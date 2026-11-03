@@ -6,7 +6,7 @@ enum ModelProvider: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
     var name: String { self == .openAI ? "OpenAI" : "DeepSeek" }
-    var model: String { self == .openAI ? "gpt-6-luna" : "deepseek-flash" }
+    var model: String { self == .openAI ? OpenAISettings.defaults.modelID : "deepseek-flash" }
     var endpoint: URL {
         switch self {
         case .openAI: return URL(string: "https://api.openai.com/v1/responses")!
@@ -28,14 +28,54 @@ struct EvidenceSnapshot: Identifiable {
     var id: UUID { frame.id }
 }
 
-struct ModelAnswer {
+struct AnswerCitation: Identifiable, Equatable, Sendable {
+    let url: URL
+    let title: String
+    var id: String { url.absoluteString }
+}
+
+enum AnswerSearchState: Equatable, Sendable {
+    case notUsed, completed, completedWithoutCitations, failed, requiredNotPerformed
+    var label: String {
+        switch self {
+        case .notUsed: return "本次未联网检索"
+        case .completed: return "已联网检索，来源可供查阅；结论仍需判断"
+        case .completedWithoutCitations: return "已执行检索，但回答缺少可用来源，不能视为已核实"
+        case .failed: return "检索未成功，不能视为已核实"
+        case .requiredNotPerformed: return "本次要求联网，但未确认工具完成检索"
+        }
+    }
+}
+
+enum VisionRequestStatus: Equatable, Sendable {
+    case connecting, thinking, searching, answering
+    var label: String {
+        switch self {
+        case .connecting: return "正在连接"
+        case .thinking: return "正在思考"
+        case .searching: return "正在联网检索"
+        case .answering: return "正在回答"
+        }
+    }
+}
+
+enum VisionStreamEvent: Sendable {
+    /// The accumulated safe-to-display answer, rather than a token delta.
+    case text(String)
+    case status(VisionRequestStatus)
+}
+
+struct ModelAnswer: Sendable {
     let text: String
     let complete: Bool
+    var citations: [AnswerCitation] = []
+    var searchState: AnswerSearchState = .notUsed
 }
 
 enum ClientError: Error, LocalizedError {
     case missingKey, keychain, invalidImage, tooLarge, unauthorized, rateLimited
     case timeout, network, server, invalidResponse, rejected, cancelled
+    case invalidSettings
 
     var errorDescription: String? {
         switch self {
@@ -51,6 +91,7 @@ enum ClientError: Error, LocalizedError {
         case .invalidResponse: return "未收到可识别的回答。不会自动重发。"
         case .rejected: return "供应商拒绝了请求，请检查图片、模型及账户权限。"
         case .cancelled: return "已取消。已发送的数据无法撤回，供应商可能已产生用量。"
+        case .invalidSettings: return "OpenAI 配置不兼容或超出范围，请在设置中检查型号、推理和预算。"
         }
     }
 }
