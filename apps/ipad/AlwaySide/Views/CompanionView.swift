@@ -262,25 +262,59 @@ private struct EvidencePreview: View {
     let frame: CapturedFrame
     var maximumHeight: CGFloat = 200
     @State private var image: UIImage?
+    @State private var decodedFrameID: UUID?
+    @State private var decodingFailed = false
 
     var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: maximumHeight)
+        // Keep a concrete task host even before an image is available, with visible
+        // loading and failure states instead of an empty conditional Group.
+        ZStack {
+            Color(.secondarySystemGroupedBackground)
+            if decodedFrameID == frame.id, let image {
+                Image(uiImage: image).resizable().scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityLabel("将要发送的固定画面，请核对内容")
+            } else if decodedFrameID == frame.id, decodingFailed {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                    if maximumHeight > 40 {
+                        Text("无法显示这张画面的预览。请重新唤起后更新画面，或导入截图核对。")
+                            .font(.caption).multilineTextAlignment(.center)
+                    }
+                }
+                .padding(8)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("画面预览无法显示，请重新唤起后更新画面，或导入截图核对")
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在加载固定画面的预览")
             }
         }
+        .frame(maxWidth: .infinity)
+        .frame(height: maximumHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: frame.id) {
             // Decode once per fixed frame, not on every streamed text update.
+            guard decodedFrameID != frame.id, !Task.isCancelled else { return }
             image = nil
+            decodingFailed = false
             guard let source = CGImageSourceCreateWithData(frame.jpegData as CFData,
                     [kCGImageSourceShouldCache: false] as CFDictionary),
                   let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
                     kCGImageSourceThumbnailMaxPixelSize: 480
-                  ] as CFDictionary) else { return }
+                  ] as CFDictionary) else {
+                guard !Task.isCancelled else { return }
+                decodingFailed = true
+                decodedFrameID = frame.id
+                return
+            }
+            guard !Task.isCancelled else { return }
             image = UIImage(cgImage: thumbnail)
+            decodedFrameID = frame.id
         }
     }
 }
