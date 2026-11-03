@@ -1,5 +1,4 @@
 import Combine
-import CoreMedia
 import Foundation
 @preconcurrency import ScreenCaptureKit
 
@@ -155,11 +154,9 @@ final class ScreenCaptureController: NSObject, ObservableObject {
             let scale = min(1, CGFloat(ScreenFrameSink.maximumDimension) / max(size.width, size.height))
             configuration.width = max(1, Int(floor(size.width * scale)))
             configuration.height = max(1, Int(floor(size.height * scale)))
-            configuration.preservesAspectRatio = true
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-            configuration.queueDepth = 3
             configuration.capturesAudio = false
-            configuration.captureMicrophone = false
+            // iOS controls the source cadence and queue. ScreenFrameSink throttles
+            // JPEG processing locally; only the screen output is attached below.
 
             let (frames, continuation) = AsyncStream<CapturedFrame>.makeStream(bufferingPolicy: .bufferingNewest(1))
             let output = ScreenFrameSink(continuation: continuation)
