@@ -2,6 +2,7 @@ import ImageIO
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct CompanionView: View {
     @ObservedObject var model: CompanionModel
@@ -9,6 +10,9 @@ struct CompanionView: View {
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var inputFocused: Bool
     @State private var showingSettings = false
+    @State private var showingHistory = false
+    @State private var showingAudio = false
+    @State private var showingScreenshotHelp = false
     @State private var showingPhotoPicker = false
     @State private var previewExpanded = false
     @State private var photoSelection: PhotosPickerItem?
@@ -23,54 +27,33 @@ struct CompanionView: View {
             VStack(spacing: 0) {
                 evidenceSummary
                 Divider()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if let notice = model.notice {
-                            Text(notice).font(.footnote).foregroundStyle(.secondary)
-                                .accessibilityAddTraits(.updatesFrequently)
-                        }
-                        if model.answer.isEmpty {
-                            ContentUnavailableView("一起看，随时问", systemImage: "bubble.left.and.bubble.right",
-                                description: Text(model.snapshot == nil ? "共享画面后回到目标页面，再唤起助手；也可导入截图。" : "输入问题，或直接发送默认提问。唤起与预览不调用 API。"))
-                        } else {
-                            Text(model.answer).textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if let provider = model.answerProvider {
-                                Text("回答来自 \(provider.name)").font(.caption).foregroundStyle(.secondary)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 18) {
+                            if model.messages.isEmpty && !model.isAsking {
+                                ContentUnavailableView("看图翻译，继续追问", systemImage: "bubble.left.and.bubble.right",
+                                    description: Text("长按截屏后接收最新图片，或从相册导入。留空发送即可翻译。"))
                             }
-                            if model.answerProvider == .openAI && !model.isAsking {
-                                Label(model.hasFinalAnswer ? model.searchState.label : "回答已中断，检索与来源状态未确认", systemImage: "globe")
-                                    .font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(model.messages.enumerated()), id: \.offset) { _, message in
+                                messageView(message)
                             }
-                            ForEach(model.citations) { citation in
-                                Link(destination: citation.url) {
-                                    Label(citation.title.isEmpty ? citation.url.host ?? "查看来源" : citation.title,
-                                          systemImage: "link")
-                                        .font(.callout).lineLimit(2)
-                                }
+                            if model.isAsking {
+                                userBubble(model.pendingQuestion)
+                                if !model.answer.isEmpty { MarkdownAnswerView(text: model.answer) }
                             }
-                        }
-                        if !model.history.isEmpty {
-                            DisclosureGroup("同图最近 \(model.history.count) 轮") {
-                                ForEach(model.history) { turn in
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(turn.question).font(.callout.bold())
-                                        Text(turn.answer).font(.callout).textSelection(.enabled)
-                                        if model.provider == .openAI {
-                                            Text(turn.searchState.label).font(.caption).foregroundStyle(.secondary)
-                                        }
-                                        ForEach(turn.citations) { citation in
-                                            Link(destination: citation.url) {
-                                                Label(citation.title.isEmpty ? citation.url.host ?? "查看来源" : citation.title,
-                                                      systemImage: "link")
-                                                    .font(.caption).lineLimit(2)
-                                            }
-                                        }
-                                    }.padding(.vertical, 8)
-                                }
-                            }.font(.footnote)
-                        }
-                    }.padding(16)
+                            if let warning = model.storageWarning {
+                                Text(warning).font(.footnote).foregroundStyle(.orange)
+                            }
+                            if let notice = model.notice {
+                                Text(notice).font(.footnote).foregroundStyle(.secondary)
+                                    .accessibilityAddTraits(.updatesFrequently)
+                            }
+                            Color.clear.frame(height: 1).id("bottom")
+                        }.padding(16)
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .onChange(of: model.messages.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                    .onChange(of: model.isAsking) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 composer
             }
@@ -79,241 +62,357 @@ struct CompanionView: View {
             .navigationTitle("AlwaySide")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        Picker("供应商", selection: Binding(get: { model.provider }, set: {
-                            cancelEditingRecovery()
-                            model.selectProvider($0)
-                        })) {
-                            ForEach(ModelProvider.allCases) { Text($0.name).tag($0) }
-                        }
-                        .disabled(model.isAsking)
-                        Button { cancelEditingRecovery(); cancelPhotoImport(); model.startSharing() } label: { Label("开始系统共享", systemImage: "rectangle.inset.filled.and.person.filled") }
-                            .disabled(capture.state == .capturing || capture.state == .starting || capture.state == .requesting)
-                        Button(role: .destructive) {
-                            cancelEditingRecovery()
-                            cancelPhotoImport()
-                            Task { await model.stopSharing() }
-                        } label: { Label("停止共享并清空", systemImage: "stop.fill") }
-                        Button(role: .destructive) {
-                            cancelEditingRecovery()
-                            cancelPhotoImport()
-                            model.discardEvidence()
-                        } label: { Label("清空画面与追问", systemImage: "trash") }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                    .help("供应商、共享与清空")
-                    .accessibilityLabel("供应商、共享与清空")
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button { showingHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }
+                        .help("查找与打开本机会话").accessibilityLabel("会话历史")
+                    Button { resetInteraction(); model.startNewConversation() } label: { Image(systemName: "square.and.pencil") }
+                        .help("新建对话").accessibilityLabel("新建对话")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { openSettings() } label: { Image(systemName: "slider.horizontal.3") }
-                        .help("模型、指令与本机密钥")
-                        .accessibilityLabel("模型、指令与本机密钥")
+                    Menu {
+                        Button { showingSettings = true } label: { Label("模型与密钥", systemImage: "slider.horizontal.3") }
+                        Button { showingScreenshotHelp = true } label: { Label("长按截屏设置", systemImage: "camera.viewfinder") }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .help("设置与截屏入口").accessibilityLabel("设置与截屏入口")
                 }
             }
             .sheet(isPresented: $showingSettings) { ProviderSettingsView(model: model) }
+            .sheet(isPresented: $showingHistory) { ChatHistoryView(model: model) }
+            .sheet(isPresented: $showingAudio) { AudioInputView(model: model) }
+            .sheet(isPresented: $showingScreenshotHelp) { ScreenshotSetupView() }
             .photosPicker(isPresented: $showingPhotoPicker, selection: $photoSelection, matching: .images)
-            .onChange(of: showingSettings) { _, _ in updatePresentationState() }
-            .onChange(of: showingPhotoPicker) { _, _ in updatePresentationState() }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-                model.lockFrameBeforeInteraction()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeKeyNotification)) { notification in
-                guard let window = notification.object as? UIWindow else { return }
-                model.windowBecameKey(window)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIWindow.didResignKeyNotification)) { notification in
-                guard let window = notification.object as? UIWindow else { return }
-                model.windowResignedKey(window)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIScene.willDeactivateNotification)) { _ in
-                model.sceneWillDeactivate()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-                model.setKeyboardVisible(true)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                model.setKeyboardVisible(false)
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active { cancelEditingRecovery() }
-                if phase == .background { model.enteredBackground() }
-                if phase == .active { model.lockFrameBeforeInteraction() }
-            }
-            .onChange(of: inputFocused) { _, focused in
-                if focused {
-                    cancelEditingRecovery()
-                    previewExpanded = false
-                    model.lockFrameBeforeInteraction()
-                }
+            .onChange(of: presentationActive) { _, active in
+                if active { cancelEditingRecovery(); inputFocused = false }
+                model.setInternalPresentation(active)
             }
             .onChange(of: photoSelection) { _, selection in importPhoto(selection) }
-            .onChange(of: model.isAsking) { _, asking in
-                if asking { cancelEditingRecovery() }
+            .onChange(of: model.isAsking) { _, asking in if asking { cancelEditingRecovery() } }
+            .onChange(of: model.sessionID) { _, _ in
+                // A shortcut import must invalidate any older in-flight photo picker task.
+                if model.isImporting { cancelPhotoImport() }
+                previewExpanded = model.snapshot != nil
             }
-            .onChange(of: importing) { _, active in
-                if active { cancelEditingRecovery() }
-            }
+            .onChange(of: scenePhase) { _, phase in if phase != .active { cancelEditingRecovery() } }
             .onDisappear { cancelEditingRecovery(); cancelPhotoImport() }
         }
     }
 
+    private var presentationActive: Bool {
+        showingSettings || showingHistory || showingAudio || showingScreenshotHelp || showingPhotoPicker
+    }
+    private var busyImport: Bool { importing || model.isImporting }
+
     private var evidenceSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Text(model.activeModelName).font(.caption.monospaced()).lineLimit(1)
+                if let snapshot = model.snapshot {
+                    Button { previewExpanded.toggle() } label: {
+                        EvidencePreview(frame: snapshot.frame, maximumHeight: 40).frame(width: 54, height: 40)
+                    }.buttonStyle(.plain).help("展开或收起当前图片").accessibilityLabel("当前图片，展开预览")
+                } else { Image(systemName: "photo").font(.title2).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.snapshot == nil ? "导入截图" : "当前会话图片").font(.subheadline)
+                    if let snapshot = model.snapshot {
+                        Text("接收于 " + snapshot.frame.timestamp.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    } else {
+                        Text(model.activeModelName).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
                 Spacer(minLength: 4)
-                Text(capture.state.title).font(.caption).foregroundStyle(.secondary)
-                Button { cancelEditingRecovery(); model.updateCurrentFrame() } label: { Image(systemName: "camera.viewfinder") }
-                    .help("用本次唤起前画面开启新上下文")
-                    .accessibilityLabel("更新画面并开启新上下文")
-                    .disabled(capture.state != .capturing || model.isAsking || importing)
-                Button { cancelEditingRecovery(); model.setInternalPresentation(true); showingPhotoPicker = true } label: { Image(systemName: "photo.badge.plus") }
-                .help("导入截图作为备选")
-                .accessibilityLabel("导入截图作为备选")
-                .disabled(model.isAsking || importing)
+                if busyImport { ProgressView().controlSize(.small) }
+                Button { cancelEditingRecovery(); showingPhotoPicker = true } label: { Image(systemName: "photo.badge.plus") }
+                    .help("导入图片并新建对话").accessibilityLabel("导入图片并新建对话").disabled(busyImport)
             }
-            if importing { ProgressView("正在本机导入…").font(.caption) }
+            if previewExpanded, let snapshot = model.snapshot {
+                EvidencePreview(frame: snapshot.frame)
+                Text(snapshot.origin + " · " + model.frameStatus).font(.caption).foregroundStyle(.secondary)
+            }
+            if let transcript = model.audioTranscript {
+                HStack {
+                    Label("音频转写 · \(transcript.count) 字", systemImage: "waveform").font(.caption)
+                    Spacer()
+                    Button { model.removeAudioTranscript() } label: { Image(systemName: "xmark.circle") }
+                        .help("移除音频转写并开始新上下文").accessibilityLabel("移除音频转写").disabled(model.isAsking)
+                }
+            }
             if !model.keyAvailable {
-                Button { openSettings() } label: { Label("先保存 API Key，其余设置已有默认值", systemImage: "key.horizontal") }
-                    .font(.footnote)
+                Button { showingSettings = true } label: { Label("保存 API Key", systemImage: "key.horizontal") }.font(.footnote)
             }
             if model.provider == .openAI, let validation = model.openAISettings.validationMessage {
-                Label(validation, systemImage: "exclamationmark.circle")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            DisclosureGroup(isExpanded: $previewExpanded) {
-                if previewExpanded, let snapshot = model.snapshot {
-                    EvidencePreview(frame: snapshot.frame)
-                    Text("\(snapshot.origin) · 接收于 \(snapshot.frame.timestamp.formatted(date: .omitted, time: .standard))")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Text(model.frameStatus).font(.caption).foregroundStyle(.secondary)
-                Text("画面可能包含系统过渡或窗口遮挡。画面不符时，请收起后重新唤起，或导入截图。")
-                    .font(.caption).foregroundStyle(.secondary)
-            } label: {
-                HStack(spacing: 8) {
-                    if let snapshot = model.snapshot {
-                        EvidencePreview(frame: snapshot.frame, maximumHeight: 40).frame(width: 54, height: 40)
-                    }
-                    Label(model.snapshot == nil ? "尚未固定画面" : "固定画面 · 展开核对", systemImage: "rectangle.on.rectangle")
-                        .font(.footnote)
-                }
-            }
-            if let error = capture.lastError { Text(error).font(.caption).foregroundStyle(.orange) }
-            if capture.state != .capturing && capture.state != .starting && capture.state != .requesting {
-                Button { cancelEditingRecovery(); cancelPhotoImport(); model.startSharing() } label: { Label("开始共享", systemImage: "rectangle.inset.filled.and.person.filled") }
-                    .buttonStyle(.bordered).font(.footnote)
+                Label(validation, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
             }
         }.padding(.horizontal, 14).padding(.vertical, 10)
     }
 
+    private func userBubble(_ text: String) -> some View {
+        HStack { Spacer(minLength: 24)
+            Text(verbatim: text).textSelection(.enabled).padding(12)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func messageView(_ message: ChatSessionStore.SavedTurn) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            userBubble(message.question)
+            MarkdownAnswerView(text: message.answer)
+            if !message.complete {
+                Label("回答未完成 · 未加入追问上下文", systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if model.provider == .openAI && message.turn.searchState != .notUsed {
+                Text(message.turn.searchState.label).font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(message.turn.citations) { citation in
+                Link(destination: citation.url) {
+                    Label(citation.title.isEmpty ? citation.url.host ?? "查看来源" : citation.title, systemImage: "link")
+                        .font(.callout).lineLimit(2)
+                }
+            }
+        }
+    }
+
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             if let status = model.requestStatus {
                 HStack { ProgressView().controlSize(.mini); Text(status.label).font(.caption) }
             }
-            HStack(alignment: .bottom, spacing: 10) {
-                Button { requestQuestionEditing() } label: {
-                    Image(systemName: "keyboard").frame(minWidth: 44, minHeight: 44)
-                }
-                .help("编辑问题，重新请求键盘")
-                .accessibilityLabel("编辑问题，重新请求键盘")
-                .disabled(model.isAsking || importing)
-                TextField("输入问题；留空使用默认提问", text: $model.question, axis: .vertical)
-                    .lineLimit(1...4).textFieldStyle(.roundedBorder)
-                    .focused($inputFocused)
-                    .disabled(model.isAsking || importing)
-                    .onChange(of: model.question) { _, text in
-                        if text.count > 2000 { model.question = String(text.prefix(2000)) }
-                    }
+            HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    Button { requestQuestionEditing() } label: { Label("编辑问题 / 恢复键盘", systemImage: "keyboard") }
+                    Button { showingAudio = true } label: { Label("音频转文字（OpenAI）", systemImage: "waveform") }
+                        .disabled(model.provider != .openAI)
+                } label: { Image(systemName: "plus.circle").font(.title2).frame(minWidth: 36, minHeight: 44) }
+                .help("键盘与音频").accessibilityLabel("键盘与音频").disabled(model.isAsking || busyImport)
+                TextField("输入问题；留空翻译当前图片", text: $model.question, axis: .vertical)
+                    .lineLimit(1...4).textFieldStyle(.roundedBorder).focused($inputFocused)
+                    .disabled(model.isAsking || busyImport)
+                    .onChange(of: model.question) { _, text in if text.count > 2000 { model.question = String(text.prefix(2000)) } }
                 if model.isAsking {
                     Button { model.cancelQuestion() } label: { Image(systemName: "stop.circle.fill").font(.title) }
-                        .help("停止本次回答")
-                        .accessibilityLabel("停止本次回答")
+                        .help("停止回答").accessibilityLabel("停止回答")
                 } else {
                     Button { cancelEditingRecovery(); inputFocused = false; model.ask() } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
-                        .help(model.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "发送默认问题：\(model.defaultQuestion)" : "发送固定画面与问题")
-                        .accessibilityLabel("发送固定画面与问题，留空使用默认问题")
-                        .disabled(!model.canAsk || importing)
+                        .help("发送问题；留空使用默认提问").accessibilityLabel("发送问题")
+                        .disabled(!model.canAsk || busyImport)
                 }
             }
-            Text("发送才上传固定图片与最多 3 轮文字；无音轨。收起后仅在系统允许时间内继续。")
+            Text("发送才上传当前图、附加转写及最近 3 轮完整文字；聊天保存在本机。")
                 .font(.caption2).foregroundStyle(.secondary)
         }.padding(12).background(.background)
     }
 
     private func importPhoto(_ selection: PhotosPickerItem?) {
-        cancelEditingRecovery()
-        photoTask?.cancel()
         guard let selection else { return }
+        resetInteraction()
+        model.startNewConversation()
         let id = UUID()
-        photoRequestID = id
-        importing = true
+        let destinationSession = model.sessionID
+        photoRequestID = id; importing = true
         photoTask = Task { @MainActor in
-            defer {
-                if photoRequestID == id { importing = false; photoTask = nil; photoRequestID = nil }
-            }
+            defer { if photoRequestID == id { importing = false; photoTask = nil; photoRequestID = nil } }
             do {
                 guard let data = try await selection.loadTransferable(type: Data.self) else { throw ClientError.invalidImage }
                 try Task.checkCancellation()
                 let snapshot = try PhotoImport.snapshot(from: data)
-                guard !Task.isCancelled, photoRequestID == id else { return }
+                guard photoRequestID == id, model.sessionID == destinationSession, !Task.isCancelled else { return }
                 model.choose(snapshot)
-            } catch {
-                if !Task.isCancelled, photoRequestID == id { model.reportPhotoError() }
-            }
+                previewExpanded = true
+            } catch { if photoRequestID == id, model.sessionID == destinationSession, !Task.isCancelled { model.reportPhotoError() } }
         }
     }
-
-    private func updatePresentationState() {
-        if showingSettings || showingPhotoPicker { cancelEditingRecovery() }
-        model.setInternalPresentation(showingSettings || showingPhotoPicker)
-    }
-
-    private func openSettings() {
-        cancelEditingRecovery()
-        model.setInternalPresentation(true)
-        showingSettings = true
-    }
-
     private func requestQuestionEditing() {
         cancelEditingRecovery()
-        guard scenePhase == .active, !model.isAsking, !importing,
-              !showingSettings, !showingPhotoPicker else { return }
-        // Preserve any eligible pre-interaction frame before requesting keyboard focus.
-        model.lockFrameBeforeInteraction()
-        previewExpanded = false
-        inputFocused = false
+        guard scenePhase == .active, !model.isAsking, !busyImport, !presentationActive else { return }
+        previewExpanded = false; inputFocused = false
         guard let windowID = model.prepareExplicitQuestionEditing() else { return }
-        let id = UUID()
-        editingRecoveryID = id
+        let id = UUID(); editingRecoveryID = id
         editingRecoveryTask = Task { @MainActor in
-            defer {
-                if editingRecoveryID == id { editingRecoveryID = nil; editingRecoveryTask = nil }
-            }
-            // One short, cancellable deferral lets the false focus state and actual
-            // responder resignation propagate. This is an explicit action, not a retry loop.
-            do { try await Task.sleep(nanoseconds: 50_000_000) }
-            catch { return }
+            defer { if editingRecoveryID == id { editingRecoveryID = nil; editingRecoveryTask = nil } }
+            do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return }
             guard !Task.isCancelled, editingRecoveryID == id, scenePhase == .active,
-                  !model.isAsking, !importing, !showingSettings, !showingPhotoPicker,
+                  !model.isAsking, !busyImport, !presentationActive,
                   model.activateExplicitQuestionEditing(in: windowID) else { return }
             inputFocused = true
         }
     }
-
-    private func cancelEditingRecovery() {
-        editingRecoveryID = nil
-        editingRecoveryTask?.cancel()
-        editingRecoveryTask = nil
-    }
-
+    private func cancelEditingRecovery() { editingRecoveryID = nil; editingRecoveryTask?.cancel(); editingRecoveryTask = nil }
+    private func resetInteraction() { cancelEditingRecovery(); cancelPhotoImport(); inputFocused = false }
     private func cancelPhotoImport() {
-        photoRequestID = nil
-        photoTask?.cancel()
-        photoTask = nil
-        importing = false
-        photoSelection = nil
+        photoRequestID = nil; photoTask?.cancel(); photoTask = nil; importing = false; photoSelection = nil
+    }
+}
+
+private struct ChatHistoryView: View {
+    @ObservedObject var model: CompanionModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var results: [ChatSessionSummary] = []
+    @State private var showingDeleteAll = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if results.isEmpty { Text(query.isEmpty ? "还没有本机会话" : "没有找到相关会话").foregroundStyle(.secondary) }
+                ForEach(results) { session in
+                    Button { model.openSession(session.id); dismiss() } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(session.title).foregroundStyle(.primary).lineLimit(2)
+                            Text(session.preview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(session.updatedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .swipeActions { Button(role: .destructive) { model.deleteSession(session.id); search() } label: { Label("删除", systemImage: "trash") } }
+                }
+                Section {
+                    Text("最多保存 30 段会话、每段最多 60 轮和 1 张图片。达到会话上限请先删除旧会话，达到轮数上限请新建对话；不自动删除。搜索涵盖已保存的问题与回答。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .searchable(text: $query, prompt: "搜索问题与回答")
+            .navigationTitle("会话历史").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(role: .destructive) { showingDeleteAll = true } label: { Image(systemName: "trash") }
+                        .help("删除全部本机聊天与图片").accessibilityLabel("删除全部本机会话").disabled(model.sessionSummaries.isEmpty)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: { Image(systemName: "checkmark") }.help("关闭历史").accessibilityLabel("关闭历史")
+                }
+            }
+            .confirmationDialog("删除全部本机聊天与图片？", isPresented: $showingDeleteAll, titleVisibility: .visible) {
+                Button("删除全部", role: .destructive) { model.deleteAllSessions(); search() }
+            } message: { Text("无法恢复；不会删除 Keychain 密钥，也无法撤回供应商已接收的数据。") }
+            .task(id: query) { search() }
+            .onChange(of: model.sessionSummaries.count) { _, _ in search() }
+        }
+    }
+    private func search() { results = model.searchSessions(query) }
+}
+
+private struct AudioInputView: View {
+    @ObservedObject var model: CompanionModel
+    @StateObject private var recorder = AudioRecorder()
+    @Environment(\.dismiss) private var dismiss
+    @State private var importingFile = false
+    @State private var selectedURL: URL?
+    @State private var transcribing = false
+    @State private var transcript = ""
+    @State private var errorMessage: String?
+    @State private var work: Task<Void, Never>?
+    @State private var sessionAtOpen: UUID?
+    @State private var closing = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("录制或导入") {
+                    if recorder.isFinishing {
+                        ProgressView("正在完成音频文件…")
+                    } else if recorder.isRecording {
+                        Label("录制中 · \(Int(recorder.elapsedSeconds)) 秒", systemImage: "record.circle").foregroundStyle(.red)
+                        Button { stopRecording() } label: { Label("停止录制", systemImage: "stop.fill") }
+                    } else if recorder.isRequesting {
+                        ProgressView("请在系统窗口中选择音源…")
+                        Button("取消") { Task { await recorder.cancel() } }
+                    } else {
+                        Button { startRecording(microphone: false) } label: { Label("设备音频", systemImage: "speaker.wave.2") }
+                        Button { startRecording(microphone: true) } label: { Label("麦克风", systemImage: "mic") }
+                        Button { importingFile = true } label: { Label("导入音频文件", systemImage: "doc.badge.plus") }
+                    }
+                    Text("设备音频需要系统授权并选择音源，部分受保护内容不可录制。麦克风只录周围声音，不保证收录其他 App。每次最多 2 分钟，停止后由你决定上传转写。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }.disabled(transcribing || recorder.isFinishing)
+                if selectedURL != nil {
+                    Section("转为文字") {
+                        Label("音频已在本机就绪", systemImage: "waveform")
+                        Button { transcribe() } label: { Label("上传到 OpenAI 转写", systemImage: "text.bubble") }
+                            .disabled(transcribing || recorder.isRecording || recorder.isRequesting || recorder.isFinishing)
+                        if transcribing { ProgressView("正在转写…") }
+                        Text("使用 OpenAI Keychain 密钥与 API 用量；文字不会自动发送到聊天。音频仅作临时文件，关闭后清除。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if !transcript.isEmpty {
+                    Section("核对文字") {
+                        TextEditor(text: $transcript).frame(minHeight: 140)
+                        Text("转写作为资料附加，保留完整文字；已有回答时会新建对话并保留当前图片。最多 20,000 字。").font(.caption).foregroundStyle(.secondary)
+                        Button {
+                            guard sessionAtOpen == model.sessionID else { return }
+                            model.attachAudioTranscript(transcript); dismiss()
+                        } label: { Label("附加到聊天，准备翻译", systemImage: "text.badge.plus") }
+                            .disabled(transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || transcript.count > 20000 || transcribing || sessionAtOpen != model.sessionID)
+                    }
+                }
+                if let sessionAtOpen, sessionAtOpen != model.sessionID {
+                    Text("会话已变化，请关闭后重新打开音频。").font(.footnote).foregroundStyle(.orange)
+                }
+                if let message = errorMessage ?? recorder.lastError { Text(message).font(.footnote).foregroundStyle(.orange) }
+            }
+            .navigationTitle("音频转文字").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) {
+                Button { closeAudio() } label: { Image(systemName: "xmark") }.help("关闭并清除临时音频").accessibilityLabel("关闭音频")
+            } }
+            .onAppear { if sessionAtOpen == nil { sessionAtOpen = model.sessionID } }
+            .interactiveDismissDisabled(closing || recorder.isRecording || recorder.isRequesting || recorder.isFinishing || transcribing)
+            .onChange(of: model.sessionID) { _, _ in closeAudio() }
+            .fileImporter(isPresented: $importingFile, allowedContentTypes: [.audio]) { result in importAudio(result) }
+            .onChange(of: recorder.fileURL) { _, url in if let url { replaceAudio(url) } }
+            .onDisappear { work?.cancel(); Task { await recorder.cancel() }; clearSelectedAudio() }
+        }
+    }
+    private func closeAudio() {
+        guard !closing else { return }
+        closing = true
+        work?.cancel()
+        Task { @MainActor in
+            await recorder.cancel()
+            if recorder.isRecording { errorMessage = recorder.lastError; closing = false }
+            else { dismiss() }
+        }
+    }
+    private func startRecording(microphone: Bool) {
+        guard sessionAtOpen == model.sessionID else { return }
+        errorMessage = nil; clearSelectedAudio(); transcript = ""
+        work = Task { @MainActor in
+            do { if microphone { try await recorder.startMicrophone() } else { try await recorder.start() } }
+            catch { errorMessage = error.localizedDescription }
+        }
+    }
+    private func stopRecording() {
+        work = Task { @MainActor in
+            do { replaceAudio(try await recorder.stop()) } catch { errorMessage = error.localizedDescription }
+        }
+    }
+    private func replaceAudio(_ url: URL) {
+        if selectedURL != url { clearSelectedAudio() }
+        selectedURL = url; transcript = ""
+    }
+    private func clearSelectedAudio() { if let url = selectedURL { try? FileManager.default.removeItem(at: url) }; selectedURL = nil }
+    private func importAudio(_ result: Result<URL, Error>) {
+        guard sessionAtOpen == model.sessionID else { return }
+        do {
+            let url = try result.get()
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+            guard size <= AudioTranscriptionClient.maximumBytes else { errorMessage = AudioError.tooLarge.localizedDescription; return }
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(url.pathExtension)
+            try FileManager.default.copyItem(at: url, to: copy)
+            replaceAudio(copy)
+        } catch { errorMessage = "音频文件导入失败，请重新选择。" }
+    }
+    private func transcribe() {
+        guard let file = selectedURL, sessionAtOpen == model.sessionID else { return }
+        errorMessage = nil; transcribing = true
+        work = Task { @MainActor in
+            defer { transcribing = false }
+            do {
+                guard let key = try model.credentials.read(.openAI), !key.isEmpty else { throw ClientError.missingKey }
+                let text = try await AudioTranscriptionClient().transcribe(fileURL: file, key: key)
+                try Task.checkCancellation()
+                transcript = text
+            } catch { if !Task.isCancelled { errorMessage = error.localizedDescription } }
+        }
     }
 }
 
@@ -322,80 +421,37 @@ private struct EvidencePreview: View {
     var maximumHeight: CGFloat = 200
     @State private var image: UIImage?
     @State private var decodedFrameID: UUID?
-    @State private var decodingFailed = false
 
     var body: some View {
-        // Keep a concrete task host even before an image is available, with visible
-        // loading and failure states instead of an empty conditional Group.
         ZStack {
             Color(.secondarySystemGroupedBackground)
             if decodedFrameID == frame.id, let image {
-                Image(uiImage: image).resizable().scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityLabel("将要发送的固定画面，请核对内容")
-            } else if decodedFrameID == frame.id, decodingFailed {
-                VStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                    if maximumHeight > 40 {
-                        Text("无法显示这张画面的预览。请重新唤起后更新画面，或导入截图核对。")
-                            .font(.caption).multilineTextAlignment(.center)
-                    }
-                }
-                .padding(8)
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("画面预览无法显示，请重新唤起后更新画面，或导入截图核对")
-            } else {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("正在加载固定画面的预览")
-            }
+                Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("当前会话图片")
+            } else if decodedFrameID == frame.id {
+                Image(systemName: "exclamationmark.triangle").accessibilityLabel("图片预览失败，请重新导入")
+            } else { ProgressView().controlSize(.small) }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: maximumHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(maxWidth: .infinity).frame(height: maximumHeight).clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: frame.id) {
-            // Decode once per fixed frame, not on every streamed text update.
-            guard decodedFrameID != frame.id, !Task.isCancelled else { return }
-            image = nil
-            decodingFailed = false
-            guard let source = CGImageSourceCreateWithData(frame.jpegData as CFData,
-                    [kCGImageSourceShouldCache: false] as CFDictionary),
+            guard decodedFrameID != frame.id else { return }
+            guard let source = CGImageSourceCreateWithData(frame.jpegData as CFData, nil),
                   let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
                     kCGImageSourceThumbnailMaxPixelSize: 480
-                  ] as CFDictionary) else {
-                guard !Task.isCancelled else { return }
-                decodingFailed = true
-                decodedFrameID = frame.id
-                return
-            }
+                  ] as CFDictionary) else { decodedFrameID = frame.id; return }
             guard !Task.isCancelled else { return }
-            image = UIImage(cgImage: thumbnail)
-            decodedFrameID = frame.id
+            image = UIImage(cgImage: thumbnail); decodedFrameID = frame.id
         }
     }
 }
 
-/// Resolves this view's actual UIWindow; other app-owned windows cannot create a
-/// false foreground-focus boundary. This reader creates no additional window.
 private struct InteractionWindowReader: UIViewRepresentable {
     var onWindow: (UIWindow) -> Void
-
-    func makeUIView(context: Context) -> WindowReaderView {
-        let view = WindowReaderView()
-        view.onWindow = onWindow
-        return view
-    }
-
+    func makeUIView(context: Context) -> WindowReaderView { let view = WindowReaderView(); view.onWindow = onWindow; return view }
     func updateUIView(_ view: WindowReaderView, context: Context) { view.onWindow = onWindow }
-
     final class WindowReaderView: UIView {
         var onWindow: ((UIWindow) -> Void)?
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            if let window { onWindow?(window) }
-        }
+        override func didMoveToWindow() { super.didMoveToWindow(); if let window { onWindow?(window) } }
     }
 }

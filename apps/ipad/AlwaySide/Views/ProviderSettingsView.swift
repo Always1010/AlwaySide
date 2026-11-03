@@ -6,8 +6,6 @@ struct ProviderSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var key = ""
     @State private var message: String?
-    @State private var presetName = "我的指令"
-    @State private var selectedPresetID: UUID?
 
     var body: some View {
         NavigationStack {
@@ -48,8 +46,8 @@ struct ProviderSettingsView: View {
                     }
                 }
                 Section("数据与用量") {
-                    Text("密钥仅存此设备 Keychain，不同步 iCloud。模型、指令与默认问题保存在本机；画面和聊天仅在当前进程内存中。")
-                    Text("点击发送才将固定图片、问题与最多 3 轮文字发至所选供应商。使用你的 API 账户用量，不自动重试或更换供应商。OpenAI 搜索也可能产生工具用量。")
+                    Text("密钥仅存此设备 Keychain，不同步 iCloud。模型、指令与默认问题保存在本机；聊天、来源、音频转写文字和当前图片存入本机应用目录，不纳入 iCloud 备份。")
+                    Text("最多保存 30 段会话，每段最多 60 轮、1 张图片及 1 份音频转写；达到会话上限需先删除旧会话，达到轮数上限需新建对话，不自动删除。可从历史搜索、打开或删除聊天与图片。点击发送才将当前图片（如有）、问题与最近 3 轮完整文字发至所选供应商。使用你的 API 账户用量，不自动重试或更换供应商。OpenAI 搜索与音频转写也可能产生用量。录音只在你点击转写后上传，临时音频在关闭录音页时清除。")
                     Text("请求开始时固定配置；正在进行的回答不随此处编辑变化。OpenAI 使用 store=false；清空本机数据无法撤回已发数据，实际保留规则由供应商账户政策决定。")
                 }.font(.footnote)
             }
@@ -113,18 +111,9 @@ struct ProviderSettingsView: View {
 
     private var instructionSection: some View {
         Section("OpenAI 应用指令") {
-            Menu {
-                ForEach(model.openAISettings.presets) { preset in
-                    Button(preset.name) {
-                        selectedPresetID = preset.id
-                        presetName = preset.name
-                        model.openAISettings.instructions = preset.instructions
-                    }
-                }
-            } label: { Label("应用指令预设", systemImage: "text.book.closed") }
             TextEditor(text: $model.openAISettings.instructions)
-                .frame(minHeight: 180)
-                .accessibilityLabel("本次实际生效的 OpenAI 应用指令")
+                .frame(minHeight: 100)
+                .accessibilityLabel("实际发送的 OpenAI 应用指令")
             HStack {
                 Button {
                     UIPasteboard.general.string = model.openAISettings.instructions
@@ -134,38 +123,12 @@ struct ProviderSettingsView: View {
                 Spacer()
                 Button {
                     model.openAISettings.instructions = OpenAISettings.defaults.instructions
-                    selectedPresetID = nil
-                } label: { Label("恢复默认指令", systemImage: "arrow.counterclockwise") }
+                } label: { Label("恢复默认", systemImage: "arrow.counterclockwise") }
             }
-            TextField("预设名称", text: $presetName)
-            HStack {
-                Button {
-                    let preset = InstructionPreset(name: cleanPresetName, instructions: model.openAISettings.instructions)
-                    model.openAISettings.presets.append(preset)
-                    selectedPresetID = preset.id
-                } label: { Label("新建预设", systemImage: "plus") }
-                .disabled(cleanPresetName.isEmpty || model.openAISettings.presets.count >= 20)
-                Spacer()
-                Button {
-                    guard let index = model.openAISettings.presets.firstIndex(where: { $0.id == selectedPresetID }) else { return }
-                    model.openAISettings.presets[index].name = cleanPresetName
-                    model.openAISettings.presets[index].instructions = model.openAISettings.instructions
-                } label: { Image(systemName: "square.and.arrow.down") }
-                .help("保存到所选预设").accessibilityLabel("保存到所选预设")
-                .disabled(selectedPresetID == nil || cleanPresetName.isEmpty)
-                Button(role: .destructive) {
-                    model.openAISettings.presets.removeAll { $0.id == selectedPresetID }
-                    selectedPresetID = nil
-                } label: { Image(systemName: "trash") }
-                .help("删除所选预设").accessibilityLabel("删除所选预设")
-                .disabled(selectedPresetID == nil)
-            }
-            Text("此处全文就是实际发送的应用指令，不追加隐藏规则。请保留适合你的图片资料、无音轨及搜索边界说明；预设只改变指令。编辑立即保存，最多 20 套预设。")
+            Text("全文就是实际发送的应用指令，编辑后自动保存在本机。默认帮助翻译或解释屏幕内容。")
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
-
-    private var cleanPresetName: String { String(presetName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)) }
 
     private func saveKey() {
         do {
