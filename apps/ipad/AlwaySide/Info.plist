@@ -11,7 +11,11 @@
     <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key><true/>
-    <key>NSScreenCaptureUsageDescription</key><string>共享你选择的画面，供你预览确认后按问题发送给所选模型。</string>
+    <key>NSScreenCaptureUsageDescription</key><string>共享你选择的画面，供你查看并在点击发送时将固定图片与问题发给所选模型。</string>
+    <key>CFBundleURLTypes</key><array><dict>
+        <key>CFBundleURLName</key><string>local.alwayside.assistant</string>
+        <key>CFBundleURLSchemes</key><array><string>alwayside</string></array>
+    </dict></array>
     <key>UIApplicationSceneManifest</key><dict>
         <key>UIApplicationSupportsMultipleScenes</key><false/>
     </dict>
