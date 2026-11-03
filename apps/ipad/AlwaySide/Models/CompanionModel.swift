@@ -256,7 +256,11 @@ final class CompanionModel: ObservableObject {
                 self.question = ""
                 self.finishRequest()
                 self.clearLiveAnswer()
-                if !result.complete { self.notice = "本次回答未完成；已保留可见文字，不会加入追问上下文。" }
+                if result.truncated {
+                    self.notice = "回答超过本地 12,000 字显示上限，已截断并保留可见文字；不会加入追问上下文。"
+                } else if !result.complete {
+                    self.notice = "本次回答未完成；已保留可见文字，不会加入追问上下文。"
+                }
             } catch {
                 guard let self, self.requestID == id else { return }
                 self.appendCurrentAnswer(complete: false)
