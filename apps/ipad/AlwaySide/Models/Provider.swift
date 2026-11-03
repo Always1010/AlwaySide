@@ -70,6 +70,7 @@ struct ModelAnswer: Sendable {
     let complete: Bool
     var citations: [AnswerCitation] = []
     var searchState: AnswerSearchState = .notUsed
+    var truncated: Bool = false
 }
 
 enum ClientError: Error, LocalizedError {
