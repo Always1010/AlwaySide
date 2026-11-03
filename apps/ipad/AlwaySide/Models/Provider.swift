@@ -19,6 +19,8 @@ struct ConversationTurn: Identifiable {
     let id = UUID()
     let question: String
     let answer: String
+    var citations: [AnswerCitation] = []
+    var searchState: AnswerSearchState = .notUsed
 }
 
 struct EvidenceSnapshot: Identifiable {

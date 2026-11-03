@@ -115,11 +115,15 @@ final class ScreenCaptureController: NSObject, ObservableObject {
         }
     }
 
-    /// Returns a bounded immutable snapshot, oldest first. Times indicate receipt only.
-    /// Keeping these Data references does not retain system sample/pixel buffers.
-    func recentFrameCandidates(before monotonicSeconds: TimeInterval) -> [CapturedFrame] {
-        guard state == .capturing else { return [] }
-        return recentFrames.frames.filter { $0.monotonicSeconds < monotonicSeconds }
+    /// Receipt-time heuristic only: this does not identify the source application.
+    /// Never fall back to a newer live frame, which may already contain this window.
+    func frameBeforeInteraction(at boundary: TimeInterval, after lowerBound: TimeInterval = -.infinity) -> CapturedFrame? {
+        guard state == .capturing else { return nil }
+        let cutoff = boundary - 1.2
+        return recentFrames.frames.last {
+            $0.monotonicSeconds >= lowerBound && $0.monotonicSeconds <= cutoff &&
+            boundary - $0.monotonicSeconds <= 12
+        }
     }
 
     /// Clear retained evidence while allowing a running stream to deliver new frames.
