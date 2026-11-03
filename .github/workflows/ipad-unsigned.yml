@@ -44,6 +44,24 @@ jobs:
           xcodebuild -version
           test "$(xcodebuild -version | head -n 1)" = 'Xcode 27.1'
           test "$(xcrun --sdk iphoneos --show-sdk-version)" = '27.1'
+      - name: Check OpenAI request and stream contracts without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Run once; failures stop before archive and are never retried automatically.
+          # Same-file fixture exercises private production stream code without exposing it in the app.
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Services/VisionClient.swift \
+            tests/OpenAIContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/OpenAIContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/OpenAIContractChecks.swift" -o "$RUNNER_TEMP/OpenAIContractChecks"
+          "$RUNNER_TEMP/OpenAIContractChecks"
       - name: Archive without signing
         shell: bash
         run: |
