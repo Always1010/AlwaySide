@@ -11,7 +11,8 @@
     <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key><true/>
-    <key>NSScreenCaptureUsageDescription</key><string>共享你选择的画面，供你查看并在点击发送时将固定图片与问题发给所选模型。</string>
+    <key>NSScreenCaptureUsageDescription</key><string>用于经你授权收录所选内容的音频；不保存视频。</string>
+    <key>NSMicrophoneUsageDescription</key><string>仅在你选择麦克风输入时录制问题音频，供你转写后编辑和发送。</string>
     <key>CFBundleURLTypes</key><array><dict>
         <key>CFBundleURLName</key><string>local.alwayside.assistant</string>
         <key>CFBundleURLSchemes</key><array><string>alwayside</string></array>

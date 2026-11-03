@@ -18,6 +18,13 @@
 		A1000000000000000000000A /* ScreenCaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A; };
 		A1000000000000000000000B /* ScreenFrameSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B; };
 		A1000000000000000000000C /* OpenAISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F; };
+		A10000000000000000000010 /* ScreenshotInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010; };
+		A10000000000000000000011 /* ScreenshotIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011; };
+		A10000000000000000000012 /* ScreenshotSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012; };
+		A10000000000000000000013 /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013; };
+		A10000000000000000000014 /* MarkdownAnswerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014; };
+		A10000000000000000000015 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015; };
+		A10000000000000000000016 /* AudioTranscriptionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +43,13 @@
 		A2000000000000000000000D = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		A2000000000000000000000E = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AlwaySide.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000000000000000000000F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAISettings.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotInbox.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotIntents.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotSetupView.swift; sourceTree = "<group>"; };
+		A20000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownAnswerView.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
+		A20000000000000000000016 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTranscriptionClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,9 +59,9 @@
 /* Begin PBXGroup section */
 		A40000000000000000000001 = {isa = PBXGroup; children = (A40000000000000000000002, A40000000000000000000007, A40000000000000000000008); sourceTree = "<group>"; };
 		A40000000000000000000002 = {isa = PBXGroup; children = (A20000000000000000000001, A40000000000000000000003, A40000000000000000000004, A40000000000000000000005, A40000000000000000000006, A2000000000000000000000C); path = AlwaySide; sourceTree = "<group>"; };
-		A40000000000000000000003 = {isa = PBXGroup; children = (A20000000000000000000002, A20000000000000000000003, A2000000000000000000000F); path = Models; sourceTree = "<group>"; };
-		A40000000000000000000004 = {isa = PBXGroup; children = (A20000000000000000000004, A20000000000000000000005, A20000000000000000000006); path = Services; sourceTree = "<group>"; };
-		A40000000000000000000005 = {isa = PBXGroup; children = (A20000000000000000000007, A20000000000000000000008); path = Views; sourceTree = "<group>"; };
+		A40000000000000000000003 = {isa = PBXGroup; children = (A20000000000000000000002, A20000000000000000000003, A2000000000000000000000F, A20000000000000000000013); path = Models; sourceTree = "<group>"; };
+		A40000000000000000000004 = {isa = PBXGroup; children = (A20000000000000000000004, A20000000000000000000005, A20000000000000000000006, A20000000000000000000010, A20000000000000000000011, A20000000000000000000015, A20000000000000000000016); path = Services; sourceTree = "<group>"; };
+		A40000000000000000000005 = {isa = PBXGroup; children = (A20000000000000000000007, A20000000000000000000008, A20000000000000000000012, A20000000000000000000014); path = Views; sourceTree = "<group>"; };
 		A40000000000000000000006 = {isa = PBXGroup; children = (A20000000000000000000009, A2000000000000000000000A, A2000000000000000000000B); path = Capture; sourceTree = "<group>"; };
 		A40000000000000000000007 = {isa = PBXGroup; children = (A2000000000000000000000D); path = Config; sourceTree = "<group>"; };
 		A40000000000000000000008 = {isa = PBXGroup; children = (A2000000000000000000000E); name = Products; sourceTree = "<group>"; };
@@ -92,7 +106,7 @@
 		A60000000000000000000001 = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008, A10000000000000000000009, A1000000000000000000000A, A1000000000000000000000B, A1000000000000000000000C);
+			files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008, A10000000000000000000009, A1000000000000000000000A, A1000000000000000000000B, A1000000000000000000000C, A10000000000000000000010, A10000000000000000000011, A10000000000000000000012, A10000000000000000000013, A10000000000000000000014, A10000000000000000000015, A10000000000000000000016);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
