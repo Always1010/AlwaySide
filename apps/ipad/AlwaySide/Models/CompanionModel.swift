@@ -106,6 +106,29 @@ final class CompanionModel: ObservableObject {
 
     func bindInteractionWindow(_ window: UIWindow) { interactionWindow = window }
 
+    /// Used only by an explicit edit action, never when the assistant appears.
+    func prepareExplicitQuestionEditing() -> ObjectIdentifier? {
+        guard let window = questionEditingWindow else { return nil }
+        focusDeparture = nil
+        window.endEditing(true)
+        return ObjectIdentifier(window)
+    }
+
+    func activateExplicitQuestionEditing(in windowID: ObjectIdentifier) -> Bool {
+        guard let window = questionEditingWindow, ObjectIdentifier(window) == windowID else { return false }
+        // An intentional keyboard recovery is not a new external-app frame boundary.
+        focusDeparture = nil
+        if !window.isKeyWindow { window.makeKey() }
+        return window.isKeyWindow
+    }
+
+    private var questionEditingWindow: UIWindow? {
+        guard !isAsking, !internalPresentation, let window = interactionWindow,
+              !window.isHidden, window.alpha > 0, window.windowLevel == .normal,
+              window.windowScene?.activationState == .foregroundActive else { return nil }
+        return window
+    }
+
     func setInternalPresentation(_ presented: Bool) {
         internalPresentation = presented
         if presented { focusDeparture = nil }

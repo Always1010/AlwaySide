@@ -15,6 +15,8 @@ struct CompanionView: View {
     @State private var photoTask: Task<Void, Never>?
     @State private var photoRequestID: UUID?
     @State private var importing = false
+    @State private var editingRecoveryTask: Task<Void, Never>?
+    @State private var editingRecoveryID: UUID?
 
     var body: some View {
         NavigationStack {
@@ -79,17 +81,22 @@ struct CompanionView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Picker("供应商", selection: Binding(get: { model.provider }, set: { model.selectProvider($0) })) {
+                        Picker("供应商", selection: Binding(get: { model.provider }, set: {
+                            cancelEditingRecovery()
+                            model.selectProvider($0)
+                        })) {
                             ForEach(ModelProvider.allCases) { Text($0.name).tag($0) }
                         }
                         .disabled(model.isAsking)
-                        Button { cancelPhotoImport(); model.startSharing() } label: { Label("开始系统共享", systemImage: "rectangle.inset.filled.and.person.filled") }
+                        Button { cancelEditingRecovery(); cancelPhotoImport(); model.startSharing() } label: { Label("开始系统共享", systemImage: "rectangle.inset.filled.and.person.filled") }
                             .disabled(capture.state == .capturing || capture.state == .starting || capture.state == .requesting)
                         Button(role: .destructive) {
+                            cancelEditingRecovery()
                             cancelPhotoImport()
                             Task { await model.stopSharing() }
                         } label: { Label("停止共享并清空", systemImage: "stop.fill") }
                         Button(role: .destructive) {
+                            cancelEditingRecovery()
                             cancelPhotoImport()
                             model.discardEvidence()
                         } label: { Label("清空画面与追问", systemImage: "trash") }
@@ -128,14 +135,25 @@ struct CompanionView: View {
                 model.setKeyboardVisible(false)
             }
             .onChange(of: scenePhase) { _, phase in
+                if phase != .active { cancelEditingRecovery() }
                 if phase == .background { model.enteredBackground() }
                 if phase == .active { model.lockFrameBeforeInteraction() }
             }
             .onChange(of: inputFocused) { _, focused in
-                if focused { previewExpanded = false; model.lockFrameBeforeInteraction() }
+                if focused {
+                    cancelEditingRecovery()
+                    previewExpanded = false
+                    model.lockFrameBeforeInteraction()
+                }
             }
             .onChange(of: photoSelection) { _, selection in importPhoto(selection) }
-            .onDisappear { cancelPhotoImport() }
+            .onChange(of: model.isAsking) { _, asking in
+                if asking { cancelEditingRecovery() }
+            }
+            .onChange(of: importing) { _, active in
+                if active { cancelEditingRecovery() }
+            }
+            .onDisappear { cancelEditingRecovery(); cancelPhotoImport() }
         }
     }
 
@@ -145,11 +163,11 @@ struct CompanionView: View {
                 Text(model.activeModelName).font(.caption.monospaced()).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(capture.state.title).font(.caption).foregroundStyle(.secondary)
-                Button { model.updateCurrentFrame() } label: { Image(systemName: "camera.viewfinder") }
+                Button { cancelEditingRecovery(); model.updateCurrentFrame() } label: { Image(systemName: "camera.viewfinder") }
                     .help("用本次唤起前画面开启新上下文")
                     .accessibilityLabel("更新画面并开启新上下文")
                     .disabled(capture.state != .capturing || model.isAsking || importing)
-                Button { model.setInternalPresentation(true); showingPhotoPicker = true } label: { Image(systemName: "photo.badge.plus") }
+                Button { cancelEditingRecovery(); model.setInternalPresentation(true); showingPhotoPicker = true } label: { Image(systemName: "photo.badge.plus") }
                 .help("导入截图作为备选")
                 .accessibilityLabel("导入截图作为备选")
                 .disabled(model.isAsking || importing)
@@ -183,7 +201,7 @@ struct CompanionView: View {
             }
             if let error = capture.lastError { Text(error).font(.caption).foregroundStyle(.orange) }
             if capture.state != .capturing && capture.state != .starting && capture.state != .requesting {
-                Button { cancelPhotoImport(); model.startSharing() } label: { Label("开始共享", systemImage: "rectangle.inset.filled.and.person.filled") }
+                Button { cancelEditingRecovery(); cancelPhotoImport(); model.startSharing() } label: { Label("开始共享", systemImage: "rectangle.inset.filled.and.person.filled") }
                     .buttonStyle(.bordered).font(.footnote)
             }
         }.padding(.horizontal, 14).padding(.vertical, 10)
@@ -195,6 +213,12 @@ struct CompanionView: View {
                 HStack { ProgressView().controlSize(.mini); Text(status.label).font(.caption) }
             }
             HStack(alignment: .bottom, spacing: 10) {
+                Button { requestQuestionEditing() } label: {
+                    Image(systemName: "keyboard").frame(minWidth: 44, minHeight: 44)
+                }
+                .help("编辑问题，重新请求键盘")
+                .accessibilityLabel("编辑问题，重新请求键盘")
+                .disabled(model.isAsking || importing)
                 TextField("输入问题；留空使用默认提问", text: $model.question, axis: .vertical)
                     .lineLimit(1...4).textFieldStyle(.roundedBorder)
                     .focused($inputFocused)
@@ -207,7 +231,7 @@ struct CompanionView: View {
                         .help("停止本次回答")
                         .accessibilityLabel("停止本次回答")
                 } else {
-                    Button { inputFocused = false; model.ask() } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
+                    Button { cancelEditingRecovery(); inputFocused = false; model.ask() } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
                         .help(model.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "发送默认问题：\(model.defaultQuestion)" : "发送固定画面与问题")
                         .accessibilityLabel("发送固定画面与问题，留空使用默认问题")
                         .disabled(!model.canAsk || importing)
@@ -219,6 +243,7 @@ struct CompanionView: View {
     }
 
     private func importPhoto(_ selection: PhotosPickerItem?) {
+        cancelEditingRecovery()
         photoTask?.cancel()
         guard let selection else { return }
         let id = UUID()
@@ -241,12 +266,46 @@ struct CompanionView: View {
     }
 
     private func updatePresentationState() {
+        if showingSettings || showingPhotoPicker { cancelEditingRecovery() }
         model.setInternalPresentation(showingSettings || showingPhotoPicker)
     }
 
     private func openSettings() {
+        cancelEditingRecovery()
         model.setInternalPresentation(true)
         showingSettings = true
+    }
+
+    private func requestQuestionEditing() {
+        cancelEditingRecovery()
+        guard scenePhase == .active, !model.isAsking, !importing,
+              !showingSettings, !showingPhotoPicker else { return }
+        // Preserve any eligible pre-interaction frame before requesting keyboard focus.
+        model.lockFrameBeforeInteraction()
+        previewExpanded = false
+        inputFocused = false
+        guard let windowID = model.prepareExplicitQuestionEditing() else { return }
+        let id = UUID()
+        editingRecoveryID = id
+        editingRecoveryTask = Task { @MainActor in
+            defer {
+                if editingRecoveryID == id { editingRecoveryID = nil; editingRecoveryTask = nil }
+            }
+            // One short, cancellable deferral lets the false focus state and actual
+            // responder resignation propagate. This is an explicit action, not a retry loop.
+            do { try await Task.sleep(nanoseconds: 50_000_000) }
+            catch { return }
+            guard !Task.isCancelled, editingRecoveryID == id, scenePhase == .active,
+                  !model.isAsking, !importing, !showingSettings, !showingPhotoPicker,
+                  model.activateExplicitQuestionEditing(in: windowID) else { return }
+            inputFocused = true
+        }
+    }
+
+    private func cancelEditingRecovery() {
+        editingRecoveryID = nil
+        editingRecoveryTask?.cancel()
+        editingRecoveryTask = nil
     }
 
     private func cancelPhotoImport() {
