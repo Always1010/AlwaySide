@@ -2,7 +2,7 @@
 
 个人自用的原生 SwiftUI 屏幕问答助手。目标为 iPadOS 27.0 及以上，工程与共享 scheme 位于 `AlwaySide.xcodeproj`。源码包含系统共享选择器、画面预览与冻结、文字问题、本机钥匙串和供应商直连接口。
 
-**当前交付是未经 Apple 工具链编译的源码工程。** Windows 上的结构检查不等于构建成功，也没有生成可安装 IPA。在目前仅有 Windows 与 iPad、没有 Mac 的条件下，完整的免费构建、签名与安装链路尚未验证。此项目不依赖 Swift Playground，不要求继续排查已确认的 Playground 运行故障，也不包含自动运行的云构建工作流。
+**工程的未签名 IPA 需要个人签名后才能安装。** Windows 上的结构检查不等于构建成功，只有成功完成的云构建才生成对应产物；安装和真机运行还需独立验证。此项目不依赖 Swift Playground。
 
 ## 使用流程
 
@@ -29,7 +29,7 @@
 
 单 Application target 使用系统 SwiftUI、ScreenCaptureKit、ImageIO、PhotosUI、Security 等框架，无第三方依赖。配置在 `Config/Base.xcconfig`，最低系统为 27.0，设备家族仅 iPad，Debug/Release 均共享该配置。没有开发团队、证书、额外 entitlement 或付费服务配置。`UIBackgroundModes` 仅声明 `screen-capture`，用于共享期间采集；不会以此在后台持续请求模型。
 
-未来获得经授权的 Apple 构建环境后，可先进行不签名的编译检查：
+在具有 Xcode 27.1 的 Apple 构建环境中，可进行不签名的编译检查：
 
 ```sh
 xcodebuild -project apps/ipad/AlwaySide.xcodeproj \
@@ -39,5 +39,11 @@ xcodebuild -project apps/ipad/AlwaySide.xcodeproj \
 ```
 
 此命令未在当前 Windows 设备执行；它既不生成有效个人签名，也不构成可安装交付。真机验收还必须覆盖系统授权和拒绝、共享 App 与范围、受保护内容、前后台切换、重复取帧、停止和中断、照片取消、Keychain 锁定及两家真实接口的响应与取消。没有调用付费 API 进行本次验证。
+
+## 测试构建
+
+推送 `ipad-test-YYYYMMDD-NNN` 格式的 Git tag 会触发未签名构建，例如 `ipad-test-20261103-001`。日期后序号每天从 `001` 递增；每次修改使用新 tag，保留旧 tag，不移动或删除，也不创建 GitHub Release。构建固定检出该次事件的 commit，不跟随之后的分支更新。普通分支推送和 PR 不触发此工作流，仍可手动运行 `workflow_dispatch`。
+
+工作流只使用一个标准 `xcode-27` runner，超时 15 分钟，无依赖缓存、无代码签名。成功后保留一个包含 unsigned IPA 与 SHA-256 校验文件的小型 artifact，IPA 上限 50 MiB，留存 1 天；不会发布可直接安装的签名版本或启用付费用量。
 
 官方依据：[OpenAI GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)、[OpenAI 图片输入](https://developers.openai.com/api/docs/guides/images-vision)、[DeepSeek Vision](https://api-docs.deepseek.com/guides/vision/)、[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)、[Apple ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit)。

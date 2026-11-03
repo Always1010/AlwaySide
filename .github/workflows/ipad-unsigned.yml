@@ -1,8 +1,11 @@
-# Manual unsigned build. Run only within included usage; no payment method or paid overage.
-# Account preflight: private owner included compute/storage and effective $0 paid
+# Test-tag or manual unsigned build. Standard runner only; no paid overage.
+# Account preflight: sufficient included storage and effective $0 paid
 # Actions Stop-usage protection (or no payment method); never enable paid overage.
 name: iPad unsigned build
 on:
+  push:
+    tags:
+      - 'ipad-test-*'
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,6 +23,18 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
+          ref: ${{ github.sha }}
+      - name: Verify build revision and test tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            if [[ "$GITHUB_REF_TYPE" != "tag" || ! "$GITHUB_REF_NAME" =~ ^ipad-test-[0-9]{8}-[0-9]{3}$ ]]; then
+              printf '%s\n' 'Test tag must use ipad-test-YYYYMMDD-NNN.' >&2
+              exit 1
+            fi
+          fi
       - name: Verify stable toolchain
         shell: bash
         run: |
