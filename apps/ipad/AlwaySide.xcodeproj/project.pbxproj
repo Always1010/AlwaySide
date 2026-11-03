@@ -1,0 +1,111 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* AlwaySideApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001; };
+		A10000000000000000000002 /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002; };
+		A10000000000000000000003 /* CompanionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003; };
+		A10000000000000000000004 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004; };
+		A10000000000000000000005 /* PhotoImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005; };
+		A10000000000000000000006 /* VisionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006; };
+		A10000000000000000000007 /* CompanionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007; };
+		A10000000000000000000008 /* ProviderSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008; };
+		A10000000000000000000009 /* CapturedFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009; };
+		A1000000000000000000000A /* ScreenCaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A; };
+		A1000000000000000000000B /* ScreenFrameSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlwaySideApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Provider.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionModel.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImport.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionClient.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionView.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSettingsView.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturedFrame.swift; sourceTree = "<group>"; };
+		A2000000000000000000000A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureController.swift; sourceTree = "<group>"; };
+		A2000000000000000000000B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenFrameSink.swift; sourceTree = "<group>"; };
+		A2000000000000000000000C = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000D = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		A2000000000000000000000E = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AlwaySide.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {isa = PBXGroup; children = (A40000000000000000000002, A40000000000000000000007, A40000000000000000000008); sourceTree = "<group>"; };
+		A40000000000000000000002 = {isa = PBXGroup; children = (A20000000000000000000001, A40000000000000000000003, A40000000000000000000004, A40000000000000000000005, A40000000000000000000006, A2000000000000000000000C); path = AlwaySide; sourceTree = "<group>"; };
+		A40000000000000000000003 = {isa = PBXGroup; children = (A20000000000000000000002, A20000000000000000000003); path = Models; sourceTree = "<group>"; };
+		A40000000000000000000004 = {isa = PBXGroup; children = (A20000000000000000000004, A20000000000000000000005, A20000000000000000000006); path = Services; sourceTree = "<group>"; };
+		A40000000000000000000005 = {isa = PBXGroup; children = (A20000000000000000000007, A20000000000000000000008); path = Views; sourceTree = "<group>"; };
+		A40000000000000000000006 = {isa = PBXGroup; children = (A20000000000000000000009, A2000000000000000000000A, A2000000000000000000000B); path = Capture; sourceTree = "<group>"; };
+		A40000000000000000000007 = {isa = PBXGroup; children = (A2000000000000000000000D); path = Config; sourceTree = "<group>"; };
+		A40000000000000000000008 = {isa = PBXGroup; children = (A2000000000000000000000E); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* AlwaySide */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A90000000000000000000002;
+			buildPhases = (A60000000000000000000001, A30000000000000000000001, A70000000000000000000001);
+			buildRules = ();
+			dependencies = ();
+			name = AlwaySide;
+			productName = AlwaySide;
+			productReference = A2000000000000000000000E;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A80000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {BuildIndependentTargetsInParallel = YES; LastSwiftUpdateCheck = 2710; LastUpgradeCheck = 2710; TargetAttributes = {A50000000000000000000001 = {CreatedOnToolsVersion = 27.1; }; }; };
+			buildConfigurationList = A90000000000000000000001;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh_CN;
+			hasScannedForEncodings = 0;
+			knownRegions = (zh_CN, en, Base);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000008;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A50000000000000000000001);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A70000000000000000000001 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008, A10000000000000000000009, A1000000000000000000000A, A1000000000000000000000B);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000000000000000000001 /* Debug project */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_OPTIMIZATION_LEVEL = 0; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
+		AA0000000000000000000002 /* Release project */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; name = Release; };
+		AA0000000000000000000003 /* Debug target */ = {isa = XCBuildConfiguration; baseConfigurationReference = A2000000000000000000000D; buildSettings = {CODE_SIGN_STYLE = Automatic; }; name = Debug; };
+		AA0000000000000000000004 /* Release target */ = {isa = XCBuildConfiguration; baseConfigurationReference = A2000000000000000000000D; buildSettings = {CODE_SIGN_STYLE = Automatic; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A90000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (AA0000000000000000000001, AA0000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A90000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (AA0000000000000000000003, AA0000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A80000000000000000000001;
+}
