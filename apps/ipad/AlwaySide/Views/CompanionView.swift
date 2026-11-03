@@ -159,6 +159,10 @@ struct CompanionView: View {
                 Button { openSettings() } label: { Label("先保存 API Key，其余设置已有默认值", systemImage: "key.horizontal") }
                     .font(.footnote)
             }
+            if model.provider == .openAI, let validation = model.openAISettings.validationMessage {
+                Label(validation, systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             DisclosureGroup(isExpanded: $previewExpanded) {
                 if previewExpanded, let snapshot = model.snapshot {
                     EvidencePreview(frame: snapshot.frame)
