@@ -88,6 +88,13 @@ private struct OpenAIContractChecks {
     static func main() async throws {
         let client = VisionClient()
         var settings = OpenAISettings.defaults
+        expect(settings.instructions == "你是问答助手，帮助用户翻译或解释屏幕上的内容。" && settings.presets.count == 1,
+               "factory instructions are concise and use one default preset")
+        var customized = settings
+        customized.instructions = "自定义问答方式"
+        customized.defaultQuestion = "自己的默认问题"
+        customized.presets = [.init(name: "我的预设", instructions: "我的规则")]
+        expect(customized.migratingShippedDefaults() == customized, "migration preserves user customization")
         for mode in OpenAISearchMode.allCases {
             settings.searchMode = mode
             let data = try client.makeBody(provider: .openAI, question: "解释画面", jpeg: Data([1]),
