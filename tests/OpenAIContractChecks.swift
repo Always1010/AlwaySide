@@ -95,6 +95,36 @@ private struct OpenAIContractChecks {
         customized.defaultQuestion = "自己的默认问题"
         customized.presets = [.init(name: "我的预设", instructions: "我的规则")]
         expect(customized.migratingShippedDefaults() == customized, "migration preserves user customization")
+        let textRequest = try client.makeBody(provider: .openAI, question: "翻译这段音频转写", jpeg: nil,
+                                              history: [], openAISettings: settings)
+        let textBody = try JSONSerialization.jsonObject(with: textRequest) as! [String: Any]
+        let textInput = textBody["input"] as! [[String: Any]]
+        let textParts = textInput.last?["content"] as! [[String: Any]]
+        expect(textParts.count == 1 && textParts.first?["type"] as? String == "input_text",
+               "audio transcript questions can be sent without an invented screenshot")
+        do {
+            _ = try client.makeBody(provider: .deepSeek, question: "test", jpeg: nil, history: [])
+            fatalError("FAIL: changed legacy DeepSeek image contract")
+        } catch ClientError.invalidImage { checks += 1 }
+        let audioURL = FileManager.default.temporaryDirectory.appendingPathComponent("private-fixture-\(UUID()).m4a")
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        try Data([1, 2, 3]).write(to: audioURL)
+        let audioClient = AudioTranscriptionClient()
+        let audioRequest = try audioClient.makeRequest(fileURL: audioURL, key: "fake-test-key", boundary: "fixture")
+        let upload = String(data: audioRequest.httpBody!, encoding: .utf8)!
+        expect(audioRequest.url?.absoluteString == "https://api.openai.com/v1/audio/transcriptions" &&
+               upload.contains("gpt-transcribe") && upload.contains("filename=\"audio.m4a\"") &&
+               !upload.contains(audioURL.lastPathComponent), "audio uses current official model without private filenames")
+        let transcript = try audioClient.parse(json(["text": "Bonjour fake-test-key"]), redacting: "fake-test-key")
+        expect(transcript == "Bonjour [已隐藏密钥]", "transcript credentials are hidden before display")
+        do {
+            _ = try audioClient.parse(json(["text": "  \n"]), redacting: "fake-test-key")
+            fatalError("FAIL: empty audio transcript accepted")
+        } catch AudioError.empty { checks += 1 }
+        do {
+            _ = try audioClient.parse(json(["text": String(repeating: "x", count: 20001)]), redacting: "fake-test-key")
+            fatalError("FAIL: oversized transcript silently truncated")
+        } catch AudioError.invalidResponse { checks += 1 }
         for mode in OpenAISearchMode.allCases {
             settings.searchMode = mode
             let data = try client.makeBody(provider: .openAI, question: "解释画面", jpeg: Data([1]),

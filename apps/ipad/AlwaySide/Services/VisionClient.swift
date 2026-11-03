@@ -9,7 +9,7 @@ private final class RejectRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
-/// One explicit question sends one image directly to one official provider. No automatic retries.
+/// One explicit question sends text and an optional image directly to an official provider.
 struct VisionClient {
     static let instructions = """
     你是用户的中文陪看助手。仅根据本次图片及用户的问题作答，先简短直接回答。
@@ -20,15 +20,18 @@ struct VisionClient {
     """
 
     func answer(provider: ModelProvider, key: String, question: String,
-                snapshot: EvidenceSnapshot, history: [ConversationTurn],
+                snapshot: EvidenceSnapshot? = nil, history: [ConversationTurn],
                 openAISettings: OpenAISettings = .defaults,
                 onEvent: (@Sendable (VisionStreamEvent) async -> Void)? = nil) async throws -> ModelAnswer {
         try Task.checkCancellation()
         guard !key.isEmpty else { throw ClientError.missingKey }
-        guard !snapshot.frame.jpegData.isEmpty,
-              snapshot.frame.jpegData.count <= 3 * 1024 * 1024 else { throw ClientError.tooLarge }
+        if let snapshot {
+            guard !snapshot.frame.jpegData.isEmpty,
+                  snapshot.frame.jpegData.count <= 3 * 1024 * 1024 else { throw ClientError.tooLarge }
+        }
+        guard provider == .openAI || snapshot != nil else { throw ClientError.invalidImage }
         let body = try makeBody(provider: provider, question: question,
-                                jpeg: snapshot.frame.jpegData, history: history,
+                                jpeg: snapshot?.frame.jpegData, history: history,
                                 openAISettings: openAISettings, stream: provider == .openAI)
         var request = URLRequest(url: provider.endpoint)
         request.httpMethod = "POST"
@@ -83,10 +86,10 @@ struct VisionClient {
         }
     }
 
-    func makeBody(provider: ModelProvider, question: String, jpeg: Data,
+    func makeBody(provider: ModelProvider, question: String, jpeg: Data?,
                   history: [ConversationTurn], openAISettings: OpenAISettings = .defaults,
                   stream: Bool = false) throws -> Data {
-        let image = "data:image/jpeg;base64," + jpeg.base64EncodedString()
+        let image = jpeg.map { "data:image/jpeg;base64," + $0.base64EncodedString() }
         let recent = history.suffix(3)
         let body: [String: Any]
         switch provider {
@@ -97,10 +100,9 @@ struct VisionClient {
                 input.append(["role": "user", "content": String(turn.question.prefix(2000))])
                 input.append(["role": "assistant", "content": String(turn.answer.prefix(4000))])
             }
-            input.append(["role": "user", "content": [
-                ["type": "input_text", "text": question],
-                ["type": "input_image", "image_url": image, "detail": "auto"]
-            ]])
+            var content: [[String: Any]] = [["type": "input_text", "text": question]]
+            if let image { content.append(["type": "input_image", "image_url": image, "detail": "auto"]) }
+            input.append(["role": "user", "content": content])
             var openAI: [String: Any] = [
                 "model": openAISettings.modelID, "instructions": openAISettings.instructions, "input": input,
                 "store": false, "stream": stream, "max_output_tokens": openAISettings.maxOutputTokens,
@@ -116,6 +118,7 @@ struct VisionClient {
             }
             body = openAI
         case .deepSeek:
+            guard let image else { throw ClientError.invalidImage }
             var messages: [[String: Any]] = [["role": "system", "content": Self.instructions]]
             for turn in recent {
                 messages.append(["role": "user", "content": String(turn.question.prefix(2000))])

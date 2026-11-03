@@ -55,6 +55,7 @@ jobs:
             apps/ipad/AlwaySide/Models/OpenAISettings.swift \
             apps/ipad/AlwaySide/Models/Provider.swift \
             apps/ipad/AlwaySide/Services/VisionClient.swift \
+            apps/ipad/AlwaySide/Services/AudioTranscriptionClient.swift \
             tests/OpenAIContractChecks.swift; do
             cat "$source"
             printf '\n'
