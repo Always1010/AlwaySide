@@ -49,7 +49,8 @@ final class ScreenCaptureController: NSObject, ObservableObject {
     private var pickerID: UUID?
     private var stream: SCStream?
     private var sink: ScreenFrameSink?
-    private var recentFrames: [CapturedFrame] = []
+    private var recentFrames = RecentFrameBuffer()
+    private var discardedBefore: TimeInterval = -.infinity
     private var generation: UInt64 = 0
     private var startTask: Task<Void, Never>?
     private var frameTask: Task<Void, Never>?
@@ -114,11 +115,18 @@ final class ScreenCaptureController: NSObject, ObservableObject {
         }
     }
 
-    /// Best effort only: scene transitions can already contain this App's pixels.
-    /// The caller must show the selected timestamp and require preview confirmation.
-    func freezeRecentFrame(before monotonicSeconds: TimeInterval) -> CapturedFrame? {
-        guard state == .capturing else { return nil }
-        return recentFrames.last { $0.monotonicSeconds < monotonicSeconds }
+    /// Returns a bounded immutable snapshot, oldest first. Times indicate receipt only.
+    /// Keeping these Data references does not retain system sample/pixel buffers.
+    func recentFrameCandidates(before monotonicSeconds: TimeInterval) -> [CapturedFrame] {
+        guard state == .capturing else { return [] }
+        return recentFrames.frames.filter { $0.monotonicSeconds < monotonicSeconds }
+    }
+
+    /// Clear retained evidence while allowing a running stream to deliver new frames.
+    func discardRecentFrames() {
+        discardedBefore = ProcessInfo.processInfo.systemUptime
+        recentFrames.removeAll()
+        latestFrame = nil
     }
 
     private func beginCapture(_ selection: PickerSelection) {
@@ -183,9 +191,9 @@ final class ScreenCaptureController: NSObject, ObservableObject {
     }
 
     private func accept(_ frame: CapturedFrame, token: UInt64) {
-        guard generation == token, state == .starting || state == .capturing else { return }
+        guard generation == token, state == .starting || state == .capturing,
+              frame.monotonicSeconds >= discardedBefore else { return }
         recentFrames.append(frame)
-        if recentFrames.count > 5 { recentFrames.removeFirst(recentFrames.count - 5) }
         latestFrame = frame
     }
 
@@ -193,8 +201,7 @@ final class ScreenCaptureController: NSObject, ObservableObject {
         frameTask?.cancel()
         frameTask = nil
         sink?.finish()
-        recentFrames.removeAll(keepingCapacity: false)
-        latestFrame = nil
+        discardRecentFrames()
     }
 
     private func releaseStream() async throws {

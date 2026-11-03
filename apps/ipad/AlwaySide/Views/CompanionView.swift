@@ -1,3 +1,4 @@
+import ImageIO
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -47,7 +48,7 @@ struct CompanionView: View {
             }
             .sheet(isPresented: $showingSettings) { ProviderSettingsView(model: model) }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { model.rememberReturnFrame() }
+                if phase == .active { model.rememberReturnFrames() }
                 if phase == .background { model.enteredBackground() }
             }
             .onChange(of: photoSelection) { _, selection in
@@ -85,7 +86,7 @@ struct CompanionView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("一起看，随时问。")
                 .font(.largeTitle.bold())
-            Text("共享内容或导入截图，固定一张画面并确认，再向所选模型提问。")
+            Text("从共享的最近画面中选一张，或导入截图，核对并确认后再提问。")
                 .font(.title3).foregroundStyle(.secondary)
             Text("预览和配置不调用 API。点击提问才发送图片，使用你自己账户的 API 用量。首版提供画面与文字问答。")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -99,6 +100,13 @@ struct CompanionView: View {
                     .font(.title2.bold())
                 Spacer()
                 Text(captureStatus).font(.caption).foregroundStyle(.secondary)
+                Button {
+                    cancelPhotoImport()
+                    model.discardEvidence()
+                } label: { Image(systemName: "trash") }
+                .help("清空画面、候选和追问，保留共享")
+                .accessibilityLabel("清空画面、候选和追问")
+                .disabled(model.snapshot == nil && model.frameCandidates.isEmpty && capture.latestFrame == nil)
             }
             HStack(spacing: 12) {
                 Button { model.startSharing() } label: {
@@ -128,15 +136,16 @@ struct CompanionView: View {
             if let snapshot = model.snapshot {
                 Text("已固定 · \(snapshot.origin)\n\(snapshot.frame.timestamp.formatted(date: .abbreviated, time: .standard)) · \(snapshot.frame.width) × \(snapshot.frame.height)")
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                Text("回答和追问都基于这一张画面；新取帧会清空旧的追问上下文。")
+                Text("回答和追问都基于上方已固定的画面；选择另一张缩略图才会更换并清空追问。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            Button { model.freezeLatest() } label: {
-                Label("取帧并固定预览", systemImage: "camera.viewfinder")
+            Button { model.refreshFrameCandidates() } label: {
+                Label("更新最近画面候选", systemImage: "camera.viewfinder")
             }
             .buttonStyle(.bordered)
             .disabled(capture.state != .capturing || capture.latestFrame == nil || model.isAsking || importing)
-            Text("返回助手后的第一次取帧优先使用切换前的画面，再次取帧会更新为最新画面。共享范围由系统选择；请核对预览和时间，避免把助手自身或无关内容发送出去。")
+            candidateStrip
+            Text("返回助手时保留一组最近画面，向右查看更早的画面并点选目标页。候选不会随实时预览滚动丢失；“更新”会重新取一组。时间只是本机接收时间，不能证明来源，请核对完整页面，避开桌面、切换器或助手自身。")
                 .font(.footnote).foregroundStyle(.secondary)
             if let error = capture.lastError {
                 Label(error, systemImage: "exclamationmark.circle")
@@ -145,6 +154,34 @@ struct CompanionView: View {
         }
         .padding(20)
         .background(.background, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    @ViewBuilder private var candidateStrip: some View {
+        if !model.frameCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("最近画面 · 点选一张以固定").font(.headline)
+                Text("\(model.frameCandidates.count) 张候选 · 新到旧 · 横向滑动查看")
+                    .font(.caption).foregroundStyle(.secondary)
+                ScrollView(.horizontal) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(model.frameCandidates) { frame in
+                            FrameCandidateThumbnail(frame: frame, selected: model.snapshot?.id == frame.id) {
+                                model.chooseCandidate(frame)
+                            }
+                        }
+                    }
+                    .padding(4)
+                }
+                .disabled(importing)
+                if model.snapshot == nil {
+                    Text("尚未选择固定画面，不能发送。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Text("当前仍使用上方已固定的画面；点选缩略图才更换。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     @ViewBuilder private var preview: some View {
@@ -246,5 +283,56 @@ struct CompanionView: View {
         photoTask = nil
         importing = false
         photoSelection = nil
+    }
+}
+
+private struct FrameCandidateThumbnail: View {
+    let frame: CapturedFrame
+    let selected: Bool
+    let action: () -> Void
+    @State private var thumbnail: UIImage?
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack {
+                    Color(.secondarySystemGroupedBackground)
+                    if let thumbnail {
+                        Image(uiImage: thumbnail).resizable().scaledToFit()
+                    } else {
+                        Image(systemName: "photo").foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 144, height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(selected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: selected ? 3 : 1)
+                }
+                Text("接收于 \(frame.timestamp.formatted(date: .omitted, time: .standard))")
+                    .font(.caption2.monospacedDigit())
+                Text(selected ? "已固定" : "选择这张").font(.caption)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("选择接收于 \(frame.timestamp.formatted(date: .omitted, time: .standard)) 的画面")
+        .accessibilityValue(selected ? "已固定" : "未选择")
+        .help("选择这张画面并清空旧追问")
+        .onAppear { loadThumbnail() }
+        .onDisappear { thumbnail = nil }
+    }
+
+    private func loadThumbnail() {
+        guard thumbnail == nil,
+              let source = CGImageSourceCreateWithData(frame.jpegData as CFData,
+                  [kCGImageSourceShouldCache: false] as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 240,
+                  kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else { return }
+        thumbnail = UIImage(cgImage: image)
     }
 }

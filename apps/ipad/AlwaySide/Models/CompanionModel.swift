@@ -8,6 +8,7 @@ final class CompanionModel: ObservableObject {
     @Published private(set) var provider: ModelProvider
     @Published private(set) var keyAvailable = false
     @Published private(set) var snapshot: EvidenceSnapshot?
+    @Published private(set) var frameCandidates: [CapturedFrame] = []
     @Published private(set) var history: [ConversationTurn] = []
     @Published private(set) var answer = ""
     @Published private(set) var isAsking = false
@@ -17,15 +18,14 @@ final class CompanionModel: ObservableObject {
     private var requestTask: Task<Void, Never>?
     private var requestID: UUID?
     private var captureObservation: AnyCancellable?
-    private var returnFrame: CapturedFrame?
 
     init() {
         provider = ModelProvider(rawValue: UserDefaults.standard.string(forKey: "provider") ?? "") ?? .openAI
         refreshKeyStatus()
         captureObservation = capture.$state.dropFirst().sink { [weak self] state in
             guard let self else { return }
-            if state == .stopped || state == .failed || state == .idle {
-                self.returnFrame = nil
+            if state != .capturing {
+                self.frameCandidates = []
                 if self.snapshot?.isImported == false { self.clearEvidence() }
             }
         }
@@ -65,20 +65,30 @@ final class CompanionModel: ObservableObject {
         notice = "已停止共享并清空画面及追问。已发送的数据无法撤回。"
     }
 
-    func freezeLatest() {
-        guard capture.state == .capturing, let frame = returnFrame ?? capture.latestFrame else {
+    func refreshFrameCandidates() {
+        let frames = capture.recentFrameCandidates(before: ProcessInfo.processInfo.systemUptime)
+        // Opening a new candidate set revokes consent to send any previous fixed image.
+        frameCandidates = Array(frames.reversed())
+        confirmed = false
+        guard !frames.isEmpty else {
             notice = "尚未收到可用画面，请先共享内容。"
             return
         }
-        // A return-to-App candidate is consumed once. Subsequent taps explicitly take a new frame.
-        returnFrame = nil
+        // No frame becomes evidence until the user explicitly selects its thumbnail.
+        notice = "已更新最近画面，请从缩略图选择要问的那一张。"
+    }
+
+    func chooseCandidate(_ frame: CapturedFrame) {
+        guard capture.state == .capturing, frameCandidates.contains(where: { $0.id == frame.id }) else { return }
         choose(EvidenceSnapshot(frame: frame, origin: "共享画面（时间为接收时间）", isImported: false))
     }
 
-    func rememberReturnFrame() {
-        // Best effort: samples arriving around the scene transition can still include this App.
-        // A chosen snapshot is never replaced by this candidate or a new live frame.
-        returnFrame = capture.freezeRecentFrame(before: ProcessInfo.processInfo.systemUptime)
+    func rememberReturnFrames() {
+        let frames = capture.recentFrameCandidates(before: ProcessInfo.processInfo.systemUptime)
+        guard !frames.isEmpty else { return }
+        // Preserve the return-time set while the live cache rolls on. No upload or selection.
+        frameCandidates = Array(frames.reversed())
+        confirmed = false
     }
 
     func enteredBackground() {
@@ -88,6 +98,7 @@ final class CompanionModel: ObservableObject {
 
     func choose(_ value: EvidenceSnapshot) {
         cancelQuestion()
+        if value.isImported { frameCandidates = [] }
         snapshot = value
         confirmed = false
         history = []
@@ -154,11 +165,17 @@ final class CompanionModel: ObservableObject {
     func clearEvidence() {
         cancelQuestion()
         snapshot = nil
-        returnFrame = nil
+        frameCandidates = []
         confirmed = false
         history = []
         answer = ""
         question = ""
+    }
+
+    func discardEvidence() {
+        clearEvidence()
+        capture.discardRecentFrames()
+        notice = capture.state == .capturing ? "已清空画面、候选和追问；共享继续接收新画面。" : "已清空画面、候选和追问。"
     }
 
     private func finishRequest() {

@@ -10,6 +10,28 @@ struct CapturedFrame: Identifiable, Sendable {
     let height: Int
 }
 
+/// Bounds JPEG retention by both count and bytes. Data copies share immutable storage.
+struct RecentFrameBuffer {
+    static let maximumCount = 30
+    static let maximumJPEGBytes = 24 * 1024 * 1024
+    private(set) var frames: [CapturedFrame] = []
+    private(set) var jpegBytes = 0
+
+    mutating func append(_ frame: CapturedFrame) {
+        guard !frame.jpegData.isEmpty, frame.jpegData.count <= Self.maximumJPEGBytes else { return }
+        frames.append(frame)
+        jpegBytes += frame.jpegData.count
+        while frames.count > Self.maximumCount || jpegBytes > Self.maximumJPEGBytes {
+            jpegBytes -= frames.removeFirst().jpegData.count
+        }
+    }
+
+    mutating func removeAll() {
+        frames.removeAll(keepingCapacity: false)
+        jpegBytes = 0
+    }
+}
+
 enum CaptureState: String, Sendable {
     case idle, requesting, starting, capturing, stopped, failed
 
