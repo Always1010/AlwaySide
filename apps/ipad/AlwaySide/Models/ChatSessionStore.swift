@@ -1,6 +1,6 @@
 import Foundation
 
-struct ChatSessionSummary: Codable, Identifiable {
+struct ChatSessionSummary: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     var title: String
     var updatedAt: Date
@@ -15,16 +15,21 @@ final class ChatSessionStore {
     static let maximumTurns = 60
     private let root: URL
     private(set) var summaries: [ChatSessionSummary] = []
+    // Keep only searchable text, never attachments or source metadata. Normal stores
+    // contain at most 30 documents of at most 8 MiB each. Older over-capacity stores
+    // retain every summary, but their uncached documents are read on the search worker.
+    private var searchDocuments: [UUID: SearchDocument] = [:]
+    private var searchRevision: UInt64 = 0
 
-    struct SavedTurn: Codable {
+    struct SavedTurn: Codable, Sendable {
         var question: String
         var answer: String
         var sources: [SavedSource]
         var search: String
         var complete: Bool
     }
-    struct SavedSource: Codable { var url: URL; var title: String }
-    struct Session: Codable {
+    struct SavedSource: Codable, Sendable { var url: URL; var title: String }
+    struct Session: Codable, Sendable {
         var id: UUID
         var title: String
         var updatedAt: Date
@@ -39,6 +44,19 @@ final class ChatSessionStore {
 
     enum StorageError: Error { case sessionLimit, turnLimit }
 
+    private struct SearchDocument: Sendable {
+        let fields: [String]
+
+        init(_ session: Session) {
+            fields = [session.title, session.audioTranscript ?? ""] +
+                session.turns.flatMap { [$0.question, $0.answer] }
+        }
+
+        func contains(_ term: String) -> Bool {
+            fields.contains { !Task.isCancelled && $0.localizedStandardContains(term) }
+        }
+    }
+
     init(root: URL? = nil) {
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AlwaySide/Conversations", isDirectory: true)
@@ -48,7 +66,10 @@ final class ChatSessionStore {
             includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
             summaries = directories.compactMap { directory in
                 guard UUID(uuidString: directory.lastPathComponent) != nil,
-                      let session = try? readSession(at: directory) else { return nil }
+                      let session = try? Self.readSession(at: directory) else { return nil }
+                if searchDocuments.count < Self.maximumSessions {
+                    searchDocuments[session.id] = SearchDocument(session)
+                }
                 return ChatSessionSummary(id: session.id, title: session.title, updatedAt: session.updatedAt,
                     provider: session.provider, preview: String((session.turns.last?.answer ?? "").prefix(100)))
             }.sorted { $0.updatedAt > $1.updatedAt }
@@ -57,7 +78,7 @@ final class ChatSessionStore {
 
     func load(_ id: UUID) throws -> (Session, EvidenceSnapshot?) {
         let directory = folder(id)
-        let session = try readSession(at: directory)
+        let session = try Self.readSession(at: directory)
         var snapshot: EvidenceSnapshot?
         if let width = session.imageWidth, let height = session.imageHeight, let date = session.imageDate {
             let jpeg = try Data(contentsOf: directory.appendingPathComponent("image.jpg"))
@@ -97,31 +118,73 @@ final class ChatSessionStore {
         summaries.removeAll { $0.id == id }
         summaries.insert(ChatSessionSummary(id: id, title: title, updatedAt: session.updatedAt,
             provider: provider.rawValue, preview: String((recent.last?.answer ?? "").prefix(100))), at: 0)
+        if searchDocuments[id] == nil, searchDocuments.count >= Self.maximumSessions,
+           let evicted = summaries.last(where: { searchDocuments[$0.id] != nil }) {
+            searchDocuments.removeValue(forKey: evicted.id)
+        }
+        searchDocuments[id] = SearchDocument(session)
+        searchRevision &+= 1
     }
 
     func delete(_ id: UUID) throws {
         // Remove the attachment and messages together, then update the local list.
         if FileManager.default.fileExists(atPath: folder(id).path) { try FileManager.default.removeItem(at: folder(id)) }
         summaries.removeAll { $0.id == id }
+        searchDocuments.removeValue(forKey: id)
+        searchRevision &+= 1
     }
 
     func deleteAll() throws {
         if FileManager.default.fileExists(atPath: root.path) { try FileManager.default.removeItem(at: root) }
         summaries = []
+        searchDocuments = [:]
+        searchRevision &+= 1
     }
 
-    func search(_ query: String) -> [ChatSessionSummary] {
+    func search(_ query: String) async -> [ChatSessionSummary] {
+        guard !Task.isCancelled else { return [] }
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return summaries }
-        return summaries.filter { summary in
-            if summary.title.localizedStandardContains(term) { return true }
-            guard let session = try? readSession(at: folder(summary.id)) else { return false }
-            if session.audioTranscript?.localizedStandardContains(term) == true { return true }
-            return session.turns.contains { $0.question.localizedStandardContains(term) || $0.answer.localizedStandardContains(term) }
+        while !Task.isCancelled {
+            let revision = searchRevision
+            let candidates = summaries
+            let documents = searchDocuments
+            let directory = root
+            let worker = Task.detached(priority: .userInitiated) { () -> [ChatSessionSummary] in
+                var matches: [ChatSessionSummary] = []
+                for summary in candidates {
+                    guard !Task.isCancelled else { return [] }
+                    if summary.title.localizedStandardContains(term) {
+                        matches.append(summary)
+                        continue
+                    }
+                    let document: SearchDocument?
+                    if let cached = documents[summary.id] {
+                        document = cached
+                    } else {
+                        // Compatibility for a pre-existing store exceeding today's cap.
+                        // Disk access and decoding stay entirely off the main actor.
+                        let folder = directory.appendingPathComponent(summary.id.uuidString, isDirectory: true)
+                        document = (try? Self.readSession(at: folder)).map { SearchDocument($0) }
+                    }
+                    if document?.contains(term) == true { matches.append(summary) }
+                }
+                return matches
+            }
+            let matches = await withTaskCancellationHandler(operation: {
+                await worker.value
+            }, onCancel: {
+                worker.cancel()
+            })
+            guard !Task.isCancelled else { return [] }
+            // A save/delete may have happened while the worker was suspended. Search
+            // the new snapshot before publishing any stale or deleted result.
+            if revision == searchRevision { return matches }
         }
+        return []
     }
 
-    private func readSession(at directory: URL) throws -> Session {
+    private nonisolated static func readSession(at directory: URL) throws -> Session {
         let url = directory.appendingPathComponent("conversation.json")
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
         guard size <= 8 * 1024 * 1024 else { throw ClientError.invalidResponse }

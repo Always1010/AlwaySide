@@ -112,7 +112,7 @@ final class CompanionModel: ObservableObject {
         } catch { notice = "无法打开本机会话或图片。可以删除此记录后重新导入。" }
     }
 
-    func searchSessions(_ query: String) -> [ChatSessionSummary] { sessions.search(query) }
+    func searchSessions(_ query: String) async -> [ChatSessionSummary] { await sessions.search(query) }
 
     func deleteSession(_ id: UUID) {
         if sessionID == id { cancelQuestion() }

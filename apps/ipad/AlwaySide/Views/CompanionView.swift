@@ -276,6 +276,12 @@ private struct ChatHistoryView: View {
     @State private var results: [ChatSessionSummary] = []
     @State private var showingDeleteAll = false
 
+    private struct SearchRequest: Equatable {
+        let query: String
+        let summaries: [ChatSessionSummary]
+    }
+    private var searchRequest: SearchRequest { .init(query: query, summaries: model.sessionSummaries) }
+
     var body: some View {
         NavigationStack {
             List {
@@ -288,7 +294,7 @@ private struct ChatHistoryView: View {
                             Text(session.updatedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.secondary)
                         }
                     }
-                    .swipeActions { Button(role: .destructive) { model.deleteSession(session.id); search() } label: { Label("删除", systemImage: "trash") } }
+                    .swipeActions { Button(role: .destructive) { model.deleteSession(session.id) } label: { Label("删除", systemImage: "trash") } }
                 }
                 Section {
                     Text("最多保存 30 段会话、每段最多 60 轮和 1 张图片。达到会话上限请先删除旧会话，达到轮数上限请新建对话；不自动删除。搜索涵盖已保存的问题与回答。")
@@ -307,13 +313,19 @@ private struct ChatHistoryView: View {
                 }
             }
             .confirmationDialog("删除全部本机聊天与图片？", isPresented: $showingDeleteAll, titleVisibility: .visible) {
-                Button("删除全部", role: .destructive) { model.deleteAllSessions(); search() }
+                Button("删除全部", role: .destructive) { model.deleteAllSessions() }
             } message: { Text("无法恢复；不会删除 Keychain 密钥，也无法撤回供应商已接收的数据。") }
-            .task(id: query) { search() }
-            .onChange(of: model.sessionSummaries.count) { _, _ in search() }
+            .task(id: searchRequest) {
+                let request = searchRequest
+                if !request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                }
+                let matches = await model.searchSessions(request.query)
+                guard !Task.isCancelled, request == searchRequest else { return }
+                results = matches
+            }
         }
     }
-    private func search() { results = model.searchSessions(query) }
 }
 
 private struct AudioInputView: View {
