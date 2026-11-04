@@ -23,10 +23,11 @@ struct ReceiveScreenshotIntent: AppIntent {
 }
 
 /// Optional convenience; foreground activation can open the app full screen on iPadOS.
-struct ReceiveScreenshotAndOpenIntent: AppIntent {
+struct ReceiveScreenshotAndOpenIntent: AppIntent, TargetContentProvidingIntent {
     static let title: LocalizedStringResource = "接收截图并打开助手"
-    static let description = IntentDescription("接收前一步系统截屏并打开助手；iPadOS 可能打开全屏，不能保证恢复 Slide Over。不会自动发送问题。")
-    static let supportedModes: IntentModes = .foreground(.immediate)
+    static let description = IntentDescription("接收前一步系统截屏并请求恢复原助手窗口；请先手动设为 Slide Over。系统仍决定窗口形态，不自动发送问题。")
+    static let supportedModes: IntentModes = .foreground(.dynamic)
+    var contentIdentifier: String { WindowRecovery.contentIdentifier }
 
     @Parameter(title: "截图", supportedContentTypes: [.image],
                inputConnectionBehavior: .connectToPreviousIntentResult)
@@ -36,8 +37,10 @@ struct ReceiveScreenshotAndOpenIntent: AppIntent {
         Summary("接收 \(\.$image) 并打开助手")
     }
 
+    @MainActor
     func perform() async throws -> some IntentResult {
         try await ScreenshotInbox.shared.receive(image)
+        try WindowRecovery.shared.requestExistingWindow()
         return .result()
     }
 }

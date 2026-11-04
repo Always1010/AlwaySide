@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct CompanionView: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var capture: ScreenCaptureController
+    @ObservedObject private var recovery = WindowRecovery.shared
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var inputFocused: Bool
     @State private var showingSettings = false
@@ -27,6 +28,14 @@ struct CompanionView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if let status = recovery.status {
+                    HStack {
+                        Text(status).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { recovery.dismissStatus() } label: { Image(systemName: "xmark") }
+                            .help("关闭窗口恢复提示").accessibilityLabel("关闭窗口恢复提示")
+                    }.padding(10)
+                }
                 if showingAudio {
                     AudioCompanionView(model: model, onClose: { showingAudio = false }, onFollowUp: { result in
                         model.acceptAudioRead(result)

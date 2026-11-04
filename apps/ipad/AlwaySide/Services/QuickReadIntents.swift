@@ -128,10 +128,11 @@ struct ExpandQuickReadCardIntent: AppIntent {
 }
 
 /// This is the only card action that requests foreground activation, by an explicit button tap.
-struct ContinueQuickReadInAppIntent: AppIntent {
+struct ContinueQuickReadInAppIntent: AppIntent, TargetContentProvidingIntent {
     static let title: LocalizedStringResource = "在 App 中追问"
     static let isDiscoverable = false
-    static let supportedModes: IntentModes = .foreground(.immediate)
+    static let supportedModes: IntentModes = .foreground(.dynamic)
+    var contentIdentifier: String { WindowRecovery.contentIdentifier }
     @Parameter(title: "阅读记录") var requestID: String
 
     init() {}
@@ -141,6 +142,7 @@ struct ContinueQuickReadInAppIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         guard let id = UUID(uuidString: requestID) else { throw ScreenshotHandoffError.expired }
         try QuickReadStore.shared.prepareHandoff(id)
+        try WindowRecovery.shared.requestExistingWindow()
         return .result()
     }
 }

@@ -366,7 +366,10 @@ final class CompanionModel: ObservableObject {
         if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid }
     }
 
-    func bindInteractionWindow(_ window: UIWindow) { interactionWindow = window }
+    func bindInteractionWindow(_ window: UIWindow) {
+        interactionWindow = window
+        WindowRecovery.shared.register(window)
+    }
     func setInternalPresentation(_ presented: Bool) { internalPresentation = presented }
     func prepareExplicitQuestionEditing() -> ObjectIdentifier? {
         guard let window = questionEditingWindow else { return nil }

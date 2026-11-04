@@ -9,6 +9,7 @@ struct AlwaySideApp: App {
     var body: some Scene {
         WindowGroup {
             CompanionView(model: model, capture: model.capture)
+                .handlesExternalEvents(preferring: [WindowRecovery.contentIdentifier], allowing: [WindowRecovery.contentIdentifier])
                 .task {
                     refreshKeyStatusIfAvailable()
                     if scenePhase == .active {
@@ -57,7 +58,7 @@ struct AlwaySideApp: App {
                     // Legacy link only opens the session. It cannot take a screenshot.
                     Task { await ScreenshotInboxDelivery.consume(using: model) }
                 }
-        }
+        }.handlesExternalEvents(matching: [WindowRecovery.contentIdentifier])
     }
 
     @MainActor
