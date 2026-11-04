@@ -96,6 +96,22 @@ test('EOF, DONE, malformed data and failed terminal retain incomplete partial te
   await assert.rejects(request({ fetchImpl: async () => new Response('secret', { headers: { 'content-type': 'application/json' } }) }), /流式/);
 });
 
+test('SSE limits apply to individual frames independently of transport chunk size', async () => {
+  const heartbeatFrames = ': heartbeat\n\n'.repeat(45000);
+  for (const chunkSize of [16384, 1000000]) {
+    const result = await request({ fetchImpl: async () => responseFor([heartbeatFrames, terminal()], { chunkSize }) });
+    assert.equal(result.complete, true);
+    assert.equal(result.text, '你好');
+    for (const oversized of [
+      `data: ${'x'.repeat(524289)}\n\n`,
+      `data: ${'x'.repeat(270000)}\ndata: ${'x'.repeat(270000)}\n\n`,
+      `data: ${'x'.repeat(524289)}`,
+    ]) {
+      await assert.rejects(request({ fetchImpl: async () => responseFor([oversized], { chunkSize }) }), /单个流式事件超过大小限制/);
+    }
+  }
+});
+
 test('search status and safe citations reflect actual terminal tool results', async () => {
   const annotations = [{ type: 'url_citation', url: 'https://example.org/source', title: '来源' },
     { type: 'url_citation', url: 'javascript:alert(1)', title: '恶意' },
