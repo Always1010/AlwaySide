@@ -35,6 +35,7 @@ class MainActivity : ThemedActivity() {
     private var restoredHistorySelection = emptyList<String>()
     private var backCallback: android.window.OnBackInvokedCallback? = null
     private var retainedChatOffered = false
+    private val assistantStateListener: () -> Unit = { historyScreen?.updateAssistantAction() }
     private data class RetainedApp(
         val pages: List<String>, val chat: ChatScreen.RetainedConversation?,
         val settingsPage: String?, val historyY: Int, val historySelection: List<String>,
@@ -168,6 +169,7 @@ class MainActivity : ThemedActivity() {
         var root = historyView
         if(root == null) {
             val history = HistoryListScreen(this, onOpen = { openChat(it) }, onSettings = ::openSettings,
+                onToggleAssistant = ::toggleAssistant,
                 onSelectionChanged = ::historySelectionChanged, initialSelection = restoredHistorySelection)
             restoredHistorySelection = emptyList()
             historyScreen = history
@@ -211,6 +213,28 @@ class MainActivity : ThemedActivity() {
         }
     }
 
+    private fun toggleAssistant() {
+        if (ProbeState.serviceRunning) {
+            AssistantControl.stop(this)
+        } else {
+            AssistantControl.setEnabled(this, true)
+            allowOnboarding = true
+            assistantStartAttempted = Settings.canDrawOverlays(this)
+            if (assistantStartAttempted) ensureAssistant() else requestOverlayPermission()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        ProbeState.addServiceListener(assistantStateListener)
+        assistantStateListener()
+    }
+
+    override fun onStop() {
+        ProbeState.removeServiceListener(assistantStateListener)
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         if(navigation.current == AppPage.HISTORY)showHistory()
@@ -220,7 +244,7 @@ class MainActivity : ThemedActivity() {
         overlayWasGranted=allowed
         if(allowed) {
             onboarding.edit().putBoolean("overlay_prompted",true).apply()
-            if(!assistantStartAttempted || newlyGranted) { assistantStartAttempted=true;ensureAssistant() }
+            if(AssistantControl.isEnabled(this) && (!assistantStartAttempted || newlyGranted)) { assistantStartAttempted=true;ensureAssistant() }
         } else if(!onboarding.getBoolean("overlay_prompted",false))requestOverlayPermission()
     }
 

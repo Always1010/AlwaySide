@@ -25,6 +25,7 @@ internal class HistoryListScreen(
     private val activity: Activity,
     private val onOpen: (String?) -> Unit,
     private val onSettings: () -> Unit,
+    private val onToggleAssistant: () -> Unit,
     private val onSelectionChanged: () -> Unit,
     initialSelection: List<String> = emptyList(),
 ) {
@@ -47,6 +48,15 @@ internal class HistoryListScreen(
     }
 
     fun selectedIds(): List<String> = selection.snapshot()
+
+    fun updateAssistantAction() {
+        val running = ProbeState.serviceRunning
+        val label = if (running) "关闭悬浮球" else "打开悬浮球"
+        toolbar.menu.findItem(5)?.apply {
+            title = label; contentDescription = label; tooltipText = label
+            iconTintList = android.content.res.ColorStateList.valueOf(if (running) ACCENT else MUTED)
+        }
+    }
 
     fun restoreScroll(y: Int) {
         pendingScrollY = y
@@ -115,6 +125,8 @@ internal class HistoryListScreen(
             toolbar.addIconAction(2,android.R.drawable.ic_menu_close_clear_cancel,"取消选择") { back() }
         } else {
             toolbar.addIconAction(3,android.R.drawable.ic_input_add,"新建文字对话") { onOpen(null) }
+            toolbar.addIconAction(5,R.drawable.ic_line_power,"打开悬浮球",onToggleAssistant)
+            updateAssistantAction()
             toolbar.addIconAction(4,android.R.drawable.ic_menu_manage,"设置",onSettings)
         }
         if (readFailed) {

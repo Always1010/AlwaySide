@@ -3,7 +3,16 @@ package com.alwayside.android
 import android.os.Build
 
 internal object ProbeState {
+    private val serviceListeners = linkedSetOf<() -> Unit>()
     var serviceRunning = false
+        set(value) {
+            if (field == value) return
+            field = value
+            serviceListeners.toList().forEach { it() }
+        }
+
+    fun addServiceListener(listener: () -> Unit) { serviceListeners.add(listener) }
+    fun removeServiceListener(listener: () -> Unit) { serviceListeners.remove(listener) }
     var sharing = false
     var recording = false
     var requesting = false
