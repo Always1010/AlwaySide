@@ -12,17 +12,16 @@ class HistoryActivity : Activity() {
     override fun onResume() { super.onResume(); showList() }
 
     private fun showList() {
-        val body = column()
-        body.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(label("会话记录", 28f), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(appIcon(android.R.drawable.ic_menu_revert, "返回") { finish() })
-        })
-        body.addView(label("点击会话即可查看与追问。记录仅保存在本机。", 14f, true))
-        body.addConversationList(this) { showList() }
-        setContentView(ScrollView(this).apply {
-            setBackgroundColor(BACKGROUND); fitsSystemWindows = true; isFillViewport = true
-            addView(body)
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND); fitsSystemWindows = true
+            addView(appHeader(back = { finish() }))
+            addHistoryTabs(this@HistoryActivity)
+            addView(ScrollView(this@HistoryActivity).apply {
+                isFillViewport = true
+                addView(column().apply {
+                    addConversationList(this@HistoryActivity) { showList() }
+                })
+            }, LinearLayout.LayoutParams(-1, 0, 1f))
         })
     }
 }

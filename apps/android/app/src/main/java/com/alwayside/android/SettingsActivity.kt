@@ -3,7 +3,10 @@ package com.alwayside.android
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.text.Editable
@@ -16,7 +19,6 @@ import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.CheckBox
 import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -32,9 +34,9 @@ class SettingsActivity : Activity() {
         API("API 连接", "服务地址、加密密钥与可用模型", android.R.drawable.ic_menu_manage),
         MODELS("模型与生成参数", "图文与转写模型、推理、搜索及采样", android.R.drawable.ic_menu_sort_by_size),
         PROMPTS("提示词", "截图与选中文字问题、转写提示与音频输出", android.R.drawable.ic_menu_edit),
-        BALL("悬浮球", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
-        GESTURES("手势", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
-        WINDOW("窗口行为", "位置、尺寸、默认固定与自动提问", android.R.drawable.ic_menu_crop),
+        BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
+        GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
+        WINDOW("结果窗口", "位置、尺寸、默认固定与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "截图保留策略与证据说明", android.R.drawable.ic_menu_recent_history),
     }
 
@@ -91,16 +93,36 @@ class SettingsActivity : Activity() {
         fields["apiKey"]?.text?.clear()
         fields.clear(); checks.clear(); selections.clear(); ballPreview = null
         page = next; generation++; rendering = true; dirty = false
-        body = column()
+        body = column().apply { setPadding(dp(22), dp(12), dp(22), dp(24)) }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND); fitsSystemWindows = true
+        }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            addView(icon(android.R.drawable.ic_media_previous, if (next == Page.HOME) "关闭设置" else "返回设置分类") { navigateBack() })
-            addView(label(next.title, 26f), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(10) })
-            if (next != Page.HOME) addView(icon(android.R.drawable.ic_menu_save, "保存此分类") { savePage() })
+            setPadding(dp(if(next == Page.HOME)22 else 8), dp(12), dp(10), dp(10))
+            if(next != Page.HOME) addView(iconButton(android.R.drawable.ic_media_previous, "返回设置分类") { navigateBack() })
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label(if (next == Page.HOME) "AlwaySide" else next.title, if (next == Page.HOME) 20f else 18f).apply {
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                })
+                if (next == Page.HOME) addView(label("留在当下，随手问一句。", 11f, true).apply { setPadding(0, dp(2), 0, 0) })
+            }, LinearLayout.LayoutParams(0, -2, 1f).apply { if(next != Page.HOME) leftMargin = dp(8) })
+            if (next != Page.HOME) addView(iconButton(android.R.drawable.ic_menu_save, "保存此分类") { savePage() })
         }
-        body.addView(header)
-        body.addView(label("保存只影响之后发起的操作，不会自动采集或发送媒体。", 13f, true))
-        status = label("", 14f, true); body.addView(status)
+        root.addView(header)
+        if (next == Page.HOME) root.addView(homeTabs()) else root.addView(divider())
+        status = label("", 11f, true).apply {
+            visibility = View.GONE
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    visibility = if (s.isNullOrBlank()) View.GONE else View.VISIBLE
+                }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+        body.addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         val config = try { store.load().also { readable = true } } catch (_: Exception) { readable = false; AppConfig() }
         val interaction = interactionStore.load()
         if (!readable) status.text = "无法读取配置或解密密钥。请到 API 连接移除密钥；仍失败时可重置连接与模型配置。不会使用明文备用密钥。"
@@ -114,34 +136,62 @@ class SettingsActivity : Activity() {
             Page.WINDOW -> windowPage(config, interaction)
             Page.MEDIA -> mediaPage(interaction)
         }
-        if (next != Page.HOME) body.action("保存此分类", true) { savePage() }
-        setContentView(ScrollView(this).apply {
-            setBackgroundColor(BACKGROUND); fitsSystemWindows = true; isFillViewport = true
-            isSaveEnabled = false; addView(body)
-        })
+        root.addView(ScrollView(this).apply {
+            isFillViewport = true; isSaveEnabled = false; clipToPadding = false; addView(body)
+        }, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
         rendering = false; dirty = false
+    }
+
+    private fun divider() = View(this).apply {
+        setBackgroundColor(BORDER)
+        layoutParams = LinearLayout.LayoutParams(-1, dp(1))
+    }
+
+    private fun homeTabs() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(LinearLayout(this@SettingsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL; setPadding(dp(22), 0, dp(22), 0)
+            listOf("对话记录", "设置").forEachIndexed { index, title ->
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(label(title, 13f).apply {
+                        gravity = Gravity.CENTER; minHeight = dp(44); setTextColor(if (index == 1) ACCENT else MUTED)
+                        isSelected = index == 1; isClickable = true; isFocusable = true; background = touchFeedback()
+                        setOnClickListener {
+                            if (index == 0) {
+                                startActivity(Intent(this@SettingsActivity, MainActivity::class.java)
+                                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                                finish()
+                            }
+                        }
+                    }, LinearLayout.LayoutParams(-1, dp(44)))
+                    addView(View(this@SettingsActivity).apply { setBackgroundColor(if (index == 1) ACCENT else Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, dp(2)))
+                }, LinearLayout.LayoutParams(dp(if (index == 0) 64 else 44), -2).apply { rightMargin = dp(20) })
+            }
+        })
+        addView(divider())
     }
 
     private fun category(value: Page) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background = card(SURFACE, 16f); setPadding(dp(14), dp(12), dp(14), dp(12))
+            minimumHeight = dp(64); setPadding(0, dp(14), 0, dp(14)); background = touchFeedback()
             isClickable = true; isFocusable = true; contentDescription = "${value.title}，${value.description}，进入详情"
-            addView(android.widget.ImageView(this@SettingsActivity).apply {
-                setImageResource(value.icon); imageTintList = android.content.res.ColorStateList.valueOf(ACCENT)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(28), dp(28)))
             addView(LinearLayout(this@SettingsActivity).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(label(value.title, 19f)); addView(label(value.description, 13f, true))
-            }, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(14) })
+                addView(label(value.title, 14f).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
+                addView(label(value.description, 11f, true).apply { setPadding(0, dp(3), 0, 0) })
+            }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
             addView(android.widget.ImageView(this@SettingsActivity).apply {
-                setImageResource(android.R.drawable.ic_media_next); imageTintList = android.content.res.ColorStateList.valueOf(MUTED)
+                setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
+                imageTintList = ColorStateList.valueOf(MUTED)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(20), dp(20)))
+            }, LinearLayout.LayoutParams(dp(16), dp(16)))
             setOnClickListener { showPage(value) }
         }
-        body.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        body.addView(row, LinearLayout.LayoutParams(-1, -2))
+        body.addView(divider())
     }
 
     private fun apiPage(config: AppConfig) {
@@ -188,7 +238,7 @@ class SettingsActivity : Activity() {
         note("转写提示发送给转写模型，用于保留原语言文字；它不等同于翻译或解读指令。")
         choice("audioOutput", "音频默认输出", config.audioOutput, linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 翻译", "interpret" to "原文 + 翻译与解读"))
         note("音频原始转写与 AI 输出分别保存、展示。选择“仅原始转写”时跳过初始翻译/解读请求，仍可继续追问。")
-        body.addView(label("提示词预设", 22f))
+        section("提示词预设")
         note("命名预设包含 Instructions、截图默认问题和音频默认问题三项，不包含密钥、模型、选中文字默认问题、转写提示或音频输出选项。加载后需保存此分类。")
         body.action("保存三项为命名预设") { savePreset() }
         body.action("加载三项提示词预设") { loadPreset() }
@@ -211,9 +261,9 @@ class SettingsActivity : Activity() {
 
     private fun ballPage(config: InteractionConfig) {
         ballSize = config.ballSize; ballOpacity = config.ballOpacity
-        body.addView(label("外观预览", 22f))
+        section("外观预览")
         val previewArea = LinearLayout(this).apply {
-            gravity = Gravity.CENTER; background = card(SURFACE, 16f)
+            gravity = Gravity.CENTER; background = card(SURFACE, dp(8).toFloat())
             ballPreview = View(this@SettingsActivity).also { addView(it) }
         }
         body.addView(previewArea, LinearLayout.LayoutParams(-1, dp(100)))
@@ -231,12 +281,12 @@ class SettingsActivity : Activity() {
 
     private fun gesturePage(config: InteractionConfig) {
         note("单击、双击、三击、长按与拖动互斥。为了识别三击，单击与双击会有短暂等待。拖动只移动悬浮球。")
-        body.addView(label("空闲时", 22f))
+        section("空闲时")
         choice("singleAction", "单击", config.singleAction, AssistantActions.choices)
         choice("doubleAction", "双击", config.doubleAction, AssistantActions.choices)
         choice("tripleAction", "三击", config.tripleAction, AssistantActions.choices)
         choice("longAction", "长按", config.longAction, AssistantActions.choices)
-        body.addView(label("录音中", 22f))
+        section("录音中")
         choice("recordingSingleAction", "单击", config.recordingSingleAction, AssistantActions.choices)
         choice("recordingDoubleAction", "双击", config.recordingDoubleAction, AssistantActions.choices)
         choice("recordingTripleAction", "三击", config.recordingTripleAction, AssistantActions.choices)
@@ -249,7 +299,7 @@ class SettingsActivity : Activity() {
         check("rememberWindowSize", "分别记住截图窗与音频窗的尺寸", interaction.rememberWindowSize)
         check("defaultPinned", "新会话窗口默认固定", interaction.defaultPinned)
         note("固定后点外部保留窗口，仍可拖动和调整尺寸；取消固定后点外部收起。收起不取消请求，结果继续写入对话记录。未记住的尺寸/位置下次恢复默认。")
-        body.addView(label("首问与截图上下文", 22f))
+        section("首问与截图上下文")
         check("autoAskImage", "截图后自动使用默认问题提问", interaction.autoAskImage)
         check("autoAskAudio", "结束录音后自动按默认设置处理", interaction.autoAskAudio)
         check("autoAskText", "选中文字后自动提问", interaction.autoAskText)
@@ -262,17 +312,19 @@ class SettingsActivity : Activity() {
         check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
         note("默认关闭。当前截图会话仍可在内存中沿用原图；不保存图片时，从历史恢复后会提示缺少原图，可重新取图或只用文字追问。")
         note("此开关决定新写入历史的截图策略，不追溯补存旧截图。关闭后已有历史截图是否可用，以该会话实际保存的证据为准。")
-        body.addView(label("音频与对话记录", 22f))
+        section("音频与对话记录")
         note("原始音频只用于本次处理，不进入长期历史；历史保存原始转写、问题和 AI 回答。后续音频追问复用转写文字，不重复上传音频。")
         note("每次初始查询形成一条会话，追问追加到原会话。待提问、进行中、取消或失败的会话也可从应用主页的对话列表找到。")
     }
 
     private fun input(name: String, title: String, hintValue: String, initial: String = "", multiline: Boolean = false,
                       secret: Boolean = false, numeric: Boolean = false, decimal: Boolean = false) {
-        val titleView = label(title)
+        val titleView = label(title, 12f)
         val field = EditText(this).apply {
             id = View.generateViewId(); hint = hintValue; setTextColor(INK); setHintTextColor(MUTED)
-            setPadding(dp(12), dp(10), dp(12), dp(10)); background = card(SURFACE, 12f)
+            textSize = 13f; minHeight = dp(44)
+            setPadding(dp(10), dp(9), dp(10), dp(9))
+            background = card(SURFACE, dp(8).toFloat()).apply { setStroke(dp(1), BORDER) }
             inputType = when {
                 secret -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                 decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
@@ -288,7 +340,7 @@ class SettingsActivity : Activity() {
                 if (Build.VERSION.SDK_INT >= 30) importantForContentCapture = View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
                 setAutofillHints(null)
             }
-            setSingleLine(!multiline); if (multiline) minLines = 3
+            setSingleLine(!multiline); if (multiline) { minLines = 2; gravity = Gravity.TOP or Gravity.START }
             contentDescription = title; setText(initial)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -297,20 +349,27 @@ class SettingsActivity : Activity() {
             })
         }
         titleView.labelFor = field.id; fields[name] = field
-        body.addView(titleView); body.addView(field, LinearLayout.LayoutParams(-1, -2))
+        body.addView(titleView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); bottomMargin = dp(6) })
+        body.addView(field, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun check(name: String, title: String, initial: Boolean) {
         val view = CheckBox(this).apply {
-            text = title; setTextColor(INK); minHeight = dp(48); isSaveEnabled = false; isChecked = initial
+            text = title; textSize = 13f; setTextColor(INK); minHeight = dp(44)
+            buttonTintList = ColorStateList.valueOf(ACCENT); setPadding(0, dp(4), 0, dp(4))
+            isSaveEnabled = false; isChecked = initial
             setOnCheckedChangeListener { _, _ -> if (!rendering) dirty = true }
         }
-        checks[name] = view; body.addView(view)
+        checks[name] = view; body.addView(view, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
     }
 
     private fun choice(name: String, title: String, initial: String, options: Map<String, String>) {
         selections[name] = initial
         val button = body.action("$title：${options[initial] ?: initial}") {}
+        button.textSize = 13f; button.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        button.setPadding(dp(10), 0, dp(10), 0); button.minHeight = dp(44)
+        button.background = card(SURFACE, dp(8).toFloat()).apply { setStroke(dp(1), BORDER) }
+        button.layoutParams = (button.layoutParams as LinearLayout.LayoutParams).apply { height = dp(44) }
         button.tag = name
         button.setOnClickListener {
             val keys = options.keys.toList()
@@ -322,10 +381,11 @@ class SettingsActivity : Activity() {
     }
 
     private fun slider(title: String, minimum: Int, maximum: Int, initial: Int, unit: String, changed: (Int) -> Unit) {
-        val caption = label("$title：$initial $unit")
+        val caption = label("$title：$initial $unit", 12f).apply { setPadding(0, dp(14), 0, 0) }
         body.addView(caption)
         body.addView(SeekBar(this).apply {
-            this.max = maximum - minimum; progress = initial - minimum; contentDescription = "$title，范围 $minimum 至 $maximum $unit"
+            this.max = maximum - minimum; progress = initial - minimum;
+            progressTintList = ColorStateList.valueOf(ACCENT); thumbTintList = ColorStateList.valueOf(ACCENT); contentDescription = "$title，范围 $minimum 至 $maximum $unit"
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     val value = minimum + progress; caption.text = "$title：$value $unit"; changed(value)
@@ -334,7 +394,7 @@ class SettingsActivity : Activity() {
                 override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             })
-        }, LinearLayout.LayoutParams(-1, dp(48)))
+        }, LinearLayout.LayoutParams(-1, dp(44)))
     }
 
     private fun updateBallPreview() {
@@ -486,17 +546,19 @@ class SettingsActivity : Activity() {
         } catch (_: Exception) { toast("无法读取提示词预设") }
     }
 
-    private fun note(text: String) { body.addView(label(text, 13f, true)) }
+    private fun section(text: String) {
+        body.addView(label(text, 14f).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); bottomMargin = dp(4) })
+    }
+    private fun note(text: String) {
+        body.addView(label(text, 11f, true).apply { setLineSpacing(dp(2).toFloat(), 1f) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7); bottomMargin = dp(5) })
+    }
     private fun value(name: String) = fields.getValue(name).text.toString()
     private fun checked(name: String) = checks.getValue(name).isChecked
     private fun selected(name: String) = selections.getValue(name)
     private fun optionalNumber(name: String): Double? = value(name).trim().takeIf { it.isNotEmpty() }?.let {
         it.toDoubleOrNull()?.takeIf(Double::isFinite) ?: throw IllegalArgumentException("$name 请填写有效数值或留空")
-    }
-    private fun icon(resource: Int, description: String, action: () -> Unit) = ImageButton(this).apply {
-        setImageResource(resource); imageTintList = android.content.res.ColorStateList.valueOf(INK)
-        background = card(SURFACE); accessible(description)
-        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)); setOnClickListener { action() }
     }
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
 

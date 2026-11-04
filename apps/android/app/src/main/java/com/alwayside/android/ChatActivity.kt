@@ -33,6 +33,7 @@ class ChatActivity : Activity() {
     private lateinit var retry: ImageButton
     private lateinit var transcript: ImageButton
     private lateinit var reuse: CheckBox
+    private lateinit var contextTools: LinearLayout
     private var image: Bitmap? = null
     private var ready = false
     private var closing = false
@@ -129,29 +130,40 @@ class ChatActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BACKGROUND); fitsSystemWindows = true
-            setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(2), dp(6), dp(2))
             addView(appIcon(android.R.drawable.ic_menu_revert, "返回对话列表") { finish() })
-            titleView = label("对话", 22f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-            addView(titleView, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(10) })
+            titleView = label("对话", 13f).apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            }
+            addView(titleView, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
             addView(appIcon(R.drawable.ic_copy, "复制整段会话") { copyConversation() })
             addView(appIcon(android.R.drawable.ic_menu_manage, "设置") {
                 startActivity(Intent(this@ChatActivity, SettingsActivity::class.java))
             })
         })
-        statusView = label("", 13f, true)
+        root.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)))
+        statusView = label("", 11f, true).apply { setPadding(dp(22), dp(8), dp(22), 0) }
         root.addView(statusView)
-        mediaView = label("", 13f, true)
+        mediaView = label("", 10f, true).apply { setPadding(dp(22), dp(4), dp(22), 0) }
         root.addView(mediaView)
-        messagesView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll = ScrollView(this).apply { isFillViewport = true; addView(messagesView) }
+        messagesView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(16), dp(22), dp(16))
+        }
+        scroll = ScrollView(this).apply {
+            isFillViewport = true; isVerticalScrollBarEnabled = false; addView(messagesView)
+        }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        root.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)))
+        contextTools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            setPadding(dp(12), 0, dp(10), 0)
             reuse = CheckBox(this@ChatActivity).apply {
-                text = "沿用原图"; setTextColor(INK); accessible("追问时附带这段会话的原图")
+                text = "沿用原图"; textSize = 11f; setTextColor(MUTED); minHeight = dp(44)
+                accessible("追问时附带这段会话的原图")
                 buttonTintList = android.content.res.ColorStateList.valueOf(ACCENT)
                 setOnCheckedChangeListener { _, _ -> if (ready) renderEvidence() }
             }
@@ -162,14 +174,16 @@ class ChatActivity : Activity() {
                 if (ready) { restoredStatus = ""; session.retry() }
             }
             addView(retry)
-        })
+        }
+        root.addView(contextTools)
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
+            setPadding(dp(12), dp(8), dp(10), dp(10))
             composer = EditText(this@ChatActivity).apply {
-                hint = "继续追问…"; setHintTextColor(MUTED); setTextColor(INK); textSize = 16f
+                hint = "想了解什么？"; setHintTextColor(MUTED); setTextColor(INK); textSize = 13f
                 background = card(SURFACE)
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                minLines = 1; maxLines = 5
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                minHeight = dp(40); minLines = 1; maxLines = 4
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                 filters = arrayOf(InputFilter.LengthFilter(12000))
                 accessible("问题输入框")
@@ -177,8 +191,11 @@ class ChatActivity : Activity() {
             addView(composer, LinearLayout.LayoutParams(0, -2, 1f))
             send = appIcon(android.R.drawable.ic_menu_send, "发送问题") {
                 if (ready && session.busy) session.cancel() else submit()
+            }.apply {
+                background = android.graphics.drawable.InsetDrawable(card(ACCENT, dp(8).toFloat()), dp(5), dp(4), dp(5), dp(4))
+                imageTintList = android.content.res.ColorStateList.valueOf(ON_ACCENT)
             }
-            addView(send)
+            addView(send, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(3) })
         })
         setContentView(root)
     }
@@ -187,35 +204,40 @@ class ChatActivity : Activity() {
         titleView.text = conversationTitle
         val hasPending = session.question.isNotBlank()
         statusView.text = if (restoredStatus.isNotBlank()) "上次状态：$restoredStatus" else session.status
+        statusView.visibility = if (statusView.text.isNullOrBlank()) View.GONE else View.VISIBLE
         renderEvidence()
         val atBottom = scroll.getChildAt(0)?.let { it.height - scroll.height - scroll.scrollY <= dp(72) } ?: true
         messagesView.removeAllViews()
         if (session.sourceText.isNotBlank()) {
             messagesView.addView(column().apply {
-                setPadding(dp(12), dp(8), dp(12), dp(8)); background = card(SURFACE)
+                setPadding(dp(10), dp(6), dp(10), dp(10)); background = card(SURFACE)
                 addView(LinearLayout(this@ChatActivity).apply {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                    addView(label("选中文字", 14f, true), LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(label("选中文字", 11f, true), LinearLayout.LayoutParams(0, -2, 1f))
                     addView(appIcon(android.R.drawable.ic_menu_view, "查看完整选中文字") { showSourceText() })
                 })
-                addView(label("“${session.sourceText.take(240)}${if (session.sourceText.length > 240) "…" else ""}”", 14f)
+                addView(label("“${session.sourceText.take(240)}${if (session.sourceText.length > 240) "…" else ""}”", 12f)
                     .apply { maxLines = 5; setTextIsSelectable(true) })
             })
         }
         if (session.messages.isEmpty() && !hasPending) {
-            messagesView.addView(label(if (session.transcript.isNotBlank()) "原始转写已恢复，可以继续询问这段内容。" else "输入问题开始对话。发送时才会请求你配置的 API。", 16f, true))
+            messagesView.addView(label(if (session.transcript.isNotBlank()) "原始转写已恢复，可以继续询问这段内容。" else "输入问题，开始对话。", 12f, true).apply {
+                setPadding(0, dp(12), 0, dp(12))
+            })
         }
         session.messages.forEach { message -> addMessage(message.role, message.text, message.evidence) }
         if (hasPending) {
             addMessage("user", session.question, session.evidence)
             if (session.partial.isNotBlank()) addMessage("assistant", session.partial, if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文")
         }
-        send.setImageResource(if (session.busy) android.R.drawable.ic_menu_close_clear_cancel else android.R.drawable.ic_menu_send)
+        send.setImageDrawable(prototypeIcon(if (session.busy) android.R.drawable.ic_menu_close_clear_cancel else android.R.drawable.ic_menu_send))
         send.accessible(if (session.busy) "取消当前请求" else "发送问题")
         retry.visibility = if (session.canRetry) View.VISIBLE else View.GONE
         transcript.visibility = if (session.transcript.isNotBlank()) View.VISIBLE else View.GONE
+        contextTools.visibility = if (reuse.visibility == View.VISIBLE || retry.visibility == View.VISIBLE || transcript.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         reuse.isEnabled = image != null && !session.busy
         composer.isEnabled = !session.busy
+        composer.hint = if (session.messages.isEmpty() && !hasPending) "想了解什么？" else "继续追问…"
         if (atBottom) scroll.post { if (!closing) scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
@@ -230,19 +252,25 @@ class ChatActivity : Activity() {
             session.kind == "audio" -> "原始音频未保留；当前只能使用已保存的文字消息"
             else -> "文字上下文"
         }
-        reuse.visibility = if (image != null || session.kind in setOf("photo", "screen", "image")) View.VISIBLE else View.INVISIBLE
+        mediaView.visibility = if (mediaView.text == "文字上下文") View.GONE else View.VISIBLE
+        reuse.visibility = if (image != null || session.kind in setOf("photo", "screen", "image")) View.VISIBLE else View.GONE
         if (image == null) reuse.isChecked = false
     }
 
     private fun addMessage(role: String, value: String, evidence: String) {
+        val isUser = role == "user"
         val block = column().apply {
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = card(SURFACE)
-            addView(label(when (role) { "user" -> "你"; "assistant" -> "助手"; else -> "上下文" }, 13f, true))
-            if (evidence.isNotBlank()) addView(label(evidence, 12f, true))
-            addView(label("").apply { text = MarkdownText.render(value); setTextIsSelectable(true) })
+            setPadding(if (isUser) dp(10) else 0, if (isUser) dp(7) else 0,
+                if (isUser) dp(10) else 0, if (isUser) dp(7) else 0)
+            if (isUser) background = card(SURFACE)
+            if (role != "assistant" && role != "user") addView(label("上下文", 10f, true))
+            if (evidence.isNotBlank()) addView(label(evidence, 10f, true).apply { setPadding(0, 0, 0, dp(4)) })
+            addView(label("", if (isUser) 12f else 13f).apply {
+                text = MarkdownText.render(value); setTextIsSelectable(true)
+                setLineSpacing(dp(4).toFloat(), 1f)
+            })
         }
-        messagesView.addView(block, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        messagesView.addView(block, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4); bottomMargin = dp(12) })
     }
 
     private fun submit() {
@@ -311,9 +339,12 @@ class ChatActivity : Activity() {
     private fun showUnavailable(message: String) {
         titleView.text = "会话不可用"
         statusView.text = message
+        statusView.visibility = View.VISIBLE
         mediaView.text = ""
+        mediaView.visibility = View.GONE
         composer.isEnabled = false; send.isEnabled = false
         retry.visibility = View.GONE; transcript.visibility = View.GONE; reuse.visibility = View.GONE
+        contextTools.visibility = View.GONE
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

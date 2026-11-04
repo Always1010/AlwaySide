@@ -265,6 +265,7 @@ class AssistantService : Service() {
         var recording = false
         var working = false
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val sparkle = prototypeIcon(R.drawable.ic_line_sparkles).apply { setTint(Color.WHITE) }
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val radius = dp(config.ballSize) / 2f
@@ -279,9 +280,8 @@ class AssistantService : Service() {
                     canvas.drawRoundRect(x + i * radius * .35f - dp(1), y - h / 2, x + i * radius * .35f + dp(1), y + h / 2, dp(1).toFloat(), dp(1).toFloat(), paint)
                 }
             } else {
-                val r = radius * .61f
-                val path = Path().apply { moveTo(x, y-r); lineTo(x+r*.28f,y-r*.28f); lineTo(x+r,y); lineTo(x+r*.28f,y+r*.28f); lineTo(x,y+r); lineTo(x-r*.28f,y+r*.28f); lineTo(x-r,y); lineTo(x-r*.28f,y-r*.28f); close() }
-                canvas.drawPath(path, paint)
+                val r = radius * .57f
+                sparkle.alpha=paint.alpha;sparkle.setBounds((x-r).toInt(),(y-r).toInt(),(x+r).toInt(),(y+r).toInt());sparkle.draw(canvas)
                 if (working) { paint.style = Paint.Style.STROKE; paint.strokeWidth = dp(1).toFloat(); canvas.drawArc(x-radius-2,y-radius-2,x+radius+2,y+radius+2,(SystemClock.uptimeMillis()%1800)/5f,90f,false,paint); paint.style=Paint.Style.FILL }
             }
         }
@@ -308,22 +308,31 @@ class AssistantService : Service() {
         if (gathering || selector != null) return
         hideUnpinned(); removeMenu(); showBubble()
         val body = OutsideFrame { removeMenu() }
-        val items = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)); background = card(SURFACE, dp(12).toFloat()) }
-        fun item(title: String, action: () -> Unit) {
-            items.addView(Button(this).apply { text = title; textSize = 13f; isAllCaps = false; setTextColor(INK); background = card(SURFACE); gravity=Gravity.START or Gravity.CENTER_VERTICAL; setPadding(dp(12),0,dp(12),0); setOnClickListener { removeMenu(); action() } }, LinearLayout.LayoutParams(-1, dp(42)))
+        val items = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)); background = outlinedCard(BACKGROUND, 13) }
+        var rowCount = 0
+        fun item(resource: Int, title: String, action: () -> Unit) {
+            val row = LinearLayout(this).apply {
+                gravity=Gravity.CENTER_VERTICAL; setPadding(dp(9),0,dp(9),0)
+                background=touchFeedback(); isClickable=true; isFocusable=true; accessible(title)
+                addView(ImageView(this@AssistantService).apply { setImageDrawable(prototypeIcon(resource)); imageTintList=android.content.res.ColorStateList.valueOf(MUTED) },LinearLayout.LayoutParams(dp(17),dp(17)))
+                addView(label(title,12f),LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(10)})
+                setOnClickListener { removeMenu(); action() }
+            }
+            items.addView(row,LinearLayout.LayoutParams(-1,dp(44)));rowCount++
         }
-        item("截图问答") { captureNew(false) }
-        item(if (recorder != null) "结束录音并处理" else "听一段") { if (recorder != null) finishRecording(false) else startRecording() }
-        if (recorder != null) item("取消并丢弃录音") { cancelRecording(true) }
-        item("框选问答") { captureNew(true) }
-        item("最近悬浮对话") { dispatchAction(AssistantActions.LAST) }
-        if (nodes["audio"]?.clip != null) item("回听上一段") { playClip() }
-        item("对话记录") { openApplication(MainActivity::class.java) }
-        item("设置") { openApplication(SettingsActivity::class.java) }
-        item("停止助手") { stopSelf() }
-        body.addView(items)
+        item(R.drawable.ic_line_scan,"截图问答") { captureNew(false) }
+        item(R.drawable.ic_line_audio,if (recorder != null) "结束录音并处理" else "听一段") { if (recorder != null) finishRecording(false) else startRecording() }
+        if (recorder != null) item(R.drawable.ic_line_close,"取消并丢弃录音") { cancelRecording(true) }
+        item(R.drawable.ic_line_crop,"框选问答") { captureNew(true) }
+        item(R.drawable.ic_line_text,"最近悬浮对话") { dispatchAction(AssistantActions.LAST) }
+        if (nodes["audio"]?.clip != null) item(R.drawable.ic_line_play,"回听上一段") { playClip() }
+        items.addView(View(this).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)).apply{setMargins(dp(8),dp(4),dp(8),dp(4))})
+        item(R.drawable.ic_line_history,"对话记录") { openApplication(MainActivity::class.java) }
+        item(R.drawable.ic_line_settings,"设置") { openApplication(SettingsActivity::class.java) }
+        item(R.drawable.ic_line_stop,"停止助手") { stopSelf() }
+        body.addView(ScrollView(this).apply{isVerticalScrollBarEnabled=false;addView(items)})
         val size=screenSize(); val ball=bubbleLayout
-        val w=minOf(dp(184),size.first-dp(16)); val h=minOf(dp(items.childCount*42+12),size.second-dp(100))
+        val w=minOf(dp(164),size.first-dp(16)); val h=minOf(dp(rowCount*44+21),size.second-dp(100))
         val layout=params(w,h,false).apply {
             x=if ((ball?.x ?: 0)<size.first/2) dp(47) else size.first-w-dp(47)
             x=x.coerceIn(dp(8),(size.first-w-dp(8)).coerceAtLeast(dp(8)))
@@ -346,10 +355,7 @@ class AssistantService : Service() {
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.imageChoice=null;node.scroll=null;node.content=null
         stopPlayback()
     }
-    private fun icon(resource: Int, description: String, run: () -> Unit) = ImageButton(this).apply {
-        setImageResource(resource);imageTintList=android.content.res.ColorStateList.valueOf(INK)
-        background=card(SURFACE,dp(8).toFloat());setPadding(dp(12),dp(12),dp(12),dp(12));accessible(description);setOnClickListener{run()}
-    }
+    private fun icon(resource: Int, description: String, run: () -> Unit) = iconButton(resource,description,run)
     private fun showWindow(node: FloatingConversation) {
         if (!alive || node.detached) return
         removeMenu();removeSelector();hideUnpinned(node);hideWindow(node);lastKind=node.kind
@@ -362,17 +368,19 @@ class AssistantService : Service() {
             y=if(config.rememberWindowPosition&&saved!=null)((size.second-height-dp(60))*saved.yFraction).toInt()+dp(8) else (size.second-height-dp(32))/2
         }
         clamp(layout)
-        val root=OutsideFrame { if(!node.pinned) hideWindow(node) }.apply { background=card(BACKGROUND,dp(14).toFloat()); elevation=dp(9).toFloat() }
+        val root=OutsideFrame { if(!node.pinned) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         val header=LinearLayout(this).apply {
-            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(5),0)
-            addView(label(when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"},14f),LinearLayout.LayoutParams(0,-2,1f))
+            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(13),0,dp(3),0)
+            addView(ImageView(this@AssistantService).apply{setImageDrawable(prototypeIcon(when(node.kind){"photo"->R.drawable.ic_line_scan;"audio"->R.drawable.ic_line_audio;else->R.drawable.ic_line_text}));imageTintList=android.content.res.ColorStateList.valueOf(MUTED)},LinearLayout.LayoutParams(dp(15),dp(15)).apply{marginEnd=dp(7)})
+            addView(label(when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"},12f),LinearLayout.LayoutParams(0,-2,1f))
             node.pin=icon(R.drawable.ic_pin,"固定窗口，点外部保持显示") {
                 node.pinned=!node.pinned;updatePin(node)
             }.also { addView(it,LinearLayout.LayoutParams(dp(44),dp(44))) }
         }
-        body.addView(header,LinearLayout.LayoutParams(-1,dp(46)))
-        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(14),dp(5),dp(14),dp(5)) }
+        body.addView(header,LinearLayout.LayoutParams(-1,dp(44)))
+        body.addView(View(this).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)))
+        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(15),dp(13),dp(15),dp(8)) }
         node.content=content
         node.source=label("",11f,true).apply { isClickable=true;accessible(when(node.kind){"photo"->"展开本次截图";"audio"->"展开转写原文";else->"展开所选原文"});setOnClickListener {
             if(node.kind=="photo")node.sourceImage?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE}
@@ -380,10 +388,10 @@ class AssistantService : Service() {
             else node.transcript?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE}
         }}.also{content.addView(it)}
         node.sourceImage=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER;visibility=View.GONE;accessible("本次截图预览");node.frame?.let{setImageBitmap(it.bitmap)} }.also{content.addView(it,LinearLayout.LayoutParams(-1,dp(110)))}
-        node.transcript=label("",13f,true).apply { visibility=View.GONE;setTextIsSelectable(true) }.also{content.addView(it)}
+        node.transcript=label("",12f,true).apply { visibility=View.GONE;setTextIsSelectable(true);setLineSpacing(0f,1.5f);setPadding(0,dp(8),0,dp(8)) }.also{content.addView(it)}
         if(node.kind=="text")node.transcript?.apply{visibility=View.VISIBLE;maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}
-        node.response=label("",14f).apply { setTextIsSelectable(true);movementMethod=android.text.method.LinkMovementMethod.getInstance() }.also{content.addView(it)}
-        node.status=label("",11f,true).also{content.addView(it)}
+        node.response=label("",13f).apply { setTextIsSelectable(true);setLineSpacing(0f,1.65f);setPadding(0,dp(9),0,0);movementMethod=android.text.method.LinkMovementMethod.getInstance() }.also{content.addView(it)}
+        node.status=label("",11f,true).apply{setPadding(0,dp(6),0,0)}.also{content.addView(it)}
         val scroll=ScrollView(this).apply { addView(content);isFillViewport=true;isVerticalScrollBarEnabled=true }
         node.scroll=scroll;body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         val controls=LinearLayout(this).apply { gravity=Gravity.END;setPadding(dp(8),0,dp(8),0) }
@@ -394,7 +402,8 @@ class AssistantService : Service() {
             if(text.isNotBlank()){getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("AlwaySide",text));toast("已复制")}
         }.also{controls.addView(it,LinearLayout.LayoutParams(dp(44),dp(44)))}
         body.addView(controls,LinearLayout.LayoutParams(-1,-2))
-        val composer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(4),dp(25),dp(8)) }
+        body.addView(View(this).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)))
+        val composer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(9)) }
         if(node.kind=="photo")node.imageChoice=Spinner(this).apply {
             adapter=ArrayAdapter(this@AssistantService,android.R.layout.simple_spinner_dropdown_item,listOf("沿用本次截图","发送时更新画面","仅文字上下文"))
             setSelection(node.imageMode);contentDescription="图片上下文"
@@ -405,14 +414,14 @@ class AssistantService : Service() {
         }.also{composer.addView(it,LinearLayout.LayoutParams(-1,dp(28)))}
         val row=LinearLayout(this).apply { gravity=Gravity.BOTTOM }
         node.input=EditText(this).apply {
-            hint="输入问题或继续追问…";setHintTextColor(MUTED);setTextColor(INK);textSize=14f;minLines=1;maxLines=3
+            hint="输入问题或继续追问…";setHintTextColor(MUTED);setTextColor(INK);textSize=13f;minLines=1;maxLines=3;includeFontPadding=false;minHeight=dp(40)
             setText(node.draft);background=card(SURFACE,dp(8).toFloat());setPadding(dp(10),dp(8),dp(10),dp(8));accessible("${when(node.kind){"photo"->"截图";"audio"->"音频";else->"文字"}}追问")
             filters=arrayOf(android.text.InputFilter.LengthFilter(12000))
             addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty()};override fun afterTextChanged(s:Editable?){} })
         }.also{row.addView(it,LinearLayout.LayoutParams(0,-2,1f))}
-        node.send=icon(android.R.drawable.ic_menu_send,"发送问题") { sendQuestion(node,node.draft) }.also{row.addView(it,LinearLayout.LayoutParams(dp(44),dp(44)).apply{marginStart=dp(5)})}
+        node.send=icon(android.R.drawable.ic_menu_send,"发送问题") { sendQuestion(node,node.draft) }.apply{background=android.graphics.drawable.InsetDrawable(card(ACCENT,dp(8).toFloat()),dp(5),dp(4),dp(5),dp(4));imageTintList=android.content.res.ColorStateList.valueOf(ON_ACCENT)}.also{row.addView(it,LinearLayout.LayoutParams(dp(44),dp(44)).apply{marginStart=dp(5)})}
         composer.addView(row);body.addView(composer,LinearLayout.LayoutParams(-1,-2));root.addView(body,FrameLayout.LayoutParams(-1,-1))
-        val resize=icon(R.drawable.ic_resize,"拖动调整窗口大小") {}.apply { alpha=.6f;setPadding(dp(10),dp(10),dp(10),dp(10));background=null }
+        val resize=icon(R.drawable.ic_resize,"拖动调整窗口大小") {}.apply { alpha=.55f;setPadding(dp(20),dp(20),dp(1),dp(1));background=null;minimumWidth=0;minimumHeight=0 }
         root.addView(resize,FrameLayout.LayoutParams(dp(32),dp(32),Gravity.BOTTOM or Gravity.END))
         installDrag(node,header,root,layout,false);installDrag(node,resize,root,layout,true)
         if(Build.VERSION.SDK_INT>=30)root.setOnApplyWindowInsetsListener{_,insets->
