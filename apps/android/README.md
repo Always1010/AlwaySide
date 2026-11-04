@@ -1,85 +1,54 @@
 # Android 工程说明
 
-产品功能和使用入口见[根目录 README](../../README.md)。本工程为 Kotlin 单应用模块，界面使用 View / Activity 与 Google Material Components 1.14.0，悬浮窗口由 WindowManager 管理。Material3 与 AppCompatDelegate 提供成熟组件及主题，保留平台 Activity 的会话保留逻辑；不使用 Compose 或前端运行时。
+本文面向构建和维护应用的开发者。产品介绍见[根目录 README](../../README.md)，操作方法见[使用说明](../../docs/usage.md)。
 
-## 固定工具链
+工程使用 Kotlin、Android View / Activity 和 Material Components，应用模块位于 `app/`。
 
-| 项目 | 工程配置 |
-| --- | --- |
-| JDK | 17 |
-| Android Gradle Plugin | 9.5.0，使用其内置 Kotlin 支持 |
-| Gradle Wrapper | 9.6.0，发行包 SHA256 固定在 wrapper 配置 |
-| compileSdk / targetSdk | 36 / 36 |
-| minSdk | 29 |
-| Build-Tools | 36.0.0 |
-| applicationId | com.alwayside.android |
-| Material Components | 1.14.0（固定版本，含必要 AndroidX 传递依赖） |
+## 构建准备
 
-版本号以 [app/build.gradle.kts](app/build.gradle.kts) 为准。Android Studio 不是命令行构建的必需条件；本机出包无需模拟器、NDK、手机驱动或连接手机。
+- JDK 17。
+- Android SDK Platform 36 和 Build-Tools 36.0.0。
+- 使用仓库自带的 Gradle Wrapper；Gradle、插件和依赖版本以工程配置为准。
 
-## 当前工作区构建
+在本目录创建不纳入 Git 的 `local.properties`，填写自己的 SDK 路径，或通过 `ANDROID_HOME` 指定已安装的 SDK。应用版本及最低系统要求见 [app/build.gradle.kts](app/build.gradle.kts)。
 
-在仓库根目录运行已有本机辅助脚本：
+调试构建使用自定义签名。首次构建前，请在 `app/build.gradle.kts` 的 `signingConfigs` 中改用自己的调试密钥，或移除自定义配置以使用 Android 默认调试签名。覆盖安装需要相同包名和签名；请妥善保管私钥，不要将私钥或正式签名密码提交到仓库。
+
+## 构建 APK
+
+在 `apps/android/` 目录运行：
 
 ```powershell
-python .local/android/build.py :app:assembleDebug :app:lintDebug
+.\gradlew.bat :app:assembleDebug
 ```
 
-该脚本复用现有 JDK 17，仅为构建子进程指定环境变量；SDK、Android 工具状态、Gradle 缓存均位于仓库的 .local 下。它会生成已被 Git 忽略的 apps/android/local.properties。脚本包含本机绝对路径，不作为通用安装器；其他电脑需先准备工具链并配置对应路径。
+macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。
 
-完整 APK 输出：app/build/outputs/apk/debug/app-debug.apk（相对于本工程目录）。
+## 验证改动
 
-已有标准工具链的环境也可以在本目录运行：
+静态检查：
 
 ```powershell
-.\gradlew.bat :app:assembleDebug :app:lintDebug
+.\gradlew.bat :app:lintDebug
 ```
 
-先为当前终端配置 JDK 17、SDK 路径和所需缓存目录；不要依赖系统默认 Java 的版本。SDK 路径可以通过 local.properties 指定，Windows 冒号及反斜杠须遵循 Java properties 转义规则。
-
-## 测试签名
-
-调试签名仅用于本地测试，私钥不入库；覆盖升级需要使用同一签名。
-
-覆盖升级必须保留同一私钥。新环境需要原测试签名才能覆盖已安装的包；重新生成同名文件不会恢复原签名。本机 build.py 在签名文件缺失时会生成新密钥，因此已有安装用户的环境必须先确认签名文件仍在。
-
-## 定向验证
-
-按实际改动选择测试类，例如请求与会话变化时：
+按改动范围运行相关单元测试，例如请求协议或会话逻辑变化时：
 
 ```powershell
 .\gradlew.bat :app:testDebugUnitTest --tests com.alwayside.android.ProviderProtocolTest --tests com.alwayside.android.ChatSessionTest
 ```
 
-GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTest 保护地址、生成参数、流边界和取消；ChatSessionTest 保护旧回调隔离、配置与选文快照、历史转写和追问；InteractionTest 保护多击互斥、录音取消回调与分状态映射。测试不会调用真实 API。真实服务、KeyStore、悬浮输入、文字选择菜单和音源可录性需真机验证。
+单元测试不调用真实 API。悬浮交互、系统采集授权、内部音频、文字选择入口及真实服务兼容性仍需在 Android 设备上验证。
 
-AppNavigationTest 保护设置详情返回不弹出分类页、聊天进入设置后回原聊天、重复标签不叠栈和重建后导航来源。应用内导航由 MainActivity 单窗口管理，设置和聊天为可挂载 View 页面；系统采集授权和文字选择处理仍使用独立的临时 Activity。
+## 代码与参考
 
-AppearanceModeTest 保护跟随系统与强制浅／深色；InteractionDefaultsTest 保护旧默认组合升级和自定义保留；PromptPresetTest 保护旧模板兼容、整页提示配置恢复及凭据隔离。外观变化只重建悬浮 View，取帧、框选和授权期间延迟刷新，保持采集及会话所有权。
+源码位于 [app/src/main/java/com/alwayside/android/](app/src/main/java/com/alwayside/android/)，测试位于 [app/src/test/](app/src/test/)。
 
-SettingsUpdateTest / FieldEditStateTest 保护逐项配置补丁与取消草稿；HistorySelectionTest 保护选择恢复及确认快照删除；ThemeSchemeTest 检查完整配色方案的动作文字对比。新增 Material 依赖首次构建需要下载对应运行和 lint 依赖；依赖齐全后可离线构建。
-
-## 源码职责
-
-以下类位于 app/src/main/java/com/alwayside/android/：
-
-| 类 | 职责 |
+| 范围 | 主要入口 |
 | --- | --- |
-| MainActivity / AppNavigation / AppEntry | 单应用窗口、页面返回栈、状态恢复与可信内部入口 |
-| SettingsScreen / ChatScreen / AppConversationUi | 分类设置、原生聊天、记录列表及共享导航标签 |
-| SettingsUpdate / FieldEditState / HistorySelection | 单项配置补丁、局部编辑及多选删除快照 |
-| AppAppearance / AppearanceMode / ThemedActivity / Ui | 持久主题、平台配置上下文、应用与悬浮控件状态 |
-| ColorPicker / PromptPreset | 可视颜色草稿、整页提示模板与旧模板合并 |
-| ProcessTextActivity | 系统 PROCESS_TEXT / SEND 纯文本入口与无悬浮权限回退 |
-| CapturePermissionActivity | 悬浮动作按需申请音频／屏幕采集授权，成功后继续原动作，取消时恢复悬浮球 |
-| AssistantService | 前台服务、小球手势、展开菜单、三类独立小窗与采集 |
-| InteractionPreferences / TapSequence | 外观与分状态动作、窗口记忆、多击及取消录音隔离 |
-| ActiveConversationBridge | 在悬浮与应用内页面间移交活动会话与媒体所有权 |
-| FrameSource / CropView / Geometry | 新画面获取、冻结选择、坐标映射 |
-| PlaybackRecorder / Wav | 内部播放音频采集与 WAV 封装 |
-| ChatSession | 本轮配置与证据快照、追问、取消、重试、转写复用 |
-| AiProvider / ProviderProtocol | HTTPS、Responses SSE、文件转写与有界解析 |
-| SettingsStore / HistoryStore / ConversationMediaStore | 加密凭据、预设、状态与原文历史、可选私有图片 |
-| Contracts / MarkdownText / Ui / ProbeState | 数据契约、展示及不含媒体和密钥的运行诊断 |
+| 应用页面与导航 | `MainActivity`、`AppNavigation`、`SettingsScreen`、`ChatScreen` |
+| 悬浮交互与采集 | `AssistantService`、`FrameSource`、`PlaybackRecorder` |
+| 请求与会话 | `AiProvider`、`ProviderProtocol`、`ChatSession` |
+| 设置与历史 | `SettingsStore`、`HistoryStore`、`ConversationMediaStore` |
 
-开发计划、验收结果和交付记录只放仓库根 .local/android/。工程 README 描述使用和结构，不承担阶段进度记录。
+界面维护参考[界面设计说明](../../docs/ui-design.md)，协作和提交遵循 [AGENTS.md](../../AGENTS.md)。本地计划、验收及构建记录统一放在仓库根目录 `.local/`，不随仓库分发。

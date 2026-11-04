@@ -1,5 +1,7 @@
 # 界面设计约定
 
+本文供开发者维护界面时参考。用户操作见[使用说明](usage.md)，产品概览见[README](../README.md)。
+
 Android 界面保留单窗口导航、细线图标、紧凑列表与独立结果小窗。统一使用 Google Material Components 1.14.0 的 MaterialToolbar、MaterialTextView、卡片、按钮、输入框、开关、滑块、复选框及对话框。导航、排版和编辑面板共同遵循 Material3 层级；工具栏图标采用低强调样式。
 
 | 用途 | 浅色 | 深色 |
