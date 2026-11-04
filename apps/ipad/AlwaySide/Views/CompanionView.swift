@@ -281,12 +281,18 @@ private struct ChatHistoryView: View {
         let summaries: [ChatSessionSummary]
     }
     private var searchRequest: SearchRequest { .init(query: query, summaries: model.sessionSummaries) }
+    private var visibleResults: [ChatSessionSummary] {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return model.sessionSummaries }
+        let matchedIDs = Set(results.map(\.id))
+        // A deletion takes effect immediately, even while the replacement search is debouncing.
+        return model.sessionSummaries.filter { matchedIDs.contains($0.id) }
+    }
 
     var body: some View {
         NavigationStack {
             List {
-                if results.isEmpty { Text(query.isEmpty ? "还没有本机会话" : "没有找到相关会话").foregroundStyle(.secondary) }
-                ForEach(results) { session in
+                if visibleResults.isEmpty { Text(query.isEmpty ? "还没有本机会话" : "没有找到相关会话").foregroundStyle(.secondary) }
+                ForEach(visibleResults) { session in
                     Button { model.openSession(session.id); dismiss() } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(session.title).foregroundStyle(.primary).lineLimit(2)
