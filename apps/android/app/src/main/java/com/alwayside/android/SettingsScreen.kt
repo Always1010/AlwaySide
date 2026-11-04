@@ -51,7 +51,7 @@ internal class SettingsScreen(
     private var templateSheet: BottomSheetDialog? = null
     private var group: LinearLayout? = null
     private val selections = linkedMapOf<String, String>()
-    private val audioOutputOptions = linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 翻译", "interpret" to "原文 + 翻译与解读")
+    private val audioOutputOptions = linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 中文翻译", "interpret" to "原文 + 按音频问题回答")
     private var page = Page.HOME
     private var readable = true
     private var ballSize = 28
@@ -233,11 +233,21 @@ internal class SettingsScreen(
         section("快捷提问")
         input("defaultQuestion", "截图问题", "截图后自动填入的问题", config.defaultQuestion, multiline = true)
         input("textQuestion", "选中文字问题", "选中文字后自动填入的问题", config.textQuestion, multiline = true)
-        input("audioQuestion", "音频问题", "转写后交给助手的问题", config.audioQuestion, multiline = true)
+        input("audioQuestion", "音频问题", "用于“原文 + 按音频问题回答”，可要求翻译、总结或提取要点", config.audioQuestion, multiline = true)
         section("音频处理")
         input("transcriptionPrompt", "转写提示", "示例：专有名词、背景或语言", config.transcriptionPrompt, multiline = true)
-        choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions)
-        note("仅原始转写会跳过首次 AI 回复，之后仍可追问。转写提示用于识别语言与专有名词。")
+        lateinit var outputNote: TextView
+        choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions) { value ->
+            outputNote.text = audioOutputDescription(value)
+        }
+        outputNote = note(audioOutputDescription(config.audioOutput))
+        note("原文可展开查看，之后仍可自由追问。转写提示用于识别语言与专有名词。")
+    }
+
+    private fun audioOutputDescription(value: String): String = when (value) {
+        "transcript" -> "仅显示原始转写，跳过首次助手回答，不使用“音频问题”。"
+        "translate" -> "使用独立提示词翻译成中文，不使用“音频问题”。"
+        else -> "将转写原文作为资料，按“音频问题”回答；具体任务由你填写的问题决定。"
     }
 
     private fun showTemplateActions() {
@@ -452,7 +462,7 @@ internal class SettingsScreen(
         addRow(row)
     }
 
-    private fun choice(name: String, title: String, initial: String, options: Map<String, String>) {
+    private fun choice(name: String, title: String, initial: String, options: Map<String, String>, onSelected: ((String) -> Unit)? = null) {
         selections[name] = initial
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(58); setPadding(dp(16), dp(10), dp(16), dp(10))
@@ -474,6 +484,7 @@ internal class SettingsScreen(
                 if (persistChoice(name, keys[index])) {
                     selections[name] = keys[index]
                     row.findViewWithTag<TextView>(name).text = options[keys[index]]
+                    onSelected?.invoke(keys[index])
                     dialog.dismiss()
                 }
             }.setNegativeButton("取消", null).showTracked()
@@ -747,7 +758,7 @@ internal class SettingsScreen(
         container.addView(view, LinearLayout.LayoutParams(-1, -2))
     }
 
-    private fun note(text: String) {
+    private fun note(text: String): TextView {
         val currentGroup = group
         val caption = label(text, 12f, true).apply { setLineSpacing(dp(3).toFloat(), 1f) }
         if (currentGroup != null) {
@@ -758,6 +769,7 @@ internal class SettingsScreen(
                 topMargin = dp(7); bottomMargin = dp(8); leftMargin = dp(12); rightMargin = dp(12)
             })
         }
+        return caption
     }
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
