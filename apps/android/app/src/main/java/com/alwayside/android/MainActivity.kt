@@ -29,11 +29,17 @@ class MainActivity : ThemedActivity() {
     private var chatScreen: ChatScreen? = null
     private var historyScroll: ScrollView? = null
     private var historyY = 0
+    private var historyScreen: HistoryListScreen? = null
+    private var historyView: View? = null
+    private var historyPermission: View? = null
+    private var historyHeader: View? = null
+    private var historyTabs: View? = null
+    private var restoredHistorySelection = emptyList<String>()
     private var backCallback: android.window.OnBackInvokedCallback? = null
     private var retainedChatOffered = false
     private data class RetainedApp(
         val pages: List<String>, val chat: ChatScreen.RetainedConversation?,
-        val settingsPage: String?, val historyY: Int,
+        val settingsPage: String?, val historyY: Int, val historySelection: List<String>,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,6 +53,8 @@ class MainActivity : ThemedActivity() {
         overlayWasGranted = savedInstanceState?.getBoolean("overlay_was_granted", false) ?: false
         allowOnboarding = savedInstanceState?.getBoolean("allow_onboarding") ?: (entry == null)
         historyY = savedInstanceState?.getInt("history_y") ?: retained?.historyY ?: 0
+        restoredHistorySelection = savedInstanceState?.getStringArrayList("history_selection")
+            ?: retained?.historySelection.orEmpty()
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
         if(navigation.hasChat) chatScreen = createChat(savedState=savedInstanceState?.getBundle("chat"),retained=retained?.chat)
@@ -74,11 +82,12 @@ class MainActivity : ThemedActivity() {
 
     private fun updateBackCallback() {
         if(Build.VERSION.SDK_INT < 33)return
-        if(navigation.canGoBack && backCallback == null) {
+        val canHandleBack = navigation.canGoBack || (navigation.current == AppPage.HISTORY && historyScreen?.selecting == true)
+        if(canHandleBack && backCallback == null) {
             backCallback=android.window.OnBackInvokedCallback { navigateBack() }.also {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,it)
             }
-        } else if(!navigation.canGoBack) {
+        } else if(!canHandleBack) {
             backCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) };backCallback=null
         }
     }
@@ -87,13 +96,14 @@ class MainActivity : ThemedActivity() {
     @Deprecated("Legacy key bridge; gesture Back uses OnBackInvokedCallback")
     @SuppressLint("GestureBackNavigation")
     @Suppress("DEPRECATION")
-    override fun onBackPressed() { if(navigation.canGoBack)navigateBack() else super.onBackPressed() }
+    override fun onBackPressed() { if(navigation.canGoBack || (navigation.current == AppPage.HISTORY && historyScreen?.selecting == true))navigateBack() else super.onBackPressed() }
 
     private fun hideKeyboard() {
         currentFocus?.let { getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0) }
     }
 
     private fun navigateBack() {
+        if(navigation.current == AppPage.HISTORY && historyScreen?.back() == true)return
         hideKeyboard()
         when(navigation.back(settingsAtRoot=settingsScreen?.isHome ?: true)) {
             AppBack.SETTINGS_CATEGORY -> settingsScreen?.back()
@@ -114,12 +124,14 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun openHistory(): Unit = leaveSettings {
+        historyScreen?.back()
         hideKeyboard();chatScreen?.dispose();chatScreen=null
         navigation.openHistory();showCurrent()
     }
 
     private fun openSettings() {
         if(navigation.current == AppPage.SETTINGS)return
+        historyScreen?.back()
         hideKeyboard();navigation.openSettings();createSettings()
     }
 
@@ -133,6 +145,7 @@ class MainActivity : ThemedActivity() {
         ChatScreen(this,::navigateBack,::openSettings,id,savedState,retained,autoAskText)
 
     private fun openChat(id: String?,autoAskText: Boolean = false): Unit = leaveSettings {
+        historyScreen?.back()
         hideKeyboard()
         if(chatScreen?.matches(id) != true) {
             chatScreen?.dispose();chatScreen=createChat(id=id,autoAskText=autoAskText)
@@ -157,26 +170,36 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun showHistory() {
-        historyY=historyScroll?.scrollY ?: historyY
-        val root=LinearLayout(this).apply {
-            orientation=LinearLayout.VERTICAL;setBackgroundColor(BACKGROUND)
-            addView(appHeader());addView(appTabs(AppPage.HISTORY,::openHistory,::openSettings))
-        }
-        val scroll=ScrollView(this).apply {
-            isFillViewport=true
-            addView(column().apply {
-                if(!Settings.canDrawOverlays(this@MainActivity)) {
-                    addView(label("允许悬浮显示后，即可从小球截图或听一段。",12f,true))
-                    action("允许悬浮显示",true) { requestOverlayPermission() }
-                    addView(View(this@MainActivity),LinearLayout.LayoutParams(-1,dp(12)))
-                }
-                addConversationList(this@MainActivity,onOpen={openChat(it)}) { showHistory() }
-            })
-        }
-        historyScroll=scroll;root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        var root = historyView
+        if(root == null) {
+            val history = HistoryListScreen(this, onOpen = { openChat(it) },
+                onSelectionChanged = ::historySelectionChanged, initialSelection = restoredHistorySelection)
+            restoredHistorySelection = emptyList()
+            historyScreen = history
+            historyScroll = history.scrollView
+            root = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND)
+                historyHeader=appHeader().also { addView(it) }
+                historyTabs=appTabs(AppPage.HISTORY, ::openHistory, ::openSettings).also { addView(it) }
+                historyPermission = column().apply {
+                    addView(label("允许悬浮显示后，即可从小球截图或听一段。", 12f, true))
+                    action("允许悬浮显示", true) { requestOverlayPermission() }
+                }.also { addView(it) }
+                addView(history.view, LinearLayout.LayoutParams(-1, 0, 1f))
+            }
+            historyView = root
+            history.restoreScroll(historyY)
+        } else historyScreen?.refresh()
+        historySelectionChanged()
         present(root)
-        val targetY=historyY
-        scroll.post { if(historyScroll===scroll)scroll.scrollTo(0,targetY) }
+    }
+
+    private fun historySelectionChanged() {
+        val selecting=historyScreen?.selecting == true
+        historyHeader?.visibility=if(selecting)View.GONE else View.VISIBLE
+        historyTabs?.visibility=if(selecting)View.GONE else View.VISIBLE
+        historyPermission?.visibility=if(selecting || Settings.canDrawOverlays(this))View.GONE else View.VISIBLE
+        updateBackCallback()
     }
 
     private fun requestOverlayPermission() {
@@ -213,6 +236,7 @@ class MainActivity : ThemedActivity() {
         outState.putStringArrayList("pages",ArrayList(navigation.snapshot()))
         outState.putString("settings_page",settingsScreen?.pageName())
         outState.putInt("history_y",historyScroll?.scrollY ?: historyY)
+        outState.putStringArrayList("history_selection", ArrayList(historyScreen?.selectedIds() ?: restoredHistorySelection))
         chatScreen?.let { chat -> outState.putBundle("chat",Bundle().also { chat.saveState(it) }) }
         outState.putBoolean("assistant_start_attempted",assistantStartAttempted)
         outState.putBoolean("overlay_was_granted",overlayWasGranted)
@@ -223,7 +247,8 @@ class MainActivity : ThemedActivity() {
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any {
         val retained=chatScreen?.retain();retainedChatOffered=retained!=null
-        return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName(),historyScroll?.scrollY ?: historyY)
+        return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName(),historyScroll?.scrollY ?: historyY,
+            historyScreen?.selectedIds() ?: restoredHistorySelection)
     }
 
     override fun onDestroy() {

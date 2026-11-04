@@ -1,7 +1,7 @@
 package com.alwayside.android
 
 import android.app.Activity
-import android.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Context
 import android.graphics.Typeface
 import android.text.TextUtils
@@ -53,113 +53,189 @@ internal fun Context.appTabs(selected: AppPage, onHistory: () -> Unit, onSetting
 internal fun conversationDate(value: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(value))
 
-internal fun LinearLayout.addConversationList(activity: Activity, onOpen: (String?) -> Unit, refreshed: () -> Unit) {
-    val store = HistoryStore(activity)
-    val media = ConversationMediaStore(activity)
-    fun failed() = Toast.makeText(activity, "操作未全部完成，请重试并检查本机存储", Toast.LENGTH_LONG).show()
-    fun clear(values: List<StoredConversation>?) {
-        AlertDialog.Builder(activity).setTitle("清空本机会话？")
-            .setMessage("将删除全部会话文字和已保存图片，无法撤销。正在悬浮窗中打开的对应会话也会停止。")
-            .setNegativeButton("取消", null).setPositiveButton("清空") { _, _ ->
-                runCatching {
-                    values.orEmpty().forEach {
-                        ActiveConversationBridge.detach(it.id)
-                        ActiveConversationBridge.takeSession(it.id)?.dispose?.invoke()
-                    }
-                    store.clear(); media.clear()
-                }.onSuccess { refreshed() }.onFailure { failed() }
+/** Fixed selection actions with a separately scrolling archive. */
+internal class HistoryListScreen(
+    private val activity: Activity,
+    private val onOpen: (String?) -> Unit,
+    private val onSelectionChanged: () -> Unit,
+    initialSelection: List<String> = emptyList(),
+) {
+    private val store = HistoryStore(activity)
+    private val media = ConversationMediaStore(activity)
+    private val selection = HistorySelection(initialSelection)
+    private var values = emptyList<StoredConversation>()
+    private var readFailed = false
+    private var pendingScrollY: Int? = null
+    val view = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+    private val toolbar = LinearLayout(activity).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        setPadding(activity.dp(22), activity.dp(6), activity.dp(10), activity.dp(6))
+    }
+    private val rows = activity.column().apply { setPadding(activity.dp(14), 0, activity.dp(14), activity.dp(18)) }
+    val scrollView = android.widget.ScrollView(activity).apply {
+        isFillViewport = true
+        addView(rows)
+    }
+    val selecting: Boolean get() = selection.selecting
+
+    init {
+        view.addView(toolbar, LinearLayout.LayoutParams(-1, activity.dp(60)))
+        view.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
+        refresh()
+    }
+
+    fun selectedIds(): List<String> = selection.snapshot()
+
+    fun restoreScroll(y: Int) {
+        pendingScrollY = y
+        scrollView.post {
+            scrollView.scrollTo(0, y)
+            pendingScrollY = null
+        }
+    }
+
+    fun back(): Boolean {
+        if (!selection.cancel()) return false
+        render(); onSelectionChanged()
+        return true
+    }
+
+    fun refresh() {
+        val wasSelecting = selecting
+        try {
+            values = store.list()
+            readFailed = false
+            selection.retain(values.map { it.id })
+        } catch (_: Exception) {
+            values = emptyList()
+            readFailed = true
+            selection.cancel()
+        }
+        render()
+        if (wasSelecting != selecting) onSelectionChanged()
+    }
+
+    private fun changed() { render(); onSelectionChanged() }
+    private fun failed() = Toast.makeText(activity, "操作未全部完成，请重试并检查本机存储", Toast.LENGTH_LONG).show()
+
+    private fun confirmDeletion() {
+        val deletion = HistoryDeletion(selection.snapshot())
+        if (deletion.ids.isEmpty()) return
+        MaterialAlertDialogBuilder(activity).setTitle("删除选中的 ${deletion.ids.size} 段会话？")
+            .setMessage("将删除这些会话的文字和已保存图片，无法撤销。对应悬浮会话也会停止。")
+            .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
+                val failedIds = deletion.execute { id ->
+                    ActiveConversationBridge.detach(id)
+                    ActiveConversationBridge.takeSession(id)?.dispose?.invoke()
+                    store.delete(id); media.deleteImage(id)
+                }
+                refresh()
+                if (failedIds.isNotEmpty()) failed()
             }.show()
     }
-    val count = activity.label("", 11f, true)
-    addView(LinearLayout(activity).apply {
-        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        addView(activity.label("全部对话", 15f).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) },
+
+    private fun confirmCorruptCleanup() {
+        MaterialAlertDialogBuilder(activity).setTitle("清空无法读取的本机记录？")
+            .setMessage("将删除全部本机会话文字和已保存图片，无法撤销。")
+            .setNegativeButton("取消", null).setPositiveButton("清空") { _, _ ->
+                runCatching { store.clear(); media.clear() }
+                    .onSuccess { refresh() }.onFailure { failed() }
+            }.show()
+    }
+
+    private fun render() {
+        val targetY = pendingScrollY ?: scrollView.scrollY
+        toolbar.removeAllViews(); rows.removeAllViews()
+        toolbar.addView(activity.label(if (selecting) "已选择 ${selection.snapshot().size} 项" else "全部对话", 15f),
             LinearLayout.LayoutParams(0, -2, 1f))
-        addView(count)
-        addView(activity.appIcon(android.R.drawable.ic_input_add, "新建文字对话") {
-            onOpen(null)
-        })
-    })
-    val values = try { store.list() } catch (_: Exception) {
-        addView(activity.label("无法读取会话记录。可以重试，或明确清空损坏的本机记录。", 12f, true))
-        action("重试读取") { refreshed() }
-        action("清空无法读取的记录") { clear(null) }
-        return
+        if (selecting) {
+            toolbar.addView(activity.appIcon(android.R.drawable.ic_menu_delete, "删除选中的会话") { confirmDeletion() }.apply {
+                isEnabled = selection.snapshot().isNotEmpty()
+            })
+            toolbar.addView(activity.appIcon(android.R.drawable.ic_menu_close_clear_cancel, "取消选择") { back() })
+        } else {
+            toolbar.addView(activity.label("${values.size} 个对话", 11f, true))
+            toolbar.addView(activity.appIcon(android.R.drawable.ic_input_add, "新建文字对话") { onOpen(null) })
+        }
+        if (readFailed) {
+            rows.addView(activity.label("无法读取会话记录。可以重试，或明确清空损坏的本机记录。", 12f, true))
+            rows.action("重试读取") { refresh() }
+            rows.action("清空无法读取的记录") { confirmCorruptCleanup() }
+        } else if (values.isEmpty()) {
+            rows.addView(activity.label("还没有对话。\n从悬浮球截图、听一段，\n或点击上方加号，开始文字对话。", 12f, true).apply {
+                gravity = Gravity.CENTER; setLineSpacing(activity.dp(5).toFloat(), 1f)
+                setPadding(activity.dp(20), activity.dp(75), activity.dp(20), activity.dp(75))
+            }, LinearLayout.LayoutParams(-1, -2))
+        } else values.forEach { value -> addRow(value) }
+        scrollView.post { scrollView.scrollTo(0, targetY) }
     }
-    count.text = "${values.size} 个对话"
-    if (values.isEmpty()) {
-        addView(activity.label("还没有对话。\n从悬浮球截图、听一段，\n或点击上方加号，开始文字对话。", 12f, true).apply {
-            gravity = Gravity.CENTER; setLineSpacing(activity.dp(5).toFloat(), 1f)
-            setPadding(activity.dp(20), activity.dp(75), activity.dp(20), activity.dp(75))
-        }, LinearLayout.LayoutParams(-1, -2))
-        return
-    }
-    values.forEach { value ->
-        fun delete() {
-            AlertDialog.Builder(activity).setTitle("删除这段会话？")
-                .setMessage("将删除会话文字和已保存图片，无法撤销。对应悬浮会话会停止。")
-                .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
-                    runCatching {
-                        ActiveConversationBridge.detach(value.id)
-                        ActiveConversationBridge.takeSession(value.id)?.dispose?.invoke()
-                        store.delete(value.id); media.deleteImage(value.id)
-                    }.onSuccess { refreshed() }.onFailure { failed() }
-                }.show()
+
+    private fun addRow(value: StoredConversation) {
+        val checked = selection.contains(value.id)
+        val title = value.title.ifBlank { "待提问会话" }
+        val kind = when (value.kind) { "audio" -> "音频"; "photo", "screen", "image" -> "截图"; else -> "文字" }
+        val card = com.google.android.material.card.MaterialCardView(activity).apply {
+            radius = activity.dp(12).toFloat(); cardElevation = 0f
+            setCardBackgroundColor(if (checked) SURFACE else BACKGROUND)
+            strokeWidth = if(checked)activity.dp(2).coerceAtLeast(1) else 0
+            strokeColor = if (checked) ACCENT else BORDER
+            isCheckable = selecting; isClickable = true; isFocusable = true
+            isChecked = checked
+            // The visible checkbox below supplies the selection indicator.
+            checkedIcon = null
+            accessible(if (selecting) "$title，${if (checked) "已选择" else "未选择"}，点按切换选择"
+                else "打开会话：$title；长按选择")
+            setOnLongClickListener { selection.select(value.id); changed(); true }
+            setOnClickListener {
+                if (selecting) { selection.toggle(value.id); changed() } else onOpen(value.id)
+            }
         }
         val entry = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP
-            setPadding(0, activity.dp(15), 0, activity.dp(15))
-            isClickable = true; isFocusable = true
-            background = activity.touchFeedback()
-            accessible("打开会话：${value.title.ifBlank { "未命名会话" }}；长按删除")
-            setOnLongClickListener { delete(); true }
-            setOnClickListener {
-                onOpen(value.id)
-            }
-            val kind = when (value.kind) { "audio" -> "音频"; "photo", "screen", "image" -> "截图"; else -> "文字" }
-            addView(ImageView(activity).apply {
-                setImageDrawable(activity.prototypeIcon(when (kind) {
-                    "音频" -> android.R.drawable.ic_btn_speak_now
-                    "截图" -> android.R.drawable.ic_menu_camera
-                    else -> android.R.drawable.ic_menu_edit
-                }))
-                imageTintList = android.content.res.ColorStateList.valueOf(ACCENT)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(activity.dp(17), activity.dp(17)).apply {
-                marginEnd = activity.dp(11); topMargin = activity.dp(2)
-            })
-            addView(LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(activity.label(value.title.ifBlank { "待提问会话" }, 13f).apply {
-                    maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                })
-                val preview = value.messages.lastOrNull { it.role == "assistant" }?.text.orEmpty()
-                    .ifBlank { value.messages.lastOrNull()?.text.orEmpty() }.ifBlank { value.evidence }
-                    .ifBlank { "等待你输入第一个问题。" }
-                addView(activity.label(preview.take(180), 11f, true).apply {
-                    maxLines = 2; ellipsize = TextUtils.TruncateAt.END
-                    setLineSpacing(activity.dp(2).toFloat(), 1f); setPadding(0, activity.dp(5), 0, 0)
-                })
-                addView(activity.label("${conversationDate(value.updatedAt)} · $kind · ${value.status.ifBlank { "已保存" }}", 10f, true).apply {
-                    maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setPadding(0, activity.dp(5), 0, 0)
-                })
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(ImageView(activity).apply {
-                setImageDrawable(activity.prototypeIcon(android.R.drawable.ic_media_next))
-                imageTintList = android.content.res.ColorStateList.valueOf(MUTED)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(activity.dp(14), activity.dp(14)).apply {
-                marginStart = activity.dp(8); topMargin = activity.dp(2)
-            })
+            setPadding(activity.dp(12), activity.dp(15), activity.dp(12), activity.dp(15))
         }
-        addView(entry, LinearLayout.LayoutParams(-1, -2))
-        addView(View(activity).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, activity.dp(1)))
+        if (selecting) entry.addView(com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
+            isChecked = checked; isClickable = false; isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            buttonTintList = android.content.res.ColorStateList.valueOf(ACCENT)
+            setPadding(0, 0, 0, 0); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
+        }, LinearLayout.LayoutParams(activity.dp(28), activity.dp(28)).apply { marginEnd = activity.dp(8) })
+        else entry.addView(ImageView(activity).apply {
+            setImageDrawable(activity.prototypeIcon(when (kind) {
+                "音频" -> android.R.drawable.ic_btn_speak_now
+                "截图" -> android.R.drawable.ic_menu_camera
+                else -> R.drawable.ic_line_text
+            }))
+            imageTintList = android.content.res.ColorStateList.valueOf(ACCENT)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(activity.dp(17), activity.dp(17)).apply {
+            marginEnd = activity.dp(11); topMargin = activity.dp(2)
+        })
+        entry.addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(activity.label(title, 13f).apply {
+                maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            })
+            val preview = value.messages.lastOrNull { it.role == "assistant" }?.text.orEmpty()
+                .ifBlank { value.messages.lastOrNull()?.text.orEmpty() }.ifBlank { value.evidence }
+                .ifBlank { "等待你输入第一个问题。" }
+            addView(activity.label(preview.take(180), 11f, true).apply {
+                maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+                setLineSpacing(activity.dp(2).toFloat(), 1f); setPadding(0, activity.dp(5), 0, 0)
+            })
+            addView(activity.label("${conversationDate(value.updatedAt)} · $kind · ${value.status.ifBlank { "已保存" }}", 10f, true).apply {
+                maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setPadding(0, activity.dp(5), 0, 0)
+            })
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (!selecting) entry.addView(ImageView(activity).apply {
+            setImageDrawable(activity.prototypeIcon(android.R.drawable.ic_media_next))
+            imageTintList = android.content.res.ColorStateList.valueOf(MUTED)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(activity.dp(14), activity.dp(14)).apply {
+            marginStart = activity.dp(8); topMargin = activity.dp(2)
+        })
+        card.addView(entry)
+        rows.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = activity.dp(8) })
     }
-    addView(LinearLayout(activity).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = android.view.Gravity.END
-        setPadding(0, activity.dp(12), 0, 0)
-        addView(activity.appIcon(android.R.drawable.ic_menu_delete, "清空全部会话") { clear(values) })
-    })
 }
