@@ -33,7 +33,8 @@ class InteractionTest {
     }
     @Test fun recordingGesturesHaveSeparateDefaultsAndCanBeRemapped() {
         val cfg = InteractionConfig()
-        assertEquals(AssistantActions.SCREEN, cfg.action(1, false))
+        assertEquals(AssistantActions.MENU, cfg.action(1, false))
+        assertEquals(AssistantActions.SCREEN, cfg.action(4, false))
         assertEquals(AssistantActions.CANCEL_AUDIO, cfg.action(1, true))
         assertEquals(AssistantActions.AUDIO, cfg.action(2, true))
         assertEquals(AssistantActions.NONE, cfg.action(3, false))

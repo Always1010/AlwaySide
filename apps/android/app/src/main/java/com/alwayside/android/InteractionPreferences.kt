@@ -22,10 +22,10 @@ internal data class InteractionConfig(
     val ballSize: Int = 28,
     val ballOpacity: Int = 55,
     val ballColor: Int = 0xFF72968E.toInt(),
-    val singleAction: String = AssistantActions.SCREEN,
+    val singleAction: String = AssistantActions.MENU,
     val doubleAction: String = AssistantActions.AUDIO,
     val tripleAction: String = AssistantActions.NONE,
-    val longAction: String = AssistantActions.MENU,
+    val longAction: String = AssistantActions.SCREEN,
     val recordingSingleAction: String = AssistantActions.CANCEL_AUDIO,
     val recordingDoubleAction: String = AssistantActions.AUDIO,
     val recordingTripleAction: String = AssistantActions.CANCEL_AUDIO,
@@ -55,9 +55,12 @@ internal data class SavedWindow(val xFraction: Float, val yFraction: Float, val 
 internal class InteractionPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("assistant_interaction", Context.MODE_PRIVATE)
     fun load(): InteractionConfig {
-        val d = InteractionConfig()
+        val version = prefs.getInt("gestureDefaultsVersion", 0)
+        val hasStoredGestures = listOf("singleAction", "doubleAction", "tripleAction", "longAction").any(prefs::contains)
+        val d = if (version < InteractionDefaults.VERSION && hasStoredGestures)
+            InteractionConfig(singleAction=AssistantActions.SCREEN,longAction=AssistantActions.MENU) else InteractionConfig()
         fun action(key: String, fallback: String) = prefs.getString(key, fallback)?.takeIf { it in AssistantActions.choices } ?: fallback
-        return InteractionConfig(
+        val loaded = InteractionConfig(
             prefs.getInt("ballSize", d.ballSize).coerceIn(18, 48),
             prefs.getInt("ballOpacity", d.ballOpacity).coerceIn(15, 100),
             prefs.getInt("ballColor", d.ballColor) or 0xFF000000.toInt(),
@@ -71,13 +74,21 @@ internal class InteractionPreferences(private val context: Context) {
             prefs.getBoolean("saveHistoryImages", d.saveHistoryImages),
             prefs.getBoolean("autoAskText", d.autoAskText),
         )
+        if (version >= InteractionDefaults.VERSION) return loaded
+        val upgraded = InteractionDefaults.upgrade(loaded)
+        val edit = prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
+        if (upgraded != loaded) edit.putString("singleAction", upgraded.singleAction).putString("longAction", upgraded.longAction)
+        // Persist only the default-policy upgrade; all other appearance, media and user mappings stay intact.
+        edit.commit()
+        return upgraded
     }
     fun save(value: InteractionConfig) {
         require(value.ballSize in 18..48 && value.ballOpacity in 15..100)
         require((listOf(value.singleAction, value.doubleAction, value.tripleAction, value.longAction,
             value.recordingSingleAction, value.recordingDoubleAction, value.recordingTripleAction,
             value.recordingLongAction)).all { it in AssistantActions.choices })
-        check(prefs.edit().putInt("ballSize", value.ballSize).putInt("ballOpacity", value.ballOpacity)
+        check(prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
+            .putInt("ballSize", value.ballSize).putInt("ballOpacity", value.ballOpacity)
             .putInt("ballColor", value.ballColor).putString("singleAction", value.singleAction)
             .putString("doubleAction", value.doubleAction).putString("tripleAction", value.tripleAction)
             .putString("longAction", value.longAction).putString("recordingSingleAction", value.recordingSingleAction)
