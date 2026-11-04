@@ -2,7 +2,6 @@ package com.alwayside.android
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionConfig
@@ -14,7 +13,7 @@ import android.widget.LinearLayout
 import android.widget.Toast
 
 /** Brief system-permission bridge for a gesture started from the floating assistant. */
-class CapturePermissionActivity : Activity() {
+class CapturePermissionActivity : ThemedActivity() {
     private var stage = "idle"
     private var pendingDelivery: Intent? = null
     private var backCallback: android.window.OnBackInvokedCallback? = null

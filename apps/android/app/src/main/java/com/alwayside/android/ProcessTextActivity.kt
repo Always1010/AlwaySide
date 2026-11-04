@@ -1,6 +1,5 @@
 package com.alwayside.android
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -8,7 +7,7 @@ import android.widget.Toast
 import java.util.UUID
 
 /** Explicit Android text-selection/share entry. Never reads the clipboard or original document. */
-class ProcessTextActivity : Activity() {
+class ProcessTextActivity : ThemedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // This action asks about the selection; it never replaces text in the originating app.

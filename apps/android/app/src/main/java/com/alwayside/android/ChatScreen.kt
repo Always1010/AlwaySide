@@ -179,13 +179,13 @@ internal class ChatScreen(
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                 filters = arrayOf(InputFilter.LengthFilter(12000))
                 accessible("问题输入框")
+                applyInputStyle()
             }
             addView(composer, LinearLayout.LayoutParams(0, -2, 1f))
             send = appIcon(android.R.drawable.ic_menu_send, "发送问题") {
                 if (ready && session.busy) session.cancel() else submit()
             }.apply {
-                background = android.graphics.drawable.InsetDrawable(card(ACCENT, dp(8).toFloat()), dp(5), dp(4), dp(5), dp(4))
-                imageTintList = android.content.res.ColorStateList.valueOf(ON_ACCENT)
+                applyIconActionStyle(primary=true)
             }
             addView(send, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(3) })
         })

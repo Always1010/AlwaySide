@@ -9,11 +9,15 @@ import android.graphics.Typeface
 import android.os.Build
 import android.text.Editable
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.StyleSpan
 import android.text.TextWatcher
 import android.text.method.PasswordTransformationMethod
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -21,7 +25,6 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import java.util.Locale
 import java.util.concurrent.CancellationException
 
 /** Category pages intentionally keep their draft only in the current view, never saved instance state. */
@@ -36,6 +39,7 @@ internal class SettingsScreen(
         API("API 连接", "服务地址、加密密钥与可用模型", android.R.drawable.ic_menu_manage),
         MODELS("模型与生成参数", "图文与转写模型、推理、搜索及采样", android.R.drawable.ic_menu_sort_by_size),
         PROMPTS("提示词", "截图与选中文字问题、转写提示与音频输出", android.R.drawable.ic_menu_edit),
+        APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
         GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "位置、尺寸、默认固定与自动提问", android.R.drawable.ic_menu_crop),
@@ -49,12 +53,22 @@ internal class SettingsScreen(
     private val fields = linkedMapOf<String, EditText>()
     private val checks = linkedMapOf<String, CheckBox>()
     private val selections = linkedMapOf<String, String>()
+    private val audioOutputOptions = linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 翻译", "interpret" to "原文 + 翻译与解读")
     private var page = Page.HOME
+    private var saveControl: android.widget.ImageButton? = null
     private var dirty = false
+        set(value) {
+            field = value
+            saveControl?.isEnabled = value
+        }
     private var rendering = false
     private var readable = true
     private var ballSize = 28
     private var ballOpacity = 55
+    private var ballColor = InteractionConfig().ballColor
+    private var colorPalette: LinearLayout? = null
+    private var savedCredential = false
+    private var credentialState: TextView? = null
     private var ballPreview: View? = null
     private var modelRequest: RequestCancellation? = null
     private var modelProgress: AlertDialog? = null
@@ -128,7 +142,13 @@ internal class SettingsScreen(
                 })
                 if (next == Page.HOME) addView(label("留在当下，随手问一句。", 11f, true).apply { setPadding(0, dp(2), 0, 0) })
             }, LinearLayout.LayoutParams(0, -2, 1f).apply { if(next != Page.HOME) leftMargin = dp(8) })
-            if (next != Page.HOME) addView(iconButton(android.R.drawable.ic_menu_save, "保存此分类") { savePage() })
+            if (next != Page.HOME) {
+                saveControl = iconButton(android.R.drawable.ic_menu_save, "保存此分类") { savePage() }.apply {
+                    applyIconActionStyle(primary = true)
+                    isEnabled = dirty
+                }
+                addView(saveControl)
+            }
         }
         root.addView(header)
         if (next == Page.HOME) root.addView(homeTabs()) else root.addView(divider())
@@ -151,6 +171,7 @@ internal class SettingsScreen(
             Page.API -> apiPage(config)
             Page.MODELS -> modelPage(config)
             Page.PROMPTS -> promptPage(config)
+            Page.APPEARANCE -> appearancePage()
             Page.BALL -> ballPage(interaction)
             Page.GESTURES -> gesturePage(interaction)
             Page.WINDOW -> windowPage(config, interaction)
@@ -193,55 +214,64 @@ internal class SettingsScreen(
     }
 
     private fun apiPage(config: AppConfig) {
-        input("baseUrl", "HTTPS Base URL", "https://api.openai.com/v1", config.baseUrl)
-        note("地址须以 /v1 结尾，不含账号、查询参数或片段。密钥会发送到此地址，请确认服务可信。")
-        input("apiKey", "API Key", if (readable && config.apiKey.isNotBlank()) "已有加密密钥；留空保留原值" else "输入服务提供的 API Key", secret = true)
-        note("Key 仅由 Android KeyStore 加密保存在本机。本页禁止截图，密钥不自动填充、不保存界面状态。留空保留已存密钥；移除请用下方专用操作。")
-        body.action("读取可用模型列表") { fetchModels() }
-        note("仅点击时发送经认证的 GET /models，不会上传屏幕、音频或聊天。服务列出模型不代表它支持所有参数。")
-        body.action("移除已保存的 API Key") { clearCredential() }
-        if (!readable) body.action("重置连接与模型配置") {
+        savedCredential = readable && config.apiKey.isNotBlank()
+        input("baseUrl", "服务地址（HTTPS Base URL）", "示例：https://api.openai.com/v1", config.baseUrl)
+        note("以 /v1 结尾。密钥会发送到此地址，请确认服务可信；不要包含账号、查询参数或 # 片段。")
+        input("apiKey", "API 密钥", "请输入密钥", secret = true)
+        note("留空保留已存密钥。密钥仅在本机加密保存，不自动填充；本页禁止截图。")
+        body.action("查看可用模型") { fetchModels() }
+        note("仅请求模型列表，不上传屏幕、音频或聊天。列出的模型不一定支持所有功能。")
+        body.action("移除密钥") { clearCredential() }.destructive()
+        if (!readable) body.action("重置连接配置") {
             AlertDialog.Builder(this).setTitle("重置无法读取的配置？")
-                .setMessage("将清除已存 API 连接、模型、提示词及加密密钥并恢复默认值。交互设置、预设和历史保留。不会发送请求。")
+                .setMessage("清除连接、模型、提示词及密钥，恢复默认值。快捷动作、模板和历史保留。")
                 .setNegativeButton("取消", null).setPositiveButton("重置") { _, _ ->
                     try { store.resetConfiguration(); showPage(Page.API); toast("已重置，请重新填写密钥") }
                     catch (_: Exception) { toast("重置失败，请检查本机存储") }
                 }.showTracked()
-        }
+        }.destructive()
+    }
+
+    private fun appearancePage() {
+        choice("appearance", "应用主题", AppAppearance.mode(this),
+            linkedMapOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"))
+        note("保存后立即应用。默认跟随系统。")
     }
 
     private fun modelPage(config: AppConfig) {
-        input("model", "图文模型 ID", "手动输入服务支持的模型 ID", config.model)
+        input("model", "图文模型 ID", "请输入模型 ID", config.model)
         body.action("从列表选择图文模型") { fetchModels("model") }
-        input("transcriptionModel", "转写模型 ID", "手动输入转写模型 ID", config.transcriptionModel)
+        input("transcriptionModel", "转写模型 ID", "请输入转写模型 ID", config.transcriptionModel)
         body.action("从列表选择转写模型") { fetchModels("transcriptionModel") }
-        note("列表使用已保存的 API 地址与密钥；请先保存 API 连接。模型用途与能力由服务决定，列表不作兼容性筛选。")
+        note("列表使用已保存的连接；请先保存 API 连接。请按服务说明选择对应用途的模型。")
         choice("reasoning", "推理程度", config.reasoning, linkedMapOf("" to "不设置（模型默认）", "none" to "none", "minimal" to "minimal", "low" to "low", "medium" to "medium", "high" to "high", "xhigh" to "xhigh", "max" to "max"))
         choice("verbosity", "回答详细程度", config.verbosity, linkedMapOf("" to "不设置（模型默认）", "low" to "low · 简短", "medium" to "medium · 适中", "high" to "high · 详细"))
-        input("maxOutputTokens", "最大输出 tokens（可留空）", "留空或 0：不发送限制", config.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty(), numeric = true)
-        note("填写时范围为 16–131072，受具体模型上限约束。留空不发送 max_output_tokens。")
+        input("maxOutputTokens", "回答长度上限（tokens）", "请输入上限（选填）", config.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty(), numeric = true)
+        note("可填 16–131072，实际上限由模型决定。留空或 0 使用模型默认。")
         check("webSearch", "请求联网搜索", config.webSearch)
-        note("请求 Responses API 的 web_search 工具，需要服务和模型支持，可能增加费用。回答与引用以服务实际返回为准。")
-        input("temperature", "temperature（可留空，0–2）", "例如 0.7", config.temperature?.toString().orEmpty(), decimal = true)
-        input("topP", "top_p（可留空，0–1）", "例如 0.9", config.topP?.toString().orEmpty(), decimal = true)
-        note("temperature 与 top_p 只能设置一项。未设置的可选参数不会发送；不支持的参数会显示 API 错误，不会悄悄删除后重试。")
+        note("需服务和模型支持，可能增加费用；引用以实际返回为准。")
+        input("temperature", "随机程度 temperature（0–2）", "请输入数值（选填）", config.temperature?.toString().orEmpty(), decimal = true)
+        note("值低更稳定，值高更灵活。")
+        input("topP", "候选范围 top_p（0–1）", "请输入数值（选填）", config.topP?.toString().orEmpty(), decimal = true)
+        note("值越小，候选用词范围越窄。")
+        note("一般留空即可；需要时只调整其中一项，部分模型不支持。不支持时会显示服务错误。")
     }
 
     private fun promptPage(config: AppConfig) {
-        input("instructions", "Instructions · 助手回答方式", "告诉助手如何回答", config.instructions, multiline = true)
-        input("defaultQuestion", "截图默认问题", "自动截图问答时使用", config.defaultQuestion, multiline = true)
-        input("textQuestion", "选中文字默认问题", "从系统选中文字入口打开时使用", config.textQuestion, multiline = true)
-        input("audioQuestion", "音频默认问题", "转写后翻译或解读时使用", config.audioQuestion, multiline = true)
-        input("transcriptionPrompt", "转写提示（可留空）", "例如专有名词、背景或语言提示", config.transcriptionPrompt, multiline = true)
-        note("转写提示发送给转写模型，用于保留原语言文字；它不等同于翻译或解读指令。")
-        choice("audioOutput", "音频默认输出", config.audioOutput, linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 翻译", "interpret" to "原文 + 翻译与解读"))
-        note("音频原始转写与 AI 输出分别保存、展示。选择“仅原始转写”时跳过初始翻译/解读请求，仍可继续追问。")
-        section("提示词预设")
-        note("命名预设包含 Instructions、截图默认问题和音频默认问题三项，不包含密钥、模型、选中文字默认问题、转写提示或音频输出选项。加载后需保存此分类。")
-        body.action("保存三项为命名预设") { savePreset() }
-        body.action("加载三项提示词预设") { loadPreset() }
-        body.action("恢复本页默认值（先预览）") {
-            AlertDialog.Builder(this).setTitle("恢复默认提示词？").setMessage("仅修改此页草稿，保存此分类后生效。命名预设保留。")
+        input("instructions", "助手回答方式", "请输入希望助手遵循的要求", config.instructions, multiline = true)
+        input("defaultQuestion", "截图默认问题", "请输入截图后要问的问题", config.defaultQuestion, multiline = true)
+        input("textQuestion", "选中文字默认问题", "请输入选中文字后要问的问题", config.textQuestion, multiline = true)
+        input("audioQuestion", "音频默认问题", "请输入转写后要问的问题", config.audioQuestion, multiline = true)
+        input("transcriptionPrompt", "转写提示", "示例：专有名词、背景或语言", config.transcriptionPrompt, multiline = true)
+        note("帮助识别原语言和专有名词，不用于要求翻译或解读。")
+        choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions)
+        note("原文与 AI 回答分别保存。“仅原始转写”跳过首次 AI 请求，之后仍可追问。")
+        section("提示词模板")
+        note("模板保存本页全部提示配置，不包含密钥或模型；使用后保存此分类生效，旧模板保留未包含的当前配置。")
+        body.action("保存模板") { savePreset() }
+        body.action("使用模板") { loadPreset() }
+        body.action("恢复默认") {
+            AlertDialog.Builder(this).setTitle("恢复默认提示词？").setMessage("仅修改此页草稿，保存后生效。已保存的模板保留。")
                 .setNegativeButton("取消", null).setPositiveButton("恢复草稿") { _, _ ->
                     val d = AppConfig()
                     fields.getValue("instructions").setText(d.instructions)
@@ -251,14 +281,14 @@ internal class SettingsScreen(
                     fields.getValue("transcriptionPrompt").setText(d.transcriptionPrompt)
                     selections["audioOutput"] = d.audioOutput
                     // Refresh only this selector's visible value without discarding edited fields.
-                    body.findViewWithTag<TextView>("audioOutput")?.text = "音频默认输出：原文 + 翻译与解读"
+                    setChoice("audioOutput", d.audioOutput, "音频默认输出", audioOutputOptions)
                     dirty = true; status.text = "已恢复此页草稿，尚未保存"
                 }.showTracked()
         }
     }
 
     private fun ballPage(config: InteractionConfig) {
-        ballSize = config.ballSize; ballOpacity = config.ballOpacity
+        ballSize = config.ballSize; ballOpacity = config.ballOpacity; ballColor = config.ballColor
         section("外观预览")
         val previewArea = LinearLayout(this).apply {
             gravity = Gravity.CENTER; background = card(SURFACE, dp(8).toFloat())
@@ -267,18 +297,23 @@ internal class SettingsScreen(
         body.addView(previewArea, LinearLayout.LayoutParams(-1, dp(100)))
         slider("视觉直径", 18, 48, ballSize, "dp") { ballSize = it; updateBallPreview() }
         slider("不透明度", 15, 100, ballOpacity, "%") { ballOpacity = it; updateBallPreview() }
-        input("ballColor", "球体颜色（#RRGGBB）", "#72968E", String.format(Locale.ROOT, "#%06X", config.ballColor and 0xFFFFFF))
-        fields.getValue("ballColor").addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { updateBallPreview() }
-            override fun afterTextChanged(s: Editable?) = Unit
-        })
+        section("球体颜色")
+        colorPalette = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(colorPalette, LinearLayout.LayoutParams(-1, -2))
+        renderColorPalette()
+        body.action("更多颜色") {
+            val picker = ColorPicker(this, ballColor)
+            AlertDialog.Builder(this).setTitle("选择球体颜色").setView(ScrollView(this).apply { addView(picker) })
+                .setNegativeButton("取消", null).setPositiveButton("确定") { _, _ ->
+                    ballColor = picker.selectedColor; markDirty(); renderColorPalette(); updateBallPreview()
+                }.showTracked()
+        }
         updateBallPreview()
-        note("预览即时变化；保存后应用到正在运行的悬浮球。默认 28 dp、55% 不透明度；触摸范围保留足够大小，录音状态会增强可见性。")
+        note("保存后应用到悬浮球。视觉大小不影响触摸范围；录音时会增强可见性。")
     }
 
     private fun gesturePage(config: InteractionConfig) {
-        note("单击、双击、三击、长按与拖动互斥。为了识别三击，单击与双击会有短暂等待。拖动只移动悬浮球。")
+        note("单击和双击会短暂等待，以识别连续点击。拖动只移动悬浮球。")
         section("空闲时")
         choice("singleAction", "单击", config.singleAction, AssistantActions.choices)
         choice("doubleAction", "双击", config.doubleAction, AssistantActions.choices)
@@ -289,40 +324,53 @@ internal class SettingsScreen(
         choice("recordingDoubleAction", "双击", config.recordingDoubleAction, AssistantActions.choices)
         choice("recordingTripleAction", "三击", config.recordingTripleAction, AssistantActions.choices)
         choice("recordingLongAction", "长按", config.recordingLongAction, AssistantActions.choices)
-        note("“取消并丢弃录音”立即丢弃当前片段，不上传、不转写、不提问。“开始／结束录音并处理”在录音中表示结束并处理。设置始终可从应用主页进入。")
+        note("“取消并丢弃录音”不上传或处理。录音中选择“开始／结束录音并处理”会结束并处理。")
+        body.action("恢复默认手势") {
+            val defaults = InteractionConfig()
+            mapOf("singleAction" to defaults.singleAction, "doubleAction" to defaults.doubleAction,
+                "tripleAction" to defaults.tripleAction, "longAction" to defaults.longAction,
+                "recordingSingleAction" to defaults.recordingSingleAction, "recordingDoubleAction" to defaults.recordingDoubleAction,
+                "recordingTripleAction" to defaults.recordingTripleAction, "recordingLongAction" to defaults.recordingLongAction).forEach { (key, value) ->
+                val title = when { key.contains("Single") || key == "singleAction" -> "单击"; key.contains("Double") || key == "doubleAction" -> "双击"; key.contains("Triple") || key == "tripleAction" -> "三击"; else -> "长按" }
+                setChoice(key, value, title, AssistantActions.choices)
+            }
+            markDirty(); status.text = "已恢复默认手势，保存后生效"
+        }
     }
 
     private fun windowPage(config: AppConfig, interaction: InteractionConfig) {
         check("rememberWindowPosition", "分别记住截图窗与音频窗的位置", interaction.rememberWindowPosition)
         check("rememberWindowSize", "分别记住截图窗与音频窗的尺寸", interaction.rememberWindowSize)
         check("defaultPinned", "新会话窗口默认固定", interaction.defaultPinned)
-        note("固定后点外部保留窗口，仍可拖动和调整尺寸；取消固定后点外部收起。收起不取消请求，结果继续写入对话记录。未记住的尺寸/位置下次恢复默认。")
+        note("固定时，点窗口外部也会保留窗口；否则收起。收起不取消请求，结果仍会保存。")
         section("首问与截图上下文")
         check("autoAskImage", "截图后自动使用默认问题提问", interaction.autoAskImage)
         check("autoAskAudio", "结束录音后自动按默认设置处理", interaction.autoAskAudio)
         check("autoAskText", "选中文字后自动提问", interaction.autoAskText)
-        note("关闭自动提问时先打开会话，等待你明确发送；取消录音始终直接丢弃片段。")
+        note("关闭后先打开会话，等你点发送。取消录音始终直接丢弃片段。")
         check("autoUpdateImage", "截图追问默认更新当前画面", config.autoUpdateImage)
-        note("仅在主动发送时采集新画面，需要有效的屏幕共享。截图会话中仍可逐次选择沿用原图、更新画面或仅文字。")
+        note("发送时才采集新画面，需开启屏幕共享。会话中仍可逐次选择沿用原图或仅发文字。")
     }
 
     private fun mediaPage(config: InteractionConfig) {
         check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
-        note("默认关闭。当前截图会话仍可在内存中沿用原图；不保存图片时，从历史恢复后会提示缺少原图，可重新取图或只用文字追问。")
-        note("此开关决定新写入历史的截图策略，不追溯补存旧截图。关闭后已有历史截图是否可用，以该会话实际保存的证据为准。")
+        note("默认关闭。当前会话仍可沿用截图；从历史打开后缺少原图时，可重新截图或只问文字。")
+        note("仅影响新写入的历史，不补存旧截图；旧记录能否显示原图，取决于当时是否保存。")
         section("音频与对话记录")
-        note("原始音频只用于本次处理，不进入长期历史；历史保存原始转写、问题和 AI 回答。后续音频追问复用转写文字，不重复上传音频。")
-        note("每次初始查询形成一条会话，追问追加到原会话。待提问、进行中、取消或失败的会话也可从应用主页的对话列表找到。")
+        note("不长期保存原始音频，只保存转写、问题和回答。追问复用转写文字，不重复上传音频。")
+        note("追问保存在原会话内。待发送、处理中、取消或失败的会话，也可从主页对话列表找到。")
     }
 
     private fun input(name: String, title: String, hintValue: String, initial: String = "", multiline: Boolean = false,
                       secret: Boolean = false, numeric: Boolean = false, decimal: Boolean = false) {
-        val titleView = label(title, 12f)
+        val titleView = label(title, 13f)
+        val emptyState = if (name in setOf("instructions", "defaultQuestion", "audioQuestion", "textQuestion",
+                "transcriptionPrompt", "maxOutputTokens", "temperature", "topP")) "选填" else "未填写"
+        val stateView = label(if (secret) credentialStatus() else if (initial.isBlank()) emptyState else "已填写", 11f, true)
+        if (secret) credentialState = stateView
         val field = EditText(this).apply {
-            id = View.generateViewId(); hint = hintValue; setTextColor(INK); setHintTextColor(MUTED)
-            textSize = 13f; minHeight = dp(44)
-            setPadding(dp(10), dp(9), dp(10), dp(9))
-            background = card(SURFACE, dp(8).toFloat()).apply { setStroke(dp(1), BORDER) }
+            id = View.generateViewId(); hint = placeholder(hintValue); textSize = 15f
+            applyInputStyle()
             inputType = when {
                 secret -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                 decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
@@ -342,13 +390,32 @@ internal class SettingsScreen(
             contentDescription = title; setText(initial)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { if (!rendering) dirty = true }
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    stateView.text = if (secret) credentialStatus() else if (s.isNullOrBlank()) emptyState else "已填写"
+                    if (!rendering) markDirty()
+                }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
         titleView.labelFor = field.id; fields[name] = field
-        body.addView(titleView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); bottomMargin = dp(6) })
+        body.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(titleView, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(stateView, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16); bottomMargin = dp(7) })
         body.addView(field, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun placeholder(value: String) = SpannableString(value).apply {
+        setSpan(StyleSpan(Typeface.ITALIC), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+    private fun credentialStatus() = if (savedCredential) "已保存" else "未设置"
+
+    private fun markDirty() {
+        if (rendering) return
+        dirty = true
+        status.text = "有未保存的修改，请点右上角保存"
     }
 
     private fun check(name: String, title: String, initial: Boolean) {
@@ -356,7 +423,7 @@ internal class SettingsScreen(
             text = title; textSize = 13f; setTextColor(INK); minHeight = dp(44)
             buttonTintList = ColorStateList.valueOf(ACCENT); setPadding(0, dp(4), 0, dp(4))
             isSaveEnabled = false; isChecked = initial
-            setOnCheckedChangeListener { _, _ -> if (!rendering) dirty = true }
+            setOnCheckedChangeListener { _, _ -> markDirty() }
         }
         checks[name] = view; body.addView(view, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
     }
@@ -364,18 +431,27 @@ internal class SettingsScreen(
     private fun choice(name: String, title: String, initial: String, options: Map<String, String>) {
         selections[name] = initial
         val button = body.action("$title：${options[initial] ?: initial}") {}
+        button.applyActionStyle()
         button.textSize = 13f; button.gravity = Gravity.CENTER_VERTICAL or Gravity.START
-        button.setPadding(dp(10), 0, dp(10), 0); button.minHeight = dp(44)
-        button.background = card(SURFACE, dp(8).toFloat()).apply { setStroke(dp(1), BORDER) }
-        button.layoutParams = (button.layoutParams as LinearLayout.LayoutParams).apply { height = dp(44) }
+        button.setPadding(dp(14), dp(9), dp(12), dp(9)); button.minHeight = dp(48)
+        button.background = selectionBackground()
+        button.setCompoundDrawablesWithIntrinsicBounds(null, null,
+            prototypeIcon(android.R.drawable.ic_media_next).apply { setTint(INK) }, null)
+        button.compoundDrawablePadding = dp(12)
+        button.layoutParams = (button.layoutParams as LinearLayout.LayoutParams).apply { height = -2 }
         button.tag = name
         button.setOnClickListener {
             val keys = options.keys.toList()
             AlertDialog.Builder(this).setTitle(title).setSingleChoiceItems(options.values.toTypedArray(), keys.indexOf(selections[name])) { dialog, index ->
-                selections[name] = keys[index]; button.text = "$title：${options.getValue(keys[index])}"
-                dirty = true; dialog.dismiss()
+                setChoice(name, keys[index], title, options)
+                markDirty(); dialog.dismiss()
             }.setNegativeButton("取消", null).showTracked()
         }
+    }
+
+    private fun setChoice(name: String, value: String, title: String, options: Map<String, String>) {
+        selections[name] = value
+        body.findViewWithTag<TextView>(name)?.text = "$title：${options[value] ?: value}"
     }
 
     private fun slider(title: String, minimum: Int, maximum: Int, initial: Int, unit: String, changed: (Int) -> Unit) {
@@ -387,7 +463,7 @@ internal class SettingsScreen(
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     val value = minimum + progress; caption.text = "$title：$value $unit"; changed(value)
-                    if (fromUser && !rendering) dirty = true
+                    if (fromUser) markDirty()
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
@@ -395,11 +471,47 @@ internal class SettingsScreen(
         }, LinearLayout.LayoutParams(-1, dp(44)))
     }
 
+    private fun renderColorPalette() {
+        val palette = colorPalette ?: return
+        palette.removeAllViews()
+        val colors = (listOf(ballColor to "当前颜色") + listOf(
+            0xFF72968E.toInt() to "松绿", 0xFF426BCA.toInt() to "蓝色", 0xFF8D62BD.toInt() to "紫色",
+            0xFFCC5C74.toInt() to "玫红", 0xFFE09636.toInt() to "橙色", 0xFF34403A.toInt() to "墨色",
+            0xFFF3E9D2.toInt() to "米白",
+        )).distinctBy { it.first }
+        colors.chunked(4).forEach { group ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            group.forEach { (color, name) ->
+                val chosen = color == ballColor
+                val luminance = 0.2126 * Color.red(color) + 0.7152 * Color.green(color) + 0.0722 * Color.blue(color)
+                val tile = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                    setPadding(dp(4), dp(8), dp(4), dp(8))
+                    background = selectionBackground(); isClickable = true; isFocusable = true
+                    contentDescription = "$name，${if (chosen) "已选中" else "点按选择"}"
+                    addView(label(if (chosen) "✓" else "", 22f).apply {
+                        gravity = Gravity.CENTER; setTextColor(if (luminance > 150) Color.BLACK else Color.WHITE)
+                        background = card(color, dp(22).toFloat()).apply {
+                            setStroke(dp(if (chosen) 3 else 1), if (chosen) INK else BORDER)
+                        }
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    }, LinearLayout.LayoutParams(dp(44), dp(44)))
+                    addView(label(name, 11f).apply {
+                        gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0)
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    })
+                    setOnClickListener { ballColor = color; markDirty(); renderColorPalette(); updateBallPreview() }
+                }
+                row.addView(tile, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
+            }
+            repeat(4 - group.size) { row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f)) }
+            palette.addView(row)
+        }
+    }
+
     private fun updateBallPreview() {
-        val color = fields["ballColor"]?.text?.toString()?.trim()?.takeIf { it.matches(Regex("#[0-9a-fA-F]{6}")) }
-            ?.let { Color.parseColor(it) } ?: InteractionConfig().ballColor
         ballPreview?.apply {
-            background = card(color, dp(48).toFloat()); alpha = ballOpacity / 100f
+            background = card(ballColor, dp(48).toFloat()); alpha = ballOpacity / 100f
             layoutParams = LinearLayout.LayoutParams(dp(ballSize), dp(ballSize))
             contentDescription = "悬浮球预览，直径 $ballSize dp，不透明度 $ballOpacity%"
         }
@@ -421,13 +533,13 @@ internal class SettingsScreen(
                             transcriptionPrompt = value("transcriptionPrompt"), audioOutput = selected("audioOutput"), textQuestion = value("textQuestion"))
                     }
                     SettingsStore.validate(config); store.save(config)
-                    fields["apiKey"]?.apply { text.clear(); hint = if (config.apiKey.isBlank()) "输入服务提供的 API Key" else "已有加密密钥；留空保留原值" }
+                    savedCredential = config.apiKey.isNotBlank()
+                    fields["apiKey"]?.text?.clear()
+                    credentialState?.text = credentialStatus()
                 }
-                Page.BALL -> {
-                    val hex = value("ballColor").trim()
-                    require(hex.matches(Regex("#[0-9a-fA-F]{6}"))) { "颜色请填写 #RRGGBB，例如 #72968E" }
-                    interactionStore.save(interactionStore.load().copy(ballSize = ballSize, ballOpacity = ballOpacity, ballColor = Color.parseColor(hex)))
-                }
+                Page.APPEARANCE -> AppAppearance.save(this, selected("appearance"))
+                Page.BALL -> interactionStore.save(interactionStore.load().copy(
+                    ballSize = ballSize, ballOpacity = ballOpacity, ballColor = ballColor))
                 Page.GESTURES -> interactionStore.save(interactionStore.load().copy(
                     singleAction = selected("singleAction"), doubleAction = selected("doubleAction"), tripleAction = selected("tripleAction"), longAction = selected("longAction"),
                     recordingSingleAction = selected("recordingSingleAction"), recordingDoubleAction = selected("recordingDoubleAction"),
@@ -442,7 +554,8 @@ internal class SettingsScreen(
                 Page.MEDIA -> interactionStore.save(interactionStore.load().copy(saveHistoryImages = checked("saveHistoryImages")))
                 Page.HOME -> return
             }
-            dirty = false; status.text = "此分类已保存；之后的操作使用新配置。"; toast("已保存此分类")
+            dirty = false; status.text = "此分类已保存"; toast("已保存此分类")
+            if (page == Page.APPEARANCE) activity.recreate()
         } catch (error: IllegalArgumentException) { toast(error.message ?: "设置内容无效") }
         catch (_: Exception) { status.text = "保存失败，请检查设备安全存储及可用空间。请确认本页内容后重试。" }
     }
@@ -507,8 +620,11 @@ internal class SettingsScreen(
     }
 
     private fun savePreset() {
-        val name = EditText(this).apply { hint = "预设名称（最多 60 字）"; isSaveEnabled = false }
-        val dialog = AlertDialog.Builder(this).setTitle("保存提示词预设").setView(name)
+        val name = EditText(this).apply {
+            hint = placeholder("请输入模板名称（最多 60 字）"); isSaveEnabled = false; isSaveFromParentEnabled = false; textSize = 15f
+            applyInputStyle()
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("保存提示词模板").setView(name)
             .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -516,14 +632,14 @@ internal class SettingsScreen(
                 if (title.isBlank() || title.length > 60) { toast("名称需为 1 至 60 字"); return@setOnClickListener }
                 try {
                     val perform = {
-                        try { store.savePreset(title, PromptPreset(value("instructions"), value("defaultQuestion"), value("audioQuestion")))
-                            dialog.dismiss(); toast("预设已保存") }
-                        catch (_: Exception) { toast("保存失败：最多 20 个预设，单项提示词最多 32000 字") }
+                        try { store.savePreset(title, PromptPreset.capture(promptDraft()))
+                            dialog.dismiss(); toast("模板已保存") }
+                        catch (_: Exception) { toast("保存失败：最多 20 个模板，单项提示词最多 32000 字") }
                     }
-                    if (store.presets().containsKey(title)) AlertDialog.Builder(this).setTitle("覆盖同名预设？").setMessage(title)
+                    if (store.presets().containsKey(title)) AlertDialog.Builder(this).setTitle("覆盖同名模板？").setMessage(title)
                         .setNegativeButton("取消", null).setPositiveButton("覆盖") { _, _ -> perform() }.showTracked()
                     else perform()
-                } catch (_: Exception) { toast("无法读取预设") }
+                } catch (_: Exception) { toast("无法读取模板") }
             }
         }
         dialog.showTracked()
@@ -532,16 +648,32 @@ internal class SettingsScreen(
     private fun loadPreset() {
         try {
             val presets = store.presets()
-            if (presets.isEmpty()) { toast("尚未保存预设"); return }
+            if (presets.isEmpty()) { toast("尚未保存模板"); return }
             val names = presets.keys.toTypedArray()
-            AlertDialog.Builder(this).setTitle("选择提示词预设").setItems(names) { _, index ->
+            AlertDialog.Builder(this).setTitle("选择提示词模板").setItems(names) { _, index ->
                 val preset = presets.getValue(names[index])
-                fields.getValue("instructions").setText(preset.instructions)
-                fields.getValue("defaultQuestion").setText(preset.defaultQuestion)
-                fields.getValue("audioQuestion").setText(preset.audioQuestion)
-                status.text = "已加载“${names[index]}”，保存此分类后生效"
+                val merged = preset.mergeInto(promptDraft())
+                fields.getValue("instructions").setText(merged.instructions)
+                fields.getValue("defaultQuestion").setText(merged.defaultQuestion)
+                fields.getValue("audioQuestion").setText(merged.audioQuestion)
+                fields.getValue("textQuestion").setText(merged.textQuestion)
+                fields.getValue("transcriptionPrompt").setText(merged.transcriptionPrompt)
+                setChoice("audioOutput", merged.audioOutput, "音频默认输出", audioOutputOptions)
+                markDirty(); status.text = "已使用“${names[index]}”，保存后生效"
             }.setNegativeButton("取消", null).showTracked()
-        } catch (_: Exception) { toast("无法读取提示词预设") }
+        } catch (_: Exception) { toast("无法读取提示词模板") }
+    }
+
+    private fun promptDraft() = AppConfig(instructions = value("instructions"), defaultQuestion = value("defaultQuestion"),
+        audioQuestion = value("audioQuestion"), textQuestion = value("textQuestion"),
+        transcriptionPrompt = value("transcriptionPrompt"), audioOutput = selected("audioOutput"))
+
+    private val dangerColor: Int get() = if (Color.red(INK) > 160) 0xFFFFB4AB.toInt() else 0xFFB3261E.toInt()
+
+    private fun Button.destructive() {
+        applyActionStyle()
+        setTextColor(dangerColor)
+        background = card(BACKGROUND, dp(8).toFloat()).apply { setStroke(dp(1).coerceAtLeast(1), dangerColor) }
     }
 
     private fun section(text: String) {
@@ -563,7 +695,7 @@ internal class SettingsScreen(
     private fun clearDraft() {
         rendering = true
         fields.values.forEach { it.text.clear() }
-        fields.clear(); checks.clear(); selections.clear(); ballPreview = null
+        fields.clear(); checks.clear(); selections.clear(); ballPreview = null; colorPalette = null; credentialState = null; saveControl = null
         rendering = false
         dirty = false
     }
@@ -575,6 +707,9 @@ internal class SettingsScreen(
         dialogs += this
         setOnDismissListener { dialogs.remove(this) }
         show()
+        if (getButton(AlertDialog.BUTTON_POSITIVE)?.text?.toString() in setOf("移除", "重置", "覆盖", "放弃并返回", "放弃并离开")) {
+            getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(dangerColor)
+        }
         return this
     }
 

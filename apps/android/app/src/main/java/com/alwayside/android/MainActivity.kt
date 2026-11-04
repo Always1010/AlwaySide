@@ -2,7 +2,6 @@ package com.alwayside.android
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -19,7 +18,7 @@ import android.widget.ScrollView
 import android.widget.Toast
 
 /** One application window for history, settings and conversations. */
-class MainActivity : Activity() {
+class MainActivity : ThemedActivity() {
     private val onboarding by lazy { getSharedPreferences("assistant_onboarding", MODE_PRIVATE) }
     private var assistantStartAttempted = false
     private var overlayWasGranted = false

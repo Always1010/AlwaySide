@@ -54,6 +54,8 @@ GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTe
 
 AppNavigationTest 保护设置详情返回不弹出分类页、聊天进入设置后回原聊天、重复标签不叠栈和重建后导航来源。应用内导航由 MainActivity 单窗口管理，设置和聊天为可挂载 View 页面；系统采集授权和文字选择处理仍使用独立的临时 Activity。
 
+AppearanceModeTest 保护跟随系统与强制浅／深色；InteractionDefaultsTest 保护旧默认组合升级和自定义保留；PromptPresetTest 保护旧模板兼容、整页提示配置恢复及凭据隔离。外观变化只重建悬浮 View，取帧、框选和授权期间延迟刷新，保持采集及会话所有权。
+
 ## 源码职责
 
 以下类位于 app/src/main/java/com/alwayside/android/：
@@ -62,6 +64,8 @@ AppNavigationTest 保护设置详情返回不弹出分类页、聊天进入设�
 | --- | --- |
 | MainActivity / AppNavigation / AppEntry | 单应用窗口、页面返回栈、状态恢复与可信内部入口 |
 | SettingsScreen / ChatScreen / AppConversationUi | 分类设置、原生聊天、记录列表及共享导航标签 |
+| AppAppearance / AppearanceMode / ThemedActivity / Ui | 持久主题、平台配置上下文、应用与悬浮控件状态 |
+| ColorPicker / PromptPreset | 可视颜色草稿、整页提示模板与旧模板合并 |
 | ProcessTextActivity | 系统 PROCESS_TEXT / SEND 纯文本入口与无悬浮权限回退 |
 | CapturePermissionActivity | 悬浮动作按需申请音频／屏幕采集授权，成功后继续原动作，取消时恢复悬浮球 |
 | AssistantService | 前台服务、小球手势、贴球菜单、三类独立小窗与采集 |
