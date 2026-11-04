@@ -24,6 +24,51 @@
 
 macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。
 
+## GitHub Release 自动发包
+
+[Android Release 工作流](../../.github/workflows/release.yml) 只在向 GitHub 推送 `v` 开头的 tag 时运行，普通分支推送不会发包。发布 tag 必须采用 `v主版本.次版本.修订号`，例如 `v0.6.1`；每段为 0–999 的整数，不允许前导零、预发布后缀或 `v0.0.0`。不符合格式时工作流会报错并停止。
+
+工作流使用 JDK 17 和工程指定的 Android SDK，运行 `lintRelease`、构建并验证签名 APK，然后创建同名 GitHub Release、自动生成发布说明，并上传：
+
+- `AlwaySide-v0.6.1.apk`：可安装的 Release APK。
+- `AlwaySide-v0.6.1.apk.sha256`：APK 的 SHA-256 校验文件。
+
+### 首次配置签名
+
+在 GitHub 仓库的 **Settings → Secrets and variables → Actions → Repository secrets** 中配置以下 Secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | 签名 keystore 文件的 Base64 内容 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | 签名密钥别名 |
+| `ANDROID_KEY_PASSWORD` | 签名密钥密码 |
+
+使用计划长期保留的签名密钥。若需要覆盖已安装的测试包，必须使用与该测试包相同的密钥；改用其他签名时需先卸载旧包，卸载会清除应用本地数据。工作流不会生成临时签名，也不会将私钥上传到 Release；Secrets 缺失或签名校验失败时停止发包。
+
+在 PowerShell 中可用以下命令将现有 keystore 转成 Base64 并复制到剪贴板，将路径替换成自己的文件位置：
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('D:\path\release.jks')) | Set-Clipboard
+```
+
+创建 Release 使用工作流自带的 `GITHUB_TOKEN` 和 `contents: write` 权限，无需额外配置个人访问令牌；仓库或组织策略需要允许该权限。
+
+### 版本与触发方式
+
+APK 的 `versionName` 自动取 tag 去掉 `v` 后的值，`versionCode` 按 `主版本 × 1000000 + 次版本 × 1000 + 修订号` 生成。例如 `v0.6.1` 对应 `0.6.1` 和 `6001`，`v1.0.0` 对应 `1.0.0` 和 `1000000`。后续发布应递增版本，覆盖安装要求 `versionCode` 高于旧包。本地不传版本参数时仍使用 `app/build.gradle.kts` 中的默认版本。
+
+确认工作流所在提交已推送到 GitHub、签名 Secrets 已配置后，再执行下面的命令发布新版本（本次配置工作流不需要执行）：
+
+```powershell
+git tag -a v0.6.1 -m "发布 v0.6.1"
+git push origin v0.6.1
+```
+
+tag 必须指向包含工作流及待发布代码的提交，构建使用该 tag 对应的代码。发布后在仓库 Actions 和 Releases 查看结果。失败后可在 Actions 中重跑；已存在的 Release 不会被覆盖，需要为新内容使用新版本 tag。
+
+本地需要签名 Release 时，设置 `ANDROID_KEYSTORE_PATH`（绝对路径）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 环境变量，再运行 `:app:assembleRelease`；可通过 `"-PreleaseVersionName=0.6.1" "-PreleaseVersionCode=6001"` 指定版本。未设置签名路径的本地 Release 构建会生成未签名 APK，不能直接安装。
+
 ## 验证改动
 
 静态检查：
