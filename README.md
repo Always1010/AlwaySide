@@ -38,6 +38,7 @@ API Key 由 Android KeyStore 加密保存在本机，不内置在 APK 中。设�
 | 路径 | 内容 |
 | --- | --- |
 | [`apps/android/README.md`](apps/android/README.md) | 工具链、构建、验证与源码结构 |
+| [`docs/ai-media-context.md`](docs/ai-media-context.md) | 音频转写与翻译、图片多轮上下文及媒体保存边界 |
 | [`apps/android/app/src/main/`](apps/android/app/src/main/) | Android 应用源码、权限和资源 |
 | [`apps/android/app/src/test/`](apps/android/app/src/test/) | 核心逻辑单元测试 |
 | [`AGENTS.md`](AGENTS.md) | 项目协作与提交约定 |
