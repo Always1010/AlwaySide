@@ -58,9 +58,7 @@ internal class AiProvider : AiGateway {
             .put("input", input)
             .put("store", false)
             .put("stream", true)
-            .put("max_output_tokens", config.maxOutputTokens)
-        if (config.reasoning.isNotBlank()) body.put("reasoning", JSONObject().put("effort", config.reasoning))
-        if (config.webSearch) body.put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
+        ProviderProtocol.responseOptions(config).forEach { (name, value) -> body.put(name, JSONObject.wrap(value)) }
         val bytes = body.toString().toByteArray(Charsets.UTF_8)
         request(config, "responses", "application/json", bytes.size.toLong(), cancellation, {
             it.write(bytes)
@@ -83,8 +81,11 @@ internal class AiProvider : AiGateway {
                 String(header, 8, 4, Charsets.US_ASCII) != "WAVE") throw ProviderException("仅支持 WAV 音频")
         }
         val boundary = "alwayside-${UUID.randomUUID()}"
+        val prompt = if (config.transcriptionPrompt.isBlank()) "" else
+            "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n${config.transcriptionPrompt}"
         val prefix = ("--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n" +
             config.transcriptionModel + "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson" +
+            prompt +
             "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n" +
             "Content-Type: audio/wav\r\n\r\n").toByteArray(Charsets.UTF_8)
         val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
@@ -110,6 +111,18 @@ internal class AiProvider : AiGateway {
             val text = JSONObject(json).optString("text").trim()
             if (text.isBlank() || text.length > MAX_OUTPUT_CHARS) throw ProviderException("未识别到可用的音频文字")
             text
+        }
+    }
+
+    /** Explicit metadata request only: no question, screenshot or recording is uploaded. */
+    fun listModels(config: AppConfig, cancellation: RequestCancellation = RequestCancellation()): List<String> = sanitized(cancellation) {
+        validateConfig(config)
+        request(config, "models", "application/json", 0, cancellation, {}, "GET") { connection, deadline ->
+            val json = JSONObject(connection.inputStream.use { readBounded(it, 2 * 1024 * 1024, cancellation, deadline) })
+            val data = json.optJSONArray("data") ?: throw ProviderException("模型列表格式无效")
+            if (data.length() > 10000) throw ProviderException("模型列表过大")
+            (0 until data.length()).mapNotNull { data.optJSONObject(it)?.optString("id") }
+                .filter { it.isNotBlank() && it.length <= 200 && it.none(Char::isISOControl) }.distinct().sorted()
         }
     }
 
@@ -199,6 +212,7 @@ internal class AiProvider : AiGateway {
         contentLength: Long,
         cancellation: RequestCancellation,
         writeBody: (java.io.OutputStream) -> Unit,
+        method: String = "POST",
         readBody: (HttpURLConnection, Long) -> T,
     ): T {
         cancellation.throwIfCancelled()
@@ -210,18 +224,18 @@ internal class AiProvider : AiGateway {
             connection.disconnect()
         }, 240, TimeUnit.SECONDS)
         try {
-            connection.requestMethod = "POST"
+            connection.requestMethod = method
             connection.instanceFollowRedirects = false // Never forward a bearer token to a redirect target.
             connection.connectTimeout = 20_000
             connection.readTimeout = 60_000
             connection.useCaches = false
-            connection.doOutput = true
+            connection.doOutput = method == "POST"
             connection.setRequestProperty("Authorization", "Bearer ${config.apiKey.trim()}")
-            connection.setRequestProperty("Content-Type", contentType)
+            if (method == "POST") connection.setRequestProperty("Content-Type", contentType)
             connection.setRequestProperty("Accept", if (route == "responses") "text/event-stream" else "application/json")
-            connection.setFixedLengthStreamingMode(contentLength)
+            if (method == "POST") connection.setFixedLengthStreamingMode(contentLength)
             cancellation.attach(connection)
-            connection.outputStream.use { output -> cancellation.throwIfCancelled(); writeBody(output) }
+            if (method == "POST") connection.outputStream.use { output -> cancellation.throwIfCancelled(); writeBody(output) }
             cancellation.throwIfCancelled()
             val status = connection.responseCode
             if (status !in 200..299) throw ProviderException(statusMessage(status))
@@ -257,8 +271,9 @@ internal class AiProvider : AiGateway {
         }
         val modelPattern = Regex("[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}")
         if (!modelPattern.matches(config.model) || !modelPattern.matches(config.transcriptionModel)) throw ProviderException("模型名称无效")
-        if (config.maxOutputTokens !in 16..131_072) throw ProviderException("输出 Token 上限需在 16 至 131072 之间")
-        if (config.reasoning !in setOf("", "none", "minimal", "low", "medium", "high", "xhigh")) throw ProviderException("推理程度设置无效")
+        try { ProviderProtocol.validateOptions(config) }
+        catch (error: IllegalArgumentException) { throw ProviderException(error.message ?: "生成参数无效") }
+        if (config.transcriptionPrompt.length > 32000) throw ProviderException("转写提示过长")
     }
 
     private fun validateImage(data: String) {

@@ -12,6 +12,12 @@ internal data class AppConfig(
     val maxOutputTokens: Int = 4096,
     val reasoning: String = "",
     val webSearch: Boolean = false,
+    val verbosity: String = "",
+    val temperature: Double? = null,
+    val topP: Double? = null,
+    val transcriptionPrompt: String = "",
+    val audioOutput: String = "interpret",
+    val textQuestion: String = "请将选中的文字翻译成中文，并按需要解释语境。",
 ) {
     override fun toString() = "AppConfig(credentials redacted)"
 }
@@ -24,4 +30,7 @@ internal data class StoredConversation(
     val messages: List<ChatMessage>,
     val evidence: String,
     val transcript: String = "",
+    val kind: String = "text",
+    val status: String = "已完成",
+    val sourceText: String = "",
 )

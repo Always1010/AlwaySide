@@ -10,6 +10,25 @@ import java.net.URL
 import java.util.concurrent.CancellationException
 
 class ProviderProtocolTest {
+    @Test fun optionalGenerationOptionsAreOnlySentWhenSet() {
+        assertTrue(ProviderProtocol.responseOptions(AppConfig(maxOutputTokens = 0)).isEmpty())
+        val options = ProviderProtocol.responseOptions(AppConfig(maxOutputTokens = 16, reasoning = "max", verbosity = "high", temperature = 0.4, webSearch = true))
+        assertEquals(16, options["max_output_tokens"])
+        assertEquals(mapOf("effort" to "max"), options["reasoning"])
+        assertEquals(mapOf("verbosity" to "high"), options["text"])
+        assertEquals(0.4, options["temperature"])
+        assertEquals(listOf(mapOf("type" to "web_search")), options["tools"])
+        assertEquals(0.7, ProviderProtocol.responseOptions(AppConfig(topP = 0.7))["top_p"])
+    }
+
+    @Test fun incompatibleOrOutOfRangeOptionsAreRejectedBeforeNetworking() {
+        listOf(AppConfig(maxOutputTokens = 15), AppConfig(temperature = 2.1), AppConfig(temperature = Double.NaN),
+            AppConfig(topP = -0.1), AppConfig(temperature = 0.5, topP = 0.5), AppConfig(reasoning = "unknown"),
+            AppConfig(verbosity = "unknown"), AppConfig(audioOutput = "unknown")).forEach { config ->
+            assertThrows(IllegalArgumentException::class.java) { ProviderProtocol.responseOptions(config) }
+        }
+    }
+
     @Test fun onlyCredentialFreeHttpsV1EndpointsAreAllowed() {
         assertEquals("https://api.openai.com/v1/responses", ProviderProtocol.endpoint("https://api.openai.com/v1/", "responses").toString())
         assertEquals("https://example.com/proxy/v1/audio/transcriptions", ProviderProtocol.endpoint("https://example.com/proxy/v1", "audio/transcriptions").toString())

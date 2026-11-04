@@ -30,6 +30,12 @@ internal class SettingsStore(context: Context) {
             maxOutputTokens = data.optInt("maxOutputTokens", defaults.maxOutputTokens),
             reasoning = data.optString("reasoning", defaults.reasoning),
             webSearch = data.optBoolean("webSearch", defaults.webSearch),
+            verbosity = data.optString("verbosity", defaults.verbosity),
+            temperature = if (data.isNull("temperature")) null else data.getDouble("temperature"),
+            topP = if (data.isNull("topP")) null else data.getDouble("topP"),
+            transcriptionPrompt = data.optString("transcriptionPrompt", defaults.transcriptionPrompt),
+            audioOutput = data.optString("audioOutput", defaults.audioOutput),
+            textQuestion = data.optString("textQuestion", defaults.textQuestion),
         )
     }
 
@@ -48,6 +54,12 @@ internal class SettingsStore(context: Context) {
             put("maxOutputTokens", config.maxOutputTokens)
             put("reasoning", config.reasoning.trim())
             put("webSearch", config.webSearch)
+            put("verbosity", config.verbosity)
+            put("temperature", config.temperature)
+            put("topP", config.topP)
+            put("transcriptionPrompt", config.transcriptionPrompt)
+            put("audioOutput", config.audioOutput)
+            put("textQuestion", config.textQuestion)
         }
         val edit = prefs.edit().putString("config", data.toString())
         if (encrypted == null) edit.remove("credential") else edit.putString("credential", encrypted)
@@ -126,9 +138,8 @@ internal class SettingsStore(context: Context) {
             }
             require(config.model.isNotBlank() && config.transcriptionModel.isNotBlank()) { "模型名称不能为空" }
             require(config.model.length <= 200 && config.transcriptionModel.length <= 200) { "模型名称过长" }
-            require(config.maxOutputTokens in 1..131072) { "最大输出 tokens 请填写 1 至 131072 的整数" }
-            require(config.reasoning in setOf("", "none", "minimal", "low", "medium", "high", "xhigh")) { "推理程度请使用空白、none、minimal、low、medium、high 或 xhigh" }
-            require(listOf(config.instructions, config.defaultQuestion, config.audioQuestion).all { it.length <= 32000 }) { "单项提示词不能超过 32000 字符" }
+            ProviderProtocol.validateOptions(config)
+            require(listOf(config.instructions, config.defaultQuestion, config.audioQuestion, config.transcriptionPrompt, config.textQuestion).all { it.length <= 32000 }) { "单项提示词不能超过 32000 字符" }
             require(config.apiKey.length <= 8192 && config.apiKey.none { it.isWhitespace() }) { "API Key 不能包含空白字符" }
         }
     }

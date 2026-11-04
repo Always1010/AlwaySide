@@ -50,10 +50,33 @@ internal object ProviderProtocol {
             uri.rawQuery != null || uri.rawFragment != null || uri.port !in -1..65535 ||
             uri.port == 0 || uri.rawPath != uri.path || uri.normalize() != uri ||
             !uri.path.orEmpty().endsWith("/v1") || uri.path.orEmpty().contains("//") ||
-            route !in setOf("responses", "audio/transcriptions")) {
+            route !in setOf("responses", "audio/transcriptions", "models")) {
             throw ProviderException("API 地址无效，请使用 HTTPS 且以 /v1 结尾，不含账号、查询或片段")
         }
         return URL("${uri.toASCIIString()}/$route")
+    }
+
+    fun validateOptions(config: AppConfig) {
+        require(config.maxOutputTokens == 0 || config.maxOutputTokens in 16..131072) { "最大输出 tokens 请留空或填写 16 至 131072 的整数" }
+        require(config.reasoning in setOf("", "none", "minimal", "low", "medium", "high", "xhigh", "max")) { "推理程度设置无效" }
+        require(config.verbosity in setOf("", "low", "medium", "high")) { "回答详细程度设置无效" }
+        require(config.temperature == null || (config.temperature.isFinite() && config.temperature in 0.0..2.0)) { "temperature 请填写 0 至 2 的数值" }
+        require(config.topP == null || (config.topP.isFinite() && config.topP in 0.0..1.0)) { "top_p 请填写 0 至 1 的数值" }
+        require(config.temperature == null || config.topP == null) { "temperature 与 top_p 请选择其中一项" }
+        require(config.audioOutput in setOf("transcript", "translate", "interpret")) { "音频输出方式无效" }
+    }
+
+    /** Values are omitted unless explicitly configured; never downgrade a rejected request. */
+    fun responseOptions(config: AppConfig): Map<String, Any> {
+        validateOptions(config)
+        return linkedMapOf<String, Any>().apply {
+            if (config.maxOutputTokens != 0) put("max_output_tokens", config.maxOutputTokens)
+            if (config.reasoning.isNotBlank()) put("reasoning", mapOf("effort" to config.reasoning))
+            if (config.verbosity.isNotBlank()) put("text", mapOf("verbosity" to config.verbosity))
+            config.temperature?.let { put("temperature", it) }
+            config.topP?.let { put("top_p", it) }
+            if (config.webSearch) put("tools", listOf(mapOf("type" to "web_search")))
+        }
     }
 }
 
