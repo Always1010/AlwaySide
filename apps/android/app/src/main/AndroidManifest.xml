@@ -16,6 +16,8 @@
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".HistoryActivity" android:exported="false" />
         <activity android:name=".ChatActivity" android:exported="false" android:launchMode="singleTask" />
+        <activity android:name=".CapturePermissionActivity" android:exported="false"
+            android:taskAffinity="" android:excludeFromRecents="true" />
         <activity android:name=".ProcessTextActivity" android:exported="true" android:label="询问 AlwaySide">
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />

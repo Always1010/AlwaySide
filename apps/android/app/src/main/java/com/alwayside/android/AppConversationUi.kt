@@ -17,7 +17,7 @@ import java.util.Date
 internal fun Context.appIcon(resource: Int, description: String, action: () -> Unit) =
     iconButton(resource, description, action)
 
-internal fun Context.appHeader(back: (() -> Unit)? = null, assistant: (() -> Unit)? = null) = LinearLayout(this).apply {
+internal fun Context.appHeader(back: (() -> Unit)? = null) = LinearLayout(this).apply {
     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
     setPadding(dp(if (back == null) 22 else 8), dp(12), dp(10), dp(10))
     if (back != null) addView(appIcon(android.R.drawable.ic_menu_revert, "返回", back))
@@ -26,7 +26,6 @@ internal fun Context.appHeader(back: (() -> Unit)? = null, assistant: (() -> Uni
         addView(label("AlwaySide", 20f).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
         addView(label("留在当下，随手问一句。", 11f, true).apply { setPadding(0, dp(3), 0, 0) })
     }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (back != null) marginStart = dp(6) })
-    if (assistant != null) addView(appIcon(android.R.drawable.ic_menu_more, "悬浮助手与采集控制", assistant))
 }
 
 internal fun LinearLayout.addHistoryTabs(activity: Activity) {

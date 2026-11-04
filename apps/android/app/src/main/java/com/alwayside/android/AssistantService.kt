@@ -45,6 +45,8 @@ class AssistantService : Service() {
     private var recorder: PlaybackRecorder? = null
     private var finishingAudio = false
     private var audioManual = false
+    private var requestingConsent = false
+    private var captureContinuation: (() -> Unit)? = null
     private var player: MediaPlayer? = null
     private var lastKind = "photo"
     private val taps = TapSequence()
@@ -67,7 +69,7 @@ class AssistantService : Service() {
         override fun onStop() {
             if (!alive) return
             clearCapture()
-            ProbeState.lastEvent = "屏幕共享已停止，请从应用主界面重新授权"
+            ProbeState.lastEvent = "屏幕共享已结束，下次截图或录音时会重新申请"
             toast(ProbeState.lastEvent)
             foreground(false)
             showBubble()
@@ -143,6 +145,7 @@ class AssistantService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP || !Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
         try {
+            if(intent?.action == START || intent?.action == SHARE) requestingConsent=false
             foreground(intent?.action == SHARE || projection != null)
             if (intent?.action == SHARE && projection == null) {
                 @Suppress("DEPRECATION")
@@ -159,6 +162,14 @@ class AssistantService : Service() {
                 }
             }
             showBubble()
+            val requestedAction=intent?.getStringExtra("requestedAction")
+            val continuation=captureContinuation
+            captureContinuation=null
+            if(requestedAction in setOf(AssistantActions.SCREEN,AssistantActions.CROP,AssistantActions.AUDIO)) {
+                // The permission bridge delivers only as it leaves, with its close animation disabled.
+                // A screenshot additionally waits for two compositor frames before sampling a fresh frame.
+                main.post { if(alive) { if(continuation!=null)continuation() else dispatchAction(requestedAction!!) } }
+            }
             if (intent?.action == TEXT) {
                 val selected = intent.getStringExtra("selectedText").orEmpty().trim().take(12000)
                 if(selected.isNotBlank()) {
@@ -207,7 +218,7 @@ class AssistantService : Service() {
     private fun cancelGestures() { main.removeCallbacks(settleTaps); taps.cancel() }
 
     private fun showBubble() {
-        if (!alive || bubble != null || selector != null || gathering) return
+        if (!alive || bubble != null || selector != null || gathering || requestingConsent) return
         val size = screenSize()
         val position = preferences.ballPosition()
         val view = FrameLayout(this).apply { isClickable = true; isFocusable = true; accessible("AlwaySide，快捷手势可在设置中修改") }
@@ -304,6 +315,20 @@ class AssistantService : Service() {
         hideUnpinned()
         startActivity(Intent(this, type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
+    private fun requestCaptureConsent(action: String, continuation: (() -> Unit)? = null) {
+        if(!alive || requestingConsent)return
+        requestingConsent=true;captureContinuation=continuation;removeMenu();hideUnpinned()
+        try {
+            // Keep the visible overlay until startActivity: Android permits this user-initiated
+            // launch through SYSTEM_ALERT_WINDOW only while an overlay is actually visible.
+            startActivity(Intent(this,CapturePermissionActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("requestedAction",action).putExtra("needsCapture",projection==null))
+            removeBubble()
+        } catch(_:RuntimeException) {
+            requestingConsent=false;captureContinuation=null;showBubble();toast("无法打开系统授权，请返回应用后重试")
+        }
+    }
     private fun showMenu() {
         if (gathering || selector != null) return
         hideUnpinned(); removeMenu(); showBubble()
@@ -329,7 +354,6 @@ class AssistantService : Service() {
         items.addView(View(this).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)).apply{setMargins(dp(8),dp(4),dp(8),dp(4))})
         item(R.drawable.ic_line_history,"对话记录") { openApplication(MainActivity::class.java) }
         item(R.drawable.ic_line_settings,"设置") { openApplication(SettingsActivity::class.java) }
-        item(R.drawable.ic_line_stop,"停止助手") { stopSelf() }
         body.addView(ScrollView(this).apply{isVerticalScrollBarEnabled=false;addView(items)})
         val size=screenSize(); val ball=bubbleLayout
         val w=minOf(dp(164),size.first-dp(16)); val h=minOf(dp(rowCount*44+21),size.second-dp(100))
@@ -489,11 +513,12 @@ class AssistantService : Service() {
     private fun captureNew(crop:Boolean){
         if(recorder!=null){toast("请先完成或取消录音");return}
         if(gathering){toast("正在取得画面，请稍候");return}
-        if(frames==null){toast("请先从应用开启屏幕共享");openApplication(MainActivity::class.java);return}
+        if(frames==null){requestCaptureConsent(if(crop)AssistantActions.CROP else AssistantActions.SCREEN);return}
         val node=fresh("photo");capture(node,crop,false){archivePrepared(node);showWindow(node);if(config.autoAskImage)submitDefault(node)}
     }
     private fun capture(node:FloatingConversation,crop:Boolean,reuse:Boolean,after:()->Unit){
-        val source=frames?:run{toast("屏幕共享已停止，请重新授权");return}
+        if(!alive || node.detached || nodes[node.kind]!==node)return
+        val source=frames?:run{requestCaptureConsent(AssistantActions.SCREEN){capture(node,crop,reuse,after)};return}
         val oldBounds=if(reuse)node.bounds else null;val oldSize=node.sourceSize;val oldRotation=node.rotation
         val rotation=screenRotation();val id=++captureEpoch
         gathering=true;captureOwner=node;removeMenu();removeBubble();removeSelector()
@@ -525,7 +550,8 @@ class AssistantService : Service() {
     }
     private fun startRecording(){
         if(recorder!=null||finishingAudio||gathering)return
-        val source=projection?:run{toast("请先从应用开启屏幕共享与音频权限");openApplication(MainActivity::class.java);return}
+        if(projection==null || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestCaptureConsent(AssistantActions.AUDIO);return}
+        val source=projection?:return
         if(nodes["audio"]?.chat?.busy==true){toast("请先等待或取消当前音频回答");showWindow(nodes.getValue("audio"));return}
         removeMenu();hideUnpinned();stopPlayback();audioManual=false
         val token=recordingGate.begin();val next=PlaybackRecorder(this,main);recorder=next
@@ -564,7 +590,7 @@ class AssistantService : Service() {
     private fun clearCapture(){cancelRecording(false);captureEpoch++;captureOwner=null;gathering=false;frames?.close();frames=null;val old=projection;projection=null;old?.unregisterCallback(captureCallback);old?.stop();ProbeState.sharing=false;removeSelector();nodes.values.forEach{it.root?.visibility=View.VISIBLE}}
     override fun onConfigurationChanged(newConfig:Configuration){super.onConfigurationChanged(newConfig);captureEpoch++;captureOwner=null;gathering=false;removeMenu();removeSelector();removeBubble();nodes.values.forEach{hideWindow(it)};if(Build.VERSION.SDK_INT<34){val size=screenSize();frames?.resize(size.first,size.second)};showBubble()}
     override fun onDestroy(){
-        alive=false;main.removeCallbacksAndMessages(null);ActiveConversationBridge.detachHandler=null
+        alive=false;captureContinuation=null;main.removeCallbacksAndMessages(null);ActiveConversationBridge.detachHandler=null
         preferences.removeListener(preferencesListener);cancelRecording(false);stopPlayback()
         nodes.values.forEach{hideWindow(it);it.chat.close();it.clip?.file?.delete()};nodes.clear()
         clearCapture();removeMenu();removeBubble();removeSelector();mediaWorker.shutdown()

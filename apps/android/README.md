@@ -60,6 +60,7 @@ GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTe
 | --- | --- |
 | MainActivity / SettingsActivity / HistoryActivity / ChatActivity | 应用对话主页、分类设置、权限控制与原生聊天 |
 | ProcessTextActivity | 系统 PROCESS_TEXT / SEND 纯文本入口与无悬浮权限回退 |
+| CapturePermissionActivity | 悬浮动作按需申请音频／屏幕采集授权，成功后继续原动作，取消时恢复悬浮球 |
 | AssistantService | 前台服务、小球手势、贴球菜单、三类独立小窗与采集 |
 | InteractionPreferences / TapSequence | 外观与分状态动作、窗口记忆、多击及取消录音隔离 |
 | ActiveConversationBridge | 在悬浮与应用内页面间移交活动会话与媒体所有权 |
