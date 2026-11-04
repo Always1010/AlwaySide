@@ -139,6 +139,7 @@ class AssistantService : Service() {
         var source: TextView? = null
         var sourceImage: ImageView? = null
         var transcript: TextView? = null
+        var transcriptCopy: View? = null
         var input: TextInputEditText? = null
         var composer: View? = null
         var composerToggle: MaterialButton? = null
@@ -306,6 +307,7 @@ class AssistantService : Service() {
             showWindow(node, layout)
             node.sourceImage?.visibility = if (imageVisible) View.VISIBLE else View.GONE
             node.transcript?.visibility = if (transcriptVisible) View.VISIBLE else View.GONE
+            updateTranscriptCopy(node)
             node.input?.let { input ->
                 if (selectionStart >= 0 && selectionEnd >= 0) input.setSelection(selectionStart.coerceAtMost(input.length()), selectionEnd.coerceAtMost(input.length()))
                 if (focused) input.requestFocus()
@@ -511,6 +513,7 @@ class AssistantService : Service() {
     private fun hideWindow(node: FloatingConversation, stopAudio: Boolean = true) {
         node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);remove(it) }
         node.root=null;node.layout=null;node.response=null;node.status=null;node.source=null;node.sourceImage=null;node.transcript=null
+        node.transcriptCopy=null
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
         node.composer=null;node.composerToggle=null
         if (stopAudio) stopPlayback()
@@ -550,10 +553,20 @@ class AssistantService : Service() {
         node.source=uiContext.label("",11f,true).apply { minHeight=dp(28); gravity=Gravity.CENTER_VERTICAL;isClickable=true;accessible(when(node.kind){"photo"->"展开本次截图";"audio"->"展开转写原文";else->"展开所选原文"});setOnClickListener {
             if(node.kind=="photo")node.sourceImage?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE}
             else if(node.kind=="text") {node.originalExpanded=!node.originalExpanded;node.transcript?.apply{maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}}
-            else node.transcript?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE}
+            else node.transcript?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE;updateTranscriptCopy(node)}
         }}.also{sourceContent.addView(it)}
         node.sourceImage=ImageView(uiContext).apply { scaleType=ImageView.ScaleType.FIT_CENTER;visibility=View.GONE;accessible("本次截图预览");node.frame?.let{setImageBitmap(it.bitmap)} }.also{sourceContent.addView(it,LinearLayout.LayoutParams(-1,dp(110)))}
         node.transcript=uiContext.label("",12f,true).apply { visibility=View.GONE;setTextIsSelectable(true);setLineSpacing(0f,1.3f);setPadding(0,dp(8),0,dp(8)) }.also{sourceContent.addView(it)}
+        if(node.kind=="audio")node.transcriptCopy=icon(R.drawable.ic_copy,"复制转写原文") {
+            val text=node.chat.transcript
+            if(text.isNotBlank())runCatching {
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("AlwaySide 转写原文",text))
+            }.onSuccess { toast("已复制转写原文") }.onFailure { toast("复制失败，可长按文字选择复制") }
+        }.apply {
+            visibility=View.GONE;iconSize=dp(14)
+            minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
+            setPadding(dp(9),0,dp(9),0)
+        }.also { sourceContent.addView(it,LinearLayout.LayoutParams(dp(32),dp(32)).apply { gravity=Gravity.END }) }
         if(node.kind=="text")node.transcript?.apply{visibility=View.VISIBLE;maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}
         node.response=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL;setPadding(0,dp(12),0,0) }.also{content.addView(it)}
         node.status=uiContext.label("",11f,true).apply{setPadding(0,dp(6),0,0)}.also{content.addView(it)}
@@ -698,11 +711,15 @@ class AssistantService : Service() {
             else->true
         }}
     }
+    private fun updateTranscriptCopy(node:FloatingConversation) {
+        node.transcriptCopy?.visibility=if(node.transcript?.visibility==View.VISIBLE&&node.chat.transcript.isNotBlank())View.VISIBLE else View.GONE
+    }
     private fun refresh(node:FloatingConversation){
         if(!alive||node.detached)return
         ProbeState.requesting=nodes.values.any{it.chat.busy};bubbleVisual?.working=ProbeState.requesting
         node.source?.text=when(node.kind){"photo"->imageDescription(node)+"  ▾";"text"->"所选原文  ▾";else->if(node.chat.transcript.isNotBlank())"转写原文 · ${String.format(Locale.getDefault(),"%.1f",node.clip?.seconds ?: 0f)} 秒  ▾" else "内部音频 · 不附图"}
         node.transcript?.text=if(node.kind=="text")node.chat.sourceText else node.chat.transcript
+        updateTranscriptCopy(node)
         val messages=buildList {
             node.chat.messages.withIndex().toList().takeLast(12).forEach { (index,message) ->
                 if(!(node.automaticFirstQuestion&&index==0&&message.role=="user")) add((message.role=="user") to message.text)
