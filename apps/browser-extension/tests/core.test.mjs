@@ -146,6 +146,19 @@ test('idle timeout stops a stuck transport without real waiting', async context 
   await assert.rejects(pending, error => error.code === 'timeout' && error.partialAnswer.complete === false);
 });
 
+test('cancellation from a text event prevents a terminal frame in the same read from completing', async () => {
+  for (const stopOnTerminal of [false, true]) {
+    const controller = new AbortController();
+    let textEvents = 0;
+    await assert.rejects(request({ signal: controller.signal,
+      fetchImpl: async () => responseFor([delta('部分'), terminal()], { chunkSize: 100000 }),
+      onEvent: event => {
+        if (event.type === 'text' && ++textEvents === (stopOnTerminal ? 2 : 1)) controller.abort();
+      },
+    }), { name: 'AbortError' });
+  }
+});
+
 test('keys are redacted across frames, terminal text, titles and raw transport errors', async () => {
   const updates = [];
   const result = await request({ fetchImpl: async () => responseFor([delta(`前${KEY.slice(0, 9)}`), delta(KEY.slice(9)), terminal({ text: `前${KEY}后` })]), onEvent: event => updates.push(event) });

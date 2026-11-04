@@ -142,6 +142,7 @@ export async function streamAnswer({ settings: rawSettings, apiKey, evidence = n
     const decoder = new TextDecoder('utf-8', { fatal: true });
     let buffer = '', dataLines = [], bytes = 0;
     const dispatch = () => {
+      if (signal?.aborted || controller.signal.aborted) throw cancelled();
       if (!dataLines.length) return null;
       const data = dataLines.join('\n'); dataLines = [];
       if (data === '[DONE]') throw problem('流已结束，但未收到回答终态；已保留部分内容。', 'disconnected');
@@ -163,6 +164,7 @@ export async function streamAnswer({ settings: rawSettings, apiKey, evidence = n
         const answer = parseTerminal(event.response, settings, key);
         if (sawSearch && answer.searchState === 'notUsed') throw problem('服务的检索过程与最终状态不一致。');
         onEvent({ type: 'text', text: answer.text });
+        if (signal?.aborted || controller.signal.aborted) throw cancelled();
         return answer;
       }
       return null;
