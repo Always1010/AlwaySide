@@ -139,3 +139,16 @@ test("a stale history snapshot cannot overwrite another window's updates", async
   await assert.rejects(saveSessions([]), /历史已在其他窗口更新/);
   assert.deepEqual(localData.sessions, [{ external: "new data is preserved" }]);
 });
+
+test("storage property reordering does not cause a false conflict on consecutive saves", async () => {
+  const { api } = mockBrowser();
+  const get = api.storage.local.get;
+  api.storage.local.get = async (key) => JSON.parse(JSON.stringify(await get(key), (_name, value) => value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().reverse().map((name) => [name, value[name]])) : value));
+  await loadSessions();
+  const now = "2026-11-04T01:00:00.000Z";
+  const session = { version: 1, id: "ordering", title: "保存顺序", createdAt: now, updatedAt: now, evidence: { kind: "text", text: "资料", title: "来源", url: "https://example.org/", capturedAt: now }, turns: [] };
+  await saveSessions([session]);
+  await saveSessions([{ ...session, title: "再次保存" }]);
+  assert.equal((await loadSessions())[0].title, "再次保存");
+});

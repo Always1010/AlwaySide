@@ -187,11 +187,19 @@ function checkedSessions(raw) {
   return normalized;
 }
 
+function historyFingerprint(raw) {
+  // storage.local may reconstruct objects with a different property order.
+  // Sort object keys recursively while preserving meaningful array order.
+  return JSON.stringify(raw ?? [], (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]))
+    : value);
+}
+
 export async function loadSessions() {
   return withHistoryLock(async () => {
     const raw = await readStorage("local", STORAGE_KEYS.sessions);
     const sessions = raw === undefined ? [] : checkedSessions(raw);
-    sessionsSnapshot = JSON.stringify(raw ?? []);
+    sessionsSnapshot = historyFingerprint(raw);
     return sessions;
   });
 }
@@ -200,12 +208,12 @@ export async function saveSessions(sessions) {
   const normalized = checkedSessions(sessions);
   await withHistoryLock(async () => {
     const raw = await readStorage("local", STORAGE_KEYS.sessions);
-    const current = JSON.stringify(raw ?? []);
+    const current = historyFingerprint(raw);
     if ((sessionsSnapshot === undefined && raw !== undefined) || (sessionsSnapshot !== undefined && sessionsSnapshot !== current)) {
       throw new Error("历史已在其他窗口更新，本次未覆盖。请重新加载历史后重试，当前对话仍保留在侧栏。");
     }
     await writeStorage("local", STORAGE_KEYS.sessions, normalized);
-    sessionsSnapshot = JSON.stringify(normalized);
+    sessionsSnapshot = historyFingerprint(normalized);
   });
 }
 
