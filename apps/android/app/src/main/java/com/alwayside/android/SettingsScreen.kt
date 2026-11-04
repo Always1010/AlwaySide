@@ -332,7 +332,7 @@ internal class SettingsScreen(
 
     private fun windowPage(config: AppConfig, interaction: InteractionConfig) {
         check("collapseFollowUpByDefault", "小窗口追问输入框默认收起", interaction.collapseFollowUpByDefault)
-        note("呼出小窗口时优先显示内容，点左下角箭头展开追问。关闭后默认显示输入框；修改从下次呼出时生效。")
+        note("呼出小窗口时优先显示内容，点左下角“继续提问”展开输入框。关闭后默认显示输入框；修改从下次呼出时生效。")
         check("rememberWindowPosition", "分别记住截图窗与音频窗的位置", interaction.rememberWindowPosition)
         check("rememberWindowSize", "分别记住截图窗与音频窗的尺寸", interaction.rememberWindowSize)
         check("defaultPinned", "新会话窗口默认固定", interaction.defaultPinned)

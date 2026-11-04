@@ -577,10 +577,19 @@ class AssistantService : Service() {
             iconSize=dp(14);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
             setPadding(dp(9),0,dp(9),0)
         }.also{controls.addView(it,LinearLayout.LayoutParams(dp(32),dp(32)))}
-        node.composerToggle=compactControl(R.drawable.ic_line_chevron_up,"展开追问输入框") {
-            setComposerExpanded(node,!node.composerExpanded,fromUser=true)
-        }
-        controls.addView(View(uiContext),LinearLayout.LayoutParams(0,1,1f))
+        val followUpEntry=FrameLayout(uiContext)
+        controls.addView(followUpEntry,LinearLayout.LayoutParams(0,dp(32),1f))
+        node.composerToggle=MaterialButton(uiContext,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
+            applyActionStyle()
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelMedium)
+            iconSize=dp(14);iconPadding=dp(4);iconGravity=MaterialButton.ICON_GRAVITY_TEXT_END
+            minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
+            insetLeft=0;insetRight=0;insetTop=0;insetBottom=0
+            setPadding(dp(8),0,dp(8),0);cornerRadius=dp(8)
+            maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
+            backgroundTintList=android.content.res.ColorStateList.valueOf(TONAL_SURFACE)
+            setOnClickListener { setComposerExpanded(node,!node.composerExpanded,fromUser=true) }
+        }.also { followUpEntry.addView(it,FrameLayout.LayoutParams(-2,-1,Gravity.START or Gravity.CENTER_VERTICAL)) }
         node.cancel=compactControl(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答") { node.chat.cancel() }
         node.retry=compactControl(android.R.drawable.ic_popup_sync,"重试原问题与证据") { if(!gathering)node.chat.retry() }
         node.copy=compactControl(R.drawable.ic_copy,"复制最近回答") {
@@ -667,8 +676,15 @@ class AssistantService : Service() {
     private fun updateComposerToggle(node:FloatingConversation) {
         node.composerToggle?.apply {
             icon=uiContext.prototypeIcon(if(node.composerExpanded)R.drawable.ic_line_chevron_down else R.drawable.ic_line_chevron_up)
+            text=when {
+                node.composerExpanded -> "收起输入框"
+                node.draft.isNotBlank() -> "继续编辑"
+                else -> "继续提问"
+            }
             isActivated=node.draft.isNotBlank()
-            iconTint=android.content.res.ColorStateList.valueOf(if(isActivated)ACCENT else MUTED)
+            val color=if(isActivated)ACCENT else INK
+            setTextColor(color)
+            iconTint=android.content.res.ColorStateList.valueOf(color)
             accessible(when {
                 node.composerExpanded -> "收起追问输入框"
                 node.draft.isNotBlank() -> "展开追问输入框，继续编辑草稿"
