@@ -302,6 +302,7 @@ private struct AudioInputView: View {
     @State private var selectedURL: URL?
     @State private var transcribing = false
     @State private var transcript = ""
+    @State private var hasTranscript = false
     @State private var errorMessage: String?
     @State private var work: Task<Void, Never>?
     @State private var sessionAtOpen: UUID?
@@ -337,7 +338,7 @@ private struct AudioInputView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                if !transcript.isEmpty {
+                if hasTranscript {
                     Section("核对文字") {
                         TextEditor(text: $transcript).frame(minHeight: 140)
                         Text("转写作为资料附加，保留完整文字；已有回答时会新建对话并保留当前图片。最多 20,000 字。").font(.caption).foregroundStyle(.secondary)
@@ -377,7 +378,7 @@ private struct AudioInputView: View {
     }
     private func startRecording(microphone: Bool) {
         guard sessionAtOpen == model.sessionID else { return }
-        errorMessage = nil; clearSelectedAudio(); transcript = ""
+        errorMessage = nil; clearSelectedAudio(); transcript = ""; hasTranscript = false
         work = Task { @MainActor in
             do { if microphone { try await recorder.startMicrophone() } else { try await recorder.start() } }
             catch { errorMessage = error.localizedDescription }
@@ -390,7 +391,7 @@ private struct AudioInputView: View {
     }
     private func replaceAudio(_ url: URL) {
         if selectedURL != url { clearSelectedAudio() }
-        selectedURL = url; transcript = ""
+        selectedURL = url; transcript = ""; hasTranscript = false
     }
     private func clearSelectedAudio() { if let url = selectedURL { try? FileManager.default.removeItem(at: url) }; selectedURL = nil }
     private func importAudio(_ result: Result<URL, Error>) {
@@ -416,6 +417,7 @@ private struct AudioInputView: View {
                 let text = try await AudioTranscriptionClient().transcribe(fileURL: file, key: key)
                 try Task.checkCancellation()
                 transcript = text
+                hasTranscript = true
             } catch { if !Task.isCancelled { errorMessage = error.localizedDescription } }
         }
     }
