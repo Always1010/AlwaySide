@@ -18,6 +18,11 @@ actor ScreenshotInbox {
         let failure: String?
     }
 
+    struct ReceiptFailure: Sendable {
+        let id: UUID
+        let message: String
+    }
+
     private var directory: URL {
         get throws {
             let support = try FileManager.default.url(for: .applicationSupportDirectory,
@@ -41,7 +46,7 @@ actor ScreenshotInbox {
         latestReceiptID = receiptID
         isReceiving = true
         defer { if latestReceiptID == receiptID { isReceiving = false } }
-        await MainActor.run { NotificationCenter.default.post(name: Self.willReceive, object: nil) }
+        await MainActor.run { NotificationCenter.default.post(name: Self.willReceive, object: receiptID) }
         do {
             guard latestReceiptID == receiptID else { return }
             // Invalidate the old durable image before conversion. If the process is interrupted,
@@ -64,8 +69,15 @@ actor ScreenshotInbox {
         } catch {
             guard latestReceiptID == receiptID else { return }
             // An invalid newer input replaces any pending older screenshot with an explicit failure.
-            try write(Pending(id: receiptID, receivedAt: receivedAt, jpegData: nil,
-                              failure: "截图传入失败，请重新运行「截屏 → 接收截图」。\(error.localizedDescription)"))
+            do {
+                try write(Pending(id: receiptID, receivedAt: receivedAt, jpegData: nil,
+                                  failure: "截图传入失败，请重新运行「截屏 → 接收截图」。\(error.localizedDescription)"))
+            } catch {
+                isReceiving = false
+                await announceChange(failure: ReceiptFailure(id: receiptID,
+                    message: "无法保存本次截图，请检查设备存储空间后重新运行快捷指令。"))
+                throw error
+            }
             isReceiving = false
             await announceChange()
             throw error
@@ -74,9 +86,17 @@ actor ScreenshotInbox {
     }
 
     private func write(_ pending: Pending) throws {
-        let data = try JSONEncoder().encode(pending)
-        guard data.count <= Self.maximumEnvelopeBytes else { throw ScreenshotHandoffError.invalidImage }
-        try data.write(to: pendingURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let url = try pendingURL
+        do {
+            let data = try JSONEncoder().encode(pending)
+            guard data.count <= Self.maximumEnvelopeBytes else { throw ScreenshotHandoffError.invalidImage }
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } catch {
+            // Atomic replacement keeps the previous file on failure. Never deliberately retain
+            // an older image after a newer receipt failed, even when its failure record cannot be written.
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
     }
 
     func pending() throws -> Pending? {
@@ -116,8 +136,8 @@ actor ScreenshotInbox {
         }
     }
 
-    private func announceChange() async {
-        await MainActor.run { NotificationCenter.default.post(name: Self.didChange, object: nil) }
+    private func announceChange(failure: ReceiptFailure? = nil) async {
+        await MainActor.run { NotificationCenter.default.post(name: Self.didChange, object: failure) }
     }
 }
 
@@ -127,9 +147,15 @@ enum ScreenshotInboxDelivery {
     private static var consuming = false
     private static var generation = UUID()
 
-    static func begin(using model: CompanionModel) {
-        generation = UUID()
+    static func begin(using model: CompanionModel, receiptID: UUID) {
+        generation = receiptID
         model.beginScreenshotImport()
+    }
+
+    static func fail(using model: CompanionModel, receiptID: UUID, message: String) {
+        guard generation == receiptID, model.isImporting else { return }
+        generation = UUID()
+        model.receiveScreenshotFailure(message: message)
     }
 
     static func consume(using model: CompanionModel) async {

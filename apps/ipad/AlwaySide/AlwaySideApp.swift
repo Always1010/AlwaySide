@@ -22,13 +22,17 @@ struct AlwaySideApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
                     refreshKeyStatusIfAvailable()
                 }
-                .onReceive(NotificationCenter.default.publisher(for: ScreenshotInbox.didChange)) { _ in
-                    if scenePhase == .active {
+                .onReceive(NotificationCenter.default.publisher(for: ScreenshotInbox.didChange)) { notification in
+                    if let failure = notification.object as? ScreenshotInbox.ReceiptFailure {
+                        ScreenshotInboxDelivery.fail(using: model, receiptID: failure.id, message: failure.message)
+                    } else if scenePhase == .active {
                         Task { await ScreenshotInboxDelivery.consume(using: model) }
                     }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: ScreenshotInbox.willReceive)) { _ in
-                    if scenePhase == .active { ScreenshotInboxDelivery.begin(using: model) }
+                .onReceive(NotificationCenter.default.publisher(for: ScreenshotInbox.willReceive)) { notification in
+                    if let receiptID = notification.object as? UUID {
+                        ScreenshotInboxDelivery.begin(using: model, receiptID: receiptID)
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeKeyNotification)) { notification in
                     guard let window = notification.object as? UIWindow,
