@@ -31,11 +31,14 @@ private struct ChatHistoryContractChecks {
         expect(store.search("全文检索标记").first?.id == id, "search full answer")
         expect(store.search("audio text").first?.id == id, "search complete attached transcript")
 
-        // A missing stale index is recovered from atomic conversation documents, without reading all JPEGs.
-        try FileManager.default.removeItem(at: root.appendingPathComponent("index.json"))
+        expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("index.json").path), "save needs no redundant index")
+        // A legacy index path that cannot be overwritten must not make a successful
+        // document save or directory deletion appear to fail.
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("index.json"), withIntermediateDirectories: false)
+        try Data("legacy blocker".utf8).write(to: root.appendingPathComponent("index.json/keep"))
         let reopened = ChatSessionStore(root: root)
         let (session, attachment) = try reopened.load(id)
-        expect(reopened.summaries.count == 1, "recover index")
+        expect(reopened.summaries.count == 1, "rebuild from documents despite blocked legacy index")
         expect(session.turns[0].answer == answer, "complete answer persisted")
         expect(session.audioTranscript == transcript, "long transcript round trip without question truncation")
         expect(session.turns[0].turn.citations == [source], "sources persisted")
@@ -46,6 +49,7 @@ private struct ChatHistoryContractChecks {
         try reopened.save(id: id, provider: .openAI, snapshot: snapshot, turns: [saved, interrupted], audioTranscript: transcript)
         let afterPartial = try reopened.load(id).0
         expect(afterPartial.turns.count == 2 && !afterPartial.turns[1].complete, "interrupted output preserved distinctly")
+        expect(ChatSessionStore(root: root).summaries.count == 1, "save succeeds despite blocked legacy index")
 
         do {
             try reopened.save(id: id, provider: .openAI, snapshot: snapshot,
@@ -63,6 +67,7 @@ private struct ChatHistoryContractChecks {
         } catch ChatSessionStore.StorageError.sessionLimit { checks += 1 }
         expect(reopened.summaries.count == ChatSessionStore.maximumSessions, "session cap does not evict")
         expect(tryCount(reopened, id: id) == 2, "oldest content retained at capacity")
+        try reopened.delete(id)
         try reopened.delete(id)
         expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(id.uuidString).path), "delete removes messages and image")
         expect(ChatSessionStore(root: root).summaries.count == ChatSessionStore.maximumSessions - 1, "deletion survives reopen")

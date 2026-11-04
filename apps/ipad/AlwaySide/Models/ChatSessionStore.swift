@@ -42,8 +42,8 @@ final class ChatSessionStore {
     init(root: URL? = nil) {
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AlwaySide/Conversations", isDirectory: true)
-        // Rebuild the small text index from atomic session documents. This recovers a save
-        // that reached disk before an interrupted index write, without decoding any JPEG.
+        // Atomic session documents are the source of truth; no second index write can
+        // turn an already-persisted save or deletion into an apparent failure.
         if let directories = try? FileManager.default.contentsOfDirectory(at: self.root,
             includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
             summaries = directories.compactMap { directory in
@@ -93,17 +93,16 @@ final class ChatSessionStore {
         try document.write(to: directory.appendingPathComponent("conversation.json"),
             options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         excludeFromBackup(directory)
+        excludeFromBackup(root)
         summaries.removeAll { $0.id == id }
         summaries.insert(ChatSessionSummary(id: id, title: title, updatedAt: session.updatedAt,
             provider: provider.rawValue, preview: String((recent.last?.answer ?? "").prefix(100))), at: 0)
-        try saveIndex()
     }
 
     func delete(_ id: UUID) throws {
         // Remove the attachment and messages together, then update the local list.
         if FileManager.default.fileExists(atPath: folder(id).path) { try FileManager.default.removeItem(at: folder(id)) }
         summaries.removeAll { $0.id == id }
-        try saveIndex()
     }
 
     func deleteAll() throws {
@@ -130,12 +129,6 @@ final class ChatSessionStore {
     }
 
     private func folder(_ id: UUID) -> URL { root.appendingPathComponent(id.uuidString, isDirectory: true) }
-    private func saveIndex() throws {
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try JSONEncoder().encode(summaries).write(to: root.appendingPathComponent("index.json"),
-            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        excludeFromBackup(root)
-    }
     private func excludeFromBackup(_ url: URL) {
         var mutableURL = url
         var values = URLResourceValues()
