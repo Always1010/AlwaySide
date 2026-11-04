@@ -125,7 +125,7 @@ internal class ChatSession(
                     messages.add(ChatMessage("assistant", answer))
                     while (messages.size > 40) { messages.removeAt(0); messages.removeAt(0) }
                     transcript = words; partial = ""; question = ""; busy = false; retry = null; cancellation = null
-                    status = "已完成 · 追问会附最近 24 条文字消息"
+                    status = if (messages.size >= 24) "已完成 · 后续追问最多参考最近 24 条文字消息" else "已完成"
                     archive()
                     notifyChanged()
                 }

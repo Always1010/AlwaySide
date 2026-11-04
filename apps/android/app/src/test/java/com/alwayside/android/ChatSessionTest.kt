@@ -11,6 +11,17 @@ import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.TimeUnit
 
 class ChatSessionTest {
+    @Test fun completionOnlyExplainsContextLimitOnceTwentyFourMessagesAreAvailable() {
+        val h = Harness()
+        repeat(13) { round ->
+            h.session.submit(h.config, "question $round", null, "text")
+            h.worker.runNext(); h.drainMain()
+            assertEquals(if (round < 11) "已完成" else "已完成 · 后续追问最多参考最近 24 条文字消息", h.session.status)
+        }
+        assertEquals(24, h.gateway.calls.last().history.size)
+        assertEquals(h.session.status, h.saved.single().status)
+    }
+
     @Test fun searchChoiceIsScopedToTheRequestAndRetainedOnRetry() {
         val h = Harness()
         val defaults = h.config.copy(webSearch = false)
