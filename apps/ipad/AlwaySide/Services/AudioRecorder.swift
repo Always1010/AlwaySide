@@ -164,7 +164,6 @@ final class AudioRecorder: NSObject, ObservableObject {
                 var config = SCContentSharingPickerConfiguration()
                 config.showsMicrophoneControl = false
                 config.showsCameraControl = false
-                config.allowsChangingSelectedContent = false
                 picker.defaultConfiguration = config
                 let observer = AudioPickerObserver(selected: { [weak self] selection in
                     Task { @MainActor [weak self] in
