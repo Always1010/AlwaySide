@@ -38,7 +38,7 @@ internal class SettingsScreen(
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
         GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "位置、尺寸、默认固定与自动提问", android.R.drawable.ic_menu_crop),
-        MEDIA("历史与媒体", "截图保留策略与证据说明", android.R.drawable.ic_menu_recent_history),
+        MEDIA("历史与媒体", "录音时长、截图保留策略与证据说明", android.R.drawable.ic_menu_recent_history),
     }
 
     private lateinit var store: SettingsStore
@@ -345,6 +345,11 @@ internal class SettingsScreen(
     }
 
     private fun mediaPage(config: InteractionConfig) {
+        section("录音")
+        input("recordingMaxMinutes", "录音时长上限（分钟）", "默认 10；0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
+        note("默认 10 分钟。可填写 1～${RecordingLimits.MAX_MINUTES} 分钟，或填 0 手动结束。修改从下一段录音开始生效；达到上限后按自动处理设置继续。不限时长时，仍受设备存储和单个 WAV 文件约 2 GiB 的限制。")
+        note("较长录音会按顺序分段转写，再合并原文。")
+        section("历史截图")
         check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
         note("默认开启。保留会话首张原图和当前追问图片，从历史打开后可查看并继续使用。图片仅保存在应用私有目录，删除会话时一并删除。")
         note("仅影响新写入的历史，不补存旧截图；旧记录能否显示原图，取决于当时是否保存。")
@@ -377,7 +382,8 @@ internal class SettingsScreen(
         val open = {
             finishEditing {
                 val start = if (secret) "" else try {
-                    SettingsUpdate.TextField.valueOf(name).read(store.load())
+                    if (name == "recordingMaxMinutes") interactionStore.load().recordingMaxMinutes.toString()
+                    else SettingsUpdate.TextField.valueOf(name).read(store.load())
                 } catch (_: Exception) {
                     toast("无法读取配置，请先修复 API 连接")
                     return@finishEditing
@@ -406,6 +412,18 @@ internal class SettingsScreen(
     }
 
     private fun saveText(name: String, draft: String, secret: Boolean, valueView: TextView, error: (String) -> Unit) {
+        if (name == "recordingMaxMinutes") {
+            val minutes = draft.trim().toIntOrNull()
+            if (minutes == null || minutes !in 0..RecordingLimits.MAX_MINUTES) {
+                error("请输入 0～${RecordingLimits.MAX_MINUTES} 的整数，0 表示不限时长")
+                return
+            }
+            if (persistInteraction { it.copy(recordingMaxMinutes = minutes) }) {
+                valueView.text = minutes.toString()
+                closeEditor?.invoke()
+            } else error("保存失败，请重试")
+            return
+        }
         val update = SettingsUpdate.Text(SettingsUpdate.TextField.valueOf(name), draft)
         val save: (Boolean) -> Unit = { replace ->
             if (persist(update.copy(replaceSampling = replace), error)) {

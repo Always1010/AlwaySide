@@ -28,7 +28,9 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
     private var thread: Thread?=null
 
     @SuppressLint("MissingPermission")
-    fun start(projection: MediaProjection,onDone: (AudioClip?) -> Unit) {
+    fun start(projection: MediaProjection, maxMinutes: Int, onDone: (AudioClip?) -> Unit) {
+        val maxBytes = RecordingLimits.pcmBytes(maxMinutes)
+        val maxMillis = if (maxMinutes == 0) Long.MAX_VALUE else maxMinutes * 60_000L
         check(thread==null) { "录音仍在处理中" }
         check(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) { "请先在主界面允许音频权限" }
         val config=AudioPlaybackCaptureConfiguration.Builder(projection)
@@ -57,8 +59,8 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
                     val data=ShortArray(4096)
                     val encoded=ByteArray(data.size*2)
                     val startedAt=SystemClock.elapsedRealtime()
-                    while (!stopping.get() && bytes<MAX_BYTES && SystemClock.elapsedRealtime()-startedAt<120_000) {
-                        val count=audio.read(data,0,minOf(data.size,(MAX_BYTES-bytes)/2),AudioRecord.READ_NON_BLOCKING)
+                    while (!stopping.get() && bytes<maxBytes && SystemClock.elapsedRealtime()-startedAt<maxMillis) {
+                        val count=audio.read(data,0,minOf(data.size,(maxBytes-bytes)/2),AudioRecord.READ_NON_BLOCKING)
                         if (count<0) {
                             if (!stopping.get()) failure="音频读取中断（$count）"
                             break
@@ -94,5 +96,5 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
         // release() remains owned by the recording thread.
         runCatching { record?.stop() }
     }
-    companion object { private const val RATE=48000; private const val MAX_BYTES=RATE*2*120 }
+    companion object { private const val RATE=RecordingLimits.SAMPLE_RATE }
 }

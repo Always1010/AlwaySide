@@ -835,7 +835,7 @@ class AssistantService : Service() {
         if(nodes["audio"]?.chat?.busy==true){toast("请先等待或取消当前音频回答");showWindow(nodes.getValue("audio"));return}
         removeMenu();hideUnpinned();stopPlayback();audioManual=false
         val token=recordingGate.begin();val next=PlaybackRecorder(this,main);recorder=next
-        try{next.start(source){result->
+        try{next.start(source, config.recordingMaxMinutes){result->
             if(!alive||recorder!==next||!recordingGate.complete(token)){result?.file?.delete();return@start}
             recorder=null;finishingAudio=false;ProbeState.recording=false
             if(result==null){toast("未保存有效录音，请检查权限和音源");return@start}

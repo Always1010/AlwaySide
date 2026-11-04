@@ -6,8 +6,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class WavTest {
-    @Test fun twoMinuteClipHasCorrectRiffSizeAndMonoPcmLayout() {
-        val bytes=48000*2*120
+    @Test fun tenMinuteClipHasCorrectRiffSizeAndMonoPcmLayout() {
+        val bytes=48000*2*600
         val data=Wav.header(bytes,48000)
         val buffer=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
         assertEquals(44,data.size)

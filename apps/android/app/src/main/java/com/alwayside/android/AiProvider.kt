@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URI
@@ -73,13 +74,14 @@ internal class AiProvider : AiGateway {
 
     override fun transcribe(config: AppConfig, file: File, cancellation: RequestCancellation): String = sanitized(cancellation) {
         validateConfig(config)
-        val fileSize = file.length()
-        if (!file.isFile || fileSize !in 44..MAX_AUDIO_BYTES) throw ProviderException("音频为空或超过 20 MiB，请缩短录制")
-        file.inputStream().use {
-            val header = ByteArray(12)
-            if (it.read(header) != header.size || String(header, 0, 4, Charsets.US_ASCII) != "RIFF" ||
-                String(header, 8, 4, Charsets.US_ASCII) != "WAVE") throw ProviderException("仅支持 WAV 音频")
+        WavTranscription.transcribe(file, cancellation, MAX_OUTPUT_CHARS) { source, bytes ->
+            transcribePart(config, source, bytes, cancellation)
         }
+    }
+
+    private fun transcribePart(config: AppConfig, source: RandomAccessFile, pcmBytes: Int,
+                               cancellation: RequestCancellation): String {
+        val fileSize = pcmBytes.toLong() + 44
         val boundary = "alwayside-${UUID.randomUUID()}"
         val prompt = if (config.transcriptionPrompt.isBlank()) "" else
             "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n${config.transcriptionPrompt}"
@@ -89,27 +91,24 @@ internal class AiProvider : AiGateway {
             "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n" +
             "Content-Type: audio/wav\r\n\r\n").toByteArray(Charsets.UTF_8)
         val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
-        request(config, "audio/transcriptions", "multipart/form-data; boundary=$boundary",
+        return request(config, "audio/transcriptions", "multipart/form-data; boundary=$boundary",
             prefix.size + fileSize + suffix.size, cancellation, { output ->
                 output.write(prefix)
-                file.inputStream().use { source ->
-                    val buffer = ByteArray(16_384)
-                    var copied = 0L
-                    while (true) {
-                        cancellation.throwIfCancelled()
-                        val count = source.read(buffer)
-                        if (count < 0) break
-                        copied += count
-                        if (copied > fileSize) throw ProviderException("音频文件在发送时发生变化，请重新录制")
-                        output.write(buffer, 0, count)
-                    }
-                    if (copied != fileSize) throw ProviderException("音频文件在发送时发生变化，请重新录制")
+                output.write(Wav.header(pcmBytes, RecordingLimits.SAMPLE_RATE))
+                val buffer = ByteArray(16_384)
+                var remaining = pcmBytes
+                while (remaining > 0) {
+                    cancellation.throwIfCancelled()
+                    val count = source.read(buffer, 0, minOf(buffer.size, remaining))
+                    if (count < 0) throw ProviderException("音频文件在发送时发生变化，请重新录制")
+                    output.write(buffer, 0, count)
+                    remaining -= count
                 }
                 output.write(suffix)
             }) { connection, deadline ->
             val json = connection.inputStream.use { readBounded(it, 1024 * 1024, cancellation, deadline) }
             val text = JSONObject(json).optString("text").trim()
-            if (text.isBlank() || text.length > MAX_OUTPUT_CHARS) throw ProviderException("未识别到可用的音频文字")
+            if (text.length > MAX_OUTPUT_CHARS) throw ProviderException("转写文字过长，请缩短录制")
             text
         }
     }
@@ -305,7 +304,6 @@ internal class AiProvider : AiGateway {
     }
 
     private companion object {
-        const val MAX_AUDIO_BYTES = 20L * 1024 * 1024
         const val MAX_OUTPUT_CHARS = 256 * 1024
         val timeouts = ScheduledThreadPoolExecutor(1) { task ->
             Thread(task, "alwayside-request-timeout").apply { isDaemon = true }
