@@ -38,6 +38,7 @@ internal data class InteractionConfig(
     val saveHistoryImages: Boolean = true,
     val autoAskText: Boolean = true,
     val recordingMaxMinutes: Int = RecordingLimits.DEFAULT_MINUTES,
+    val collapseFollowUpByDefault: Boolean = true,
 ) {
     fun action(taps: Int, recording: Boolean): String = when {
         recording && taps == 1 -> recordingSingleAction
@@ -75,6 +76,7 @@ internal class InteractionPreferences(private val context: Context) {
             prefs.getBoolean("saveHistoryImages", d.saveHistoryImages),
             prefs.getBoolean("autoAskText", d.autoAskText),
             prefs.getInt("recordingMaxMinutes", d.recordingMaxMinutes).coerceIn(0, RecordingLimits.MAX_MINUTES),
+            prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
         )
         if (version >= InteractionDefaults.VERSION) return loaded
         val upgraded = InteractionDefaults.upgrade(loaded)
@@ -100,7 +102,8 @@ internal class InteractionPreferences(private val context: Context) {
             .putBoolean("autoAskAudio", value.autoAskAudio).putBoolean("rememberWindowPosition", value.rememberWindowPosition)
             .putBoolean("rememberWindowSize", value.rememberWindowSize).putBoolean("defaultPinned", value.defaultPinned)
             .putBoolean("saveHistoryImages", value.saveHistoryImages).putBoolean("autoAskText", value.autoAskText)
-            .putInt("recordingMaxMinutes", value.recordingMaxMinutes).commit()) { "无法保存交互设置" }
+            .putInt("recordingMaxMinutes", value.recordingMaxMinutes)
+            .putBoolean("collapseFollowUpByDefault", value.collapseFollowUpByDefault).commit()) { "无法保存交互设置" }
     }
     fun window(kind: String): SavedWindow? = if (!prefs.contains("${kind}_width")) null else SavedWindow(
         prefs.getFloat("${kind}_x", .5f).coerceIn(0f, 1f), prefs.getFloat("${kind}_y", .5f).coerceIn(0f, 1f),

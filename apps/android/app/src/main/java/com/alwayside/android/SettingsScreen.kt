@@ -37,7 +37,7 @@ internal class SettingsScreen(
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
         GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
-        WINDOW("结果窗口", "位置、尺寸、默认固定与自动提问", android.R.drawable.ic_menu_crop),
+        WINDOW("结果窗口", "追问输入区、位置、尺寸、固定与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "录音时长、截图保留策略与证据说明", android.R.drawable.ic_menu_recent_history),
     }
 
@@ -331,6 +331,8 @@ internal class SettingsScreen(
     }
 
     private fun windowPage(config: AppConfig, interaction: InteractionConfig) {
+        check("collapseFollowUpByDefault", "小窗口追问输入框默认收起", interaction.collapseFollowUpByDefault)
+        note("呼出小窗口时优先显示内容，点左下角箭头展开追问。关闭后默认显示输入框；修改从下次呼出时生效。")
         check("rememberWindowPosition", "分别记住截图窗与音频窗的位置", interaction.rememberWindowPosition)
         check("rememberWindowSize", "分别记住截图窗与音频窗的尺寸", interaction.rememberWindowSize)
         check("defaultPinned", "新会话窗口默认固定", interaction.defaultPinned)
@@ -464,6 +466,7 @@ internal class SettingsScreen(
                     "webSearch" -> persist(SettingsUpdate.Toggle(webSearch = value))
                     "autoUpdateImage" -> persist(SettingsUpdate.Toggle(autoUpdateImage = value))
                     else -> persistInteraction { when (name) {
+                        "collapseFollowUpByDefault" -> it.copy(collapseFollowUpByDefault = value)
                         "rememberWindowPosition" -> it.copy(rememberWindowPosition = value)
                         "rememberWindowSize" -> it.copy(rememberWindowSize = value)
                         "defaultPinned" -> it.copy(defaultPinned = value)

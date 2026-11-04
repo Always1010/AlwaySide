@@ -126,6 +126,7 @@ class AssistantService : Service() {
         var searchDefault = false
         var webSearchOverride: Boolean? = null
         var draft = ""
+        var composerExpanded = false
         var pinned = false
         var automaticFirstQuestion = false
         var originalExpanded = false
@@ -139,6 +140,8 @@ class AssistantService : Service() {
         var sourceImage: ImageView? = null
         var transcript: TextView? = null
         var input: TextInputEditText? = null
+        var composer: View? = null
+        var composerToggle: MaterialButton? = null
         var send: View? = null
         var cancel: View? = null
         var retry: View? = null
@@ -509,6 +512,7 @@ class AssistantService : Service() {
         node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);remove(it) }
         node.root=null;node.layout=null;node.response=null;node.status=null;node.source=null;node.sourceImage=null;node.transcript=null
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
+        node.composer=null;node.composerToggle=null
         if (stopAudio) stopPlayback()
     }
     private fun icon(resource: Int, description: String, run: () -> Unit) = uiContext.iconButton(resource,description,run)
@@ -516,6 +520,8 @@ class AssistantService : Service() {
         if (!alive || node.detached || gathering) return
         removeMenu();removeSelector();if(restoredLayout==null)hideUnpinned(node);hideWindow(node,stopAudio=restoredLayout==null);lastKind=node.kind
         config=preferences.load()
+        // Theme/configuration rebuilds retain the current state; a fresh invocation uses the preference.
+        if(restoredLayout==null)node.composerExpanded=!config.collapseFollowUpByDefault
         val size=screenSize();val saved=preferences.window(node.kind)
         val width=minOf(dp(if(config.rememberWindowSize)saved?.widthDp ?: 320 else 320),size.first-dp(24)).coerceAtLeast(dp(180))
         val height=minOf(dp(if(config.rememberWindowSize)saved?.heightDp ?: 340 else 340),size.second-dp(100)).coerceAtLeast(dp(220))
@@ -525,6 +531,7 @@ class AssistantService : Service() {
         }
         clamp(layout)
         val root=OutsideFrame { if(!node.pinned) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
+        root.isFocusableInTouchMode=true
         val body=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL }
         val header=uiContext.materialToolbar(when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"}, null, compact=true).apply {
             node.pin=addIconAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示") {
@@ -552,15 +559,25 @@ class AssistantService : Service() {
         node.status=uiContext.label("",11f,true).apply{setPadding(0,dp(6),0,0)}.also{content.addView(it)}
         val scroll=ScrollView(uiContext).apply { addView(content);isFillViewport=true;isVerticalScrollBarEnabled=true }
         node.scroll=scroll;body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-        val controls=LinearLayout(uiContext).apply { gravity=Gravity.END;setPadding(dp(8),0,dp(8),0) }
-        node.cancel=icon(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答") { node.chat.cancel() }.also{controls.addView(it,LinearLayout.LayoutParams(dp(44),dp(44)))}
-        node.retry=icon(android.R.drawable.ic_popup_sync,"重试原问题与证据") { if(!gathering)node.chat.retry() }.also{controls.addView(it,LinearLayout.LayoutParams(dp(44),dp(44)))}
-        node.copy=icon(R.drawable.ic_copy,"复制最近回答") {
+        val controls=LinearLayout(uiContext).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),0,dp(32),0) }
+        fun compactControl(resource:Int,description:String,action:()->Unit)=icon(resource,description,action).apply {
+            iconSize=dp(14);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
+            setPadding(dp(9),0,dp(9),0)
+        }.also{controls.addView(it,LinearLayout.LayoutParams(dp(32),dp(32)))}
+        node.composerToggle=compactControl(R.drawable.ic_line_chevron_up,"展开追问输入框") {
+            setComposerExpanded(node,!node.composerExpanded,fromUser=true)
+        }
+        controls.addView(View(uiContext),LinearLayout.LayoutParams(0,1,1f))
+        node.cancel=compactControl(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答") { node.chat.cancel() }
+        node.retry=compactControl(android.R.drawable.ic_popup_sync,"重试原问题与证据") { if(!gathering)node.chat.retry() }
+        node.copy=compactControl(R.drawable.ic_copy,"复制最近回答") {
             val text=node.chat.partial.ifBlank { node.chat.messages.lastOrNull{it.role=="assistant"}?.text.orEmpty() }
             if(text.isNotBlank()){getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("AlwaySide",text));toast("已复制")}
-        }.also{controls.addView(it,LinearLayout.LayoutParams(dp(44),dp(44)))}
+        }
         body.addView(controls,LinearLayout.LayoutParams(-1,-2))
-        body.addView(View(uiContext).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)))
+        val composerSection=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL }
+        node.composer=composerSection
+        composerSection.addView(View(uiContext).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)))
         val composer=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(9)) }
         val requestTools=LinearLayout(uiContext).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(4),0,0) }
         if(node.kind=="photo")node.imageChoice=MaterialButton(uiContext, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
@@ -591,7 +608,7 @@ class AssistantService : Service() {
             minLines=1;maxLines=3;minHeight=dp(48)
             setText(node.draft);accessible("${when(node.kind){"photo"->"截图";"audio"->"音频";else->"文字"}}追问")
             filters=arrayOf(android.text.InputFilter.LengthFilter(12000))
-            addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty()};override fun afterTextChanged(s:Editable?){} })
+            addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty();updateComposerToggle(node)};override fun afterTextChanged(s:Editable?){} })
         }.also{inputLayout.addView(it,LinearLayout.LayoutParams(-1,-2))}
         row.addView(inputLayout,LinearLayout.LayoutParams(-1,-2))
         node.search=icon(R.drawable.ic_globe,"联网搜索") {
@@ -600,7 +617,9 @@ class AssistantService : Service() {
         node.send=icon(android.R.drawable.ic_menu_send,"发送问题") { sendQuestion(node,node.draft) }.apply{applyIconActionStyle(primary=true)}.also{requestTools.addView(it,LinearLayout.LayoutParams(dp(48),dp(48)).apply{marginStart=dp(4)})}
         composer.addView(row)
         composer.addView(requestTools,LinearLayout.LayoutParams(-1,-2).apply { marginEnd=dp(24) })
-        body.addView(composer,LinearLayout.LayoutParams(-1,-2));root.addView(body,FrameLayout.LayoutParams(-1,-1))
+        composerSection.addView(composer,LinearLayout.LayoutParams(-1,-2))
+        body.addView(composerSection,LinearLayout.LayoutParams(-1,-2));root.addView(body,FrameLayout.LayoutParams(-1,-1))
+        setComposerExpanded(node,node.composerExpanded)
         val resize=icon(R.drawable.ic_resize,"拖动调整窗口大小") {}.apply { alpha=.55f;iconSize=dp(14);setPadding(dp(14),dp(14),0,0);minimumWidth=0;minimumHeight=0 }
         root.addView(resize,FrameLayout.LayoutParams(dp(32),dp(32),Gravity.BOTTOM or Gravity.END))
         installDrag(node,header,root,layout,false);installDrag(node,resize,root,layout,true)
@@ -609,8 +628,40 @@ class AssistantService : Service() {
             if(ime>0&&node.root===root){val bottom=screenSize().second-ime-dp(12);val y=layout.y.coerceAtMost((bottom-layout.height).coerceAtLeast(dp(8)));if(y!=layout.y){layout.y=y;runCatching{windows.updateViewLayout(root,layout)}}}
             insets
         }
-        try{windows.addView(root,layout);node.root=root;node.layout=layout;updatePin(node);refresh(node)}catch(_:RuntimeException){toast("无法打开结果窗口，请检查悬浮权限")}
+        layout.softInputMode=WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        try{windows.addView(root,layout);node.root=root;node.layout=layout;if(!node.composerExpanded)root.requestFocus();updatePin(node);refresh(node)}catch(_:RuntimeException){toast("无法打开结果窗口，请检查悬浮权限")}
         removeBubble();showBubble()
+    }
+    private fun setComposerExpanded(node:FloatingConversation,expanded:Boolean,fromUser:Boolean=false) {
+        node.composerExpanded=expanded
+        if(!expanded) {
+            node.input?.clearFocus()
+            if(fromUser)node.root?.let { root ->
+                getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken,0)
+                root.requestFocus()
+            }
+        }
+        node.composer?.visibility=if(expanded)View.VISIBLE else View.GONE
+        updateComposerToggle(node)
+        if(expanded&&fromUser)node.input?.let { input ->
+            input.requestFocus()
+            input.post {
+                if(node.input===input&&node.root?.isAttachedToWindow==true&&node.composerExpanded&&input.hasFocus())
+                    getSystemService(InputMethodManager::class.java).showSoftInput(input,InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+    }
+    private fun updateComposerToggle(node:FloatingConversation) {
+        node.composerToggle?.apply {
+            icon=uiContext.prototypeIcon(if(node.composerExpanded)R.drawable.ic_line_chevron_down else R.drawable.ic_line_chevron_up)
+            isActivated=node.draft.isNotBlank()
+            iconTint=android.content.res.ColorStateList.valueOf(if(isActivated)ACCENT else MUTED)
+            accessible(when {
+                node.composerExpanded -> "收起追问输入框"
+                node.draft.isNotBlank() -> "展开追问输入框，继续编辑草稿"
+                else -> "展开追问输入框"
+            })
+        }
     }
     private fun updatePin(node:FloatingConversation){node.pin?.apply{
         icon=uiContext.prototypeIcon(if(node.pinned)R.drawable.ic_pin_filled else R.drawable.ic_line_pin)
