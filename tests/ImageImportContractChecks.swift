@@ -83,6 +83,12 @@ private struct ImageImportContractChecks {
         expectFailure(.invalidHandoff, "truncated JPEG is rejected") {
             _ = try PhotoImport.restoreScreenshot(jpegData: Data(jpeg.prefix(jpeg.count / 2)), receivedAt: receivedAt)
         }
+        expectFailure(.invalidHandoff, "JPEG without its end marker is rejected despite decoder recovery") {
+            _ = try PhotoImport.restoreScreenshot(jpegData: Data(jpeg.dropLast(2)), receivedAt: receivedAt)
+        }
+        expectFailure(.invalidImage, "manual import also rejects a truncated JPEG") {
+            _ = try PhotoImport.snapshot(from: Data(jpeg.prefix(jpeg.count / 2)))
+        }
         // Trailing JPEG padding retains a valid image while exercising byte limits independently of pixels.
         var padded = jpeg
         padded.append(Data(count: 3 * 1024 * 1024 - padded.count))

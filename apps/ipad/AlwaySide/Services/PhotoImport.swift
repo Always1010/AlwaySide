@@ -9,7 +9,7 @@ enum PhotoImport {
     /// The envelope is untrusted: check its type, complete decode and actual pixel dimensions.
     static func restoreScreenshot(jpegData: Data, receivedAt: Date) throws -> EvidenceSnapshot {
         try validateReceiptDate(receivedAt)
-        guard !jpegData.isEmpty, jpegData.count <= 3 * 1024 * 1024,
+        guard !jpegData.isEmpty, jpegData.count <= 3 * 1024 * 1024, hasCompleteJPEGStream(jpegData),
               let source = CGImageSourceCreateWithData(jpegData as CFData, nil),
               CGImageSourceGetType(source) as String? == UTType.jpeg.identifier,
               CGImageSourceGetCount(source) == 1,
@@ -57,6 +57,7 @@ enum PhotoImport {
     static func snapshot(from data: Data) throws -> EvidenceSnapshot {
         guard data.count <= 20 * 1024 * 1024 else { throw ClientError.tooLarge }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetType(source) as String? != UTType.jpeg.identifier || hasCompleteJPEGStream(data),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
@@ -89,6 +90,39 @@ enum PhotoImport {
     private static func validateReceiptDate(_ receivedAt: Date) throws {
         let age = Date().timeIntervalSince(receivedAt)
         guard age >= -60, age <= maximumScreenshotAge else { throw ScreenshotHandoffError.expired }
+    }
+
+    /// ImageIO may recover a truncated JPEG and still report complete. Require an
+    /// actual EOI marker outside metadata segments, while permitting trailing padding.
+    private static func hasCompleteJPEGStream(_ data: Data) -> Bool {
+        data.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            guard bytes.count >= 4, bytes[0] == 0xff, bytes[1] == 0xd8 else { return false }
+            var offset = 2
+            var inScan = false
+            var sawScan = false
+            while offset < bytes.count {
+                if inScan {
+                    while offset < bytes.count, bytes[offset] != 0xff { offset += 1 }
+                }
+                guard offset < bytes.count, bytes[offset] == 0xff else { return false }
+                while offset < bytes.count, bytes[offset] == 0xff { offset += 1 }
+                guard offset < bytes.count else { return false }
+                let marker = bytes[offset]
+                offset += 1
+                if inScan && (marker == 0x00 || (0xd0...0xd7).contains(marker)) { continue }
+                if marker == 0xd9 { return sawScan }
+                guard marker != 0x00, marker != 0xd8, !(0xd0...0xd7).contains(marker) else { return false }
+                if marker == 0x01 { continue }
+                inScan = false
+                guard offset + 2 <= bytes.count else { return false }
+                let length = Int(bytes[offset]) * 256 + Int(bytes[offset + 1])
+                guard length >= 2, length <= bytes.count - offset else { return false }
+                offset += length
+                if marker == 0xda { inScan = true; sawScan = true }
+            }
+            return false
+        }
     }
 }
 
