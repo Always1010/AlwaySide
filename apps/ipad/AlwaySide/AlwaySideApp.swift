@@ -10,12 +10,17 @@ struct AlwaySideApp: App {
         WindowGroup {
             CompanionView(model: model, capture: model.capture)
                 .task {
+                    refreshKeyStatusIfAvailable()
                     if scenePhase == .active { await ScreenshotInboxDelivery.consume(using: model) }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
+                        refreshKeyStatusIfAvailable()
                         Task { await ScreenshotInboxDelivery.consume(using: model) }
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+                    refreshKeyStatusIfAvailable()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: ScreenshotInbox.didChange)) { _ in
                     if scenePhase == .active {
@@ -37,5 +42,12 @@ struct AlwaySideApp: App {
                     Task { await ScreenshotInboxDelivery.consume(using: model) }
                 }
         }
+    }
+
+    @MainActor
+    private func refreshKeyStatusIfAvailable() {
+        // Locked/background launches retry once the scene is active and Keychain data is available.
+        guard scenePhase == .active, UIApplication.shared.isProtectedDataAvailable else { return }
+        model.refreshKeyStatus()
     }
 }
