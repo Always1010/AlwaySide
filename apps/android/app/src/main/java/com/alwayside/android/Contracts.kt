@@ -3,7 +3,7 @@ package com.alwayside.android
 internal data class AppConfig(
     val apiKey: String = "",
     val baseUrl: String = "https://api.openai.com/v1",
-    val model: String = "gpt-4.1-mini",
+    val model: String = "gpt-6-luna",
     val transcriptionModel: String = "gpt-transcribe",
     val instructions: String = "你是问答助手，帮助用户翻译或解释屏幕上的内容。",
     val defaultQuestion: String = "请优先将内容翻译成中文；有必要时再简要解释。",
