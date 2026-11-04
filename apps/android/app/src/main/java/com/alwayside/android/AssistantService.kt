@@ -63,6 +63,7 @@ class AssistantService : Service() {
     private var gathering = false
     private var captureEpoch = 0
     private var captureOwner: FloatingConversation? = null
+    private var restoreCaptureWindows: (() -> Unit)? = null
     private var recorder: PlaybackRecorder? = null
     private var finishingAudio = false
     private var audioManual = false
@@ -504,7 +505,7 @@ class AssistantService : Service() {
     }
     private fun icon(resource: Int, description: String, run: () -> Unit) = uiContext.iconButton(resource,description,run)
     private fun showWindow(node: FloatingConversation, restoredLayout: WindowManager.LayoutParams? = null) {
-        if (!alive || node.detached) return
+        if (!alive || node.detached || gathering) return
         removeMenu();removeSelector();if(restoredLayout==null)hideUnpinned(node);hideWindow(node,stopAudio=restoredLayout==null);lastKind=node.kind
         config=preferences.load()
         val size=screenSize();val saved=preferences.window(node.kind)
@@ -722,20 +723,44 @@ class AssistantService : Service() {
         val node=fresh("photo");capture(node,crop,false){archivePrepared(node);showWindow(node);if(config.autoAskImage)submitDefault(node)}
     }
     private fun capture(node:FloatingConversation,crop:Boolean,reuse:Boolean,after:()->Unit){
-        if(!alive || node.detached || nodes[node.kind]!==node)return
+        if(!alive || gathering || node.detached || nodes[node.kind]!==node)return
         val source=frames?:run{requestCaptureConsent(AssistantActions.SCREEN){capture(node,crop,reuse,after)};return}
         val oldBounds=if(reuse)node.bounds else null;val oldSize=node.sourceSize;val oldRotation=node.rotation
         val rotation=screenRotation();val id=++captureEpoch
         gathering=true;captureOwner=node;removeMenu();removeBubble();removeSelector()
-        val shown=nodes.values.filter{it.root!=null}.toList();shown.forEach{it.root?.visibility=View.INVISIBLE}
-        fun restore(){shown.forEach{it.root?.visibility=View.VISIBLE};gathering=false;captureOwner=null;showBubble()}
+        // Detach the actual overlay windows, including their surface/shadow and IME owner.
+        // INVISIBLE only hides view content and can leave a composed window on vendor systems.
+        val shown=nodes.values.mapNotNull { visible ->
+            val root=visible.root?:return@mapNotNull null
+            val layout=visible.layout?:return@mapNotNull null
+            Triple(visible,root,layout)
+        }
+        restoreCaptureWindows={
+            shown.forEach { (visible,root,layout) ->
+                if(alive&&!visible.detached&&nodes[visible.kind]===visible&&visible.root===root&&!root.isAttachedToWindow){
+                    clamp(layout)
+                    layout.softInputMode=(layout.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST) or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                    runCatching{windows.addView(root,layout);visible.layout=layout;refresh(visible)}
+                        .onFailure{hideWindow(visible,false);toast("截图结束，但小窗恢复失败，可从菜单重新打开")}
+                }
+            }
+        }
+        try {
+            shown.forEach { (_,root,_) ->
+                getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken,0)
+                root.clearFocus()
+                windows.removeViewImmediate(root)
+            }
+        } catch(_:RuntimeException) {
+            restoreAfterCapture();toast("无法暂时收起小窗，截图未发送，请重试");return
+        }
         Choreographer.getInstance().postFrameCallback{Choreographer.getInstance().postFrameCallback{
             // Window removal and the system dim/blur layer must settle before the fresh-frame boundary.
             main.postDelayed({
                 if(!alive||captureEpoch!=id)return@postDelayed
                 source.snapshot(System.nanoTime()){result->
                     if(!alive||captureEpoch!=id||node.detached||nodes[node.kind]!==node){result.getOrNull()?.bitmap?.recycle();return@snapshot}
-                    restore()
+                    restoreAfterCapture()
                     result.fold(onSuccess={frame->
                         if(screenRotation()!=rotation||(oldBounds!=null&&(oldSize!=(frame.bitmap.width to frame.bitmap.height)||oldRotation!=rotation))){toast("屏幕尺寸或方向变化，请重新框选");showWindow(node);return@fold}
                         if(!reuse){node.bounds=null;node.sourceSize=null;node.rotation=null}
@@ -745,6 +770,12 @@ class AssistantService : Service() {
                 }
             },CAPTURE_SETTLE_MS)
         }}
+    }
+    private fun restoreAfterCapture(){
+        val restore=restoreCaptureWindows;restoreCaptureWindows=null
+        gathering=false;captureOwner=null
+        restore?.invoke()
+        showBubble()
     }
     private fun showCrop(node:FloatingConversation,frame:CapturedFrame,rotation:Int){
         removeBubble();hideUnpinned();removeSelector()
@@ -794,7 +825,7 @@ class AssistantService : Service() {
     private fun detachToApplication(id:String):Bitmap?{
         val entry=nodes.entries.firstOrNull{it.value.chat.conversationId==id}?:return null
         val node=entry.value;hideWindow(node);node.detached=true;nodes.remove(entry.key)
-        if(captureOwner===node){captureEpoch++;captureOwner=null;gathering=false;nodes.values.forEach{it.root?.visibility=View.VISIBLE};removeSelector();showBubble()}
+        if(captureOwner===node){captureEpoch++;removeSelector();restoreAfterCapture()}
         node.clip?.file?.let{ActiveConversationBridge.retainAudio(it)}
         ActiveConversationBridge.offer(id,HandedOffConversation(node.chat,node.frame?.bitmap,{
             node.chat.close();node.clip?.file?.let{ActiveConversationBridge.releaseAudio(it);it.delete()}
@@ -803,7 +834,7 @@ class AssistantService : Service() {
         return node.frame?.bitmap
     }
     @Suppress("DEPRECATION") private fun screenRotation()=windows.defaultDisplay.rotation
-    private fun clearCapture(){cancelRecording(false);captureEpoch++;captureOwner=null;gathering=false;frames?.close();frames=null;val old=projection;projection=null;old?.unregisterCallback(captureCallback);old?.stop();ProbeState.sharing=false;removeSelector();nodes.values.forEach{it.root?.visibility=View.VISIBLE}}
+    private fun clearCapture(){cancelRecording(false);captureEpoch++;frames?.close();frames=null;val old=projection;projection=null;old?.unregisterCallback(captureCallback);old?.stop();ProbeState.sharing=false;removeSelector();restoreAfterCapture()}
     override fun onConfigurationChanged(newConfig:Configuration){
         super.onConfigurationChanged(newConfig)
         val geometryChanged = newConfig.orientation != lastConfiguration.orientation ||
@@ -811,7 +842,7 @@ class AssistantService : Service() {
             newConfig.densityDpi != lastConfiguration.densityDpi
         lastConfiguration = Configuration(newConfig)
         if (geometryChanged) {
-            captureEpoch++;captureOwner=null;gathering=false;removeSelector()
+            captureEpoch++;removeSelector();restoreAfterCapture()
             nodes.values.forEach { node ->
                 node.root?.visibility=View.VISIBLE
                 node.layout?.let { layout -> clamp(layout); node.root?.let { root -> runCatching { windows.updateViewLayout(root,layout) } } }
