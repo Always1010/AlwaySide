@@ -80,17 +80,23 @@ internal class SettingsStore(context: Context) {
         val data = JSONObject(prefs.getString("presets", "{}") ?: "{}")
         data.keys().asSequence().take(20).associateWith { name ->
             val value = data.getJSONObject(name)
-            PromptPreset(value.getString("instructions"), value.getString("defaultQuestion"), value.getString("audioQuestion"))
+            PromptPreset(value.getString("instructions"), value.getString("defaultQuestion"), value.getString("audioQuestion"),
+                value.optionalPresetString("textQuestion"), value.optionalPresetString("transcriptionPrompt"),
+                value.optionalPresetString("audioOutput"))
         }.toSortedMap()
     }
 
     fun savePreset(name: String, preset: PromptPreset) = synchronized(lock) {
         require(name.isNotBlank() && name.length <= 60) { "Preset name is invalid" }
-        require(listOf(preset.instructions, preset.defaultQuestion, preset.audioQuestion).all { it.length <= 32000 })
+        require(listOfNotNull(preset.instructions, preset.defaultQuestion, preset.audioQuestion, preset.textQuestion,
+            preset.transcriptionPrompt).all { it.length <= 32000 })
+        require(preset.audioOutput == null || preset.audioOutput in setOf("transcript", "translate", "interpret"))
         val data = JSONObject(prefs.getString("presets", "{}") ?: "{}")
         require(data.has(name) || data.length() < 20) { "At most 20 presets" }
         data.put(name, JSONObject().put("instructions", preset.instructions)
-            .put("defaultQuestion", preset.defaultQuestion).put("audioQuestion", preset.audioQuestion))
+            .put("defaultQuestion", preset.defaultQuestion).put("audioQuestion", preset.audioQuestion)
+            .put("textQuestion", preset.textQuestion).put("transcriptionPrompt", preset.transcriptionPrompt)
+            .put("audioOutput", preset.audioOutput))
         check(prefs.edit().putString("presets", data.toString()).commit()) { "Preset write failed" }
     }
 
@@ -145,4 +151,5 @@ internal class SettingsStore(context: Context) {
     }
 }
 
-internal data class PromptPreset(val instructions: String, val defaultQuestion: String, val audioQuestion: String)
+private fun JSONObject.optionalPresetString(name: String): String? =
+    if (isNull(name)) null else getString(name)
