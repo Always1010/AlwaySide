@@ -18,6 +18,7 @@ struct CompanionView: View {
     @State private var photoSelection: PhotosPickerItem?
     @State private var photoTask: Task<Void, Never>?
     @State private var photoRequestID: UUID?
+    @State private var photoSessionID: UUID?
     @State private var importing = false
     @State private var editingRecoveryTask: Task<Void, Never>?
     @State private var editingRecoveryID: UUID?
@@ -87,9 +88,9 @@ struct CompanionView: View {
             }
             .onChange(of: photoSelection) { _, selection in importPhoto(selection) }
             .onChange(of: model.isAsking) { _, asking in if asking { cancelEditingRecovery() } }
-            .onChange(of: model.sessionID) { _, _ in
-                // A shortcut import must invalidate any older in-flight photo picker task.
-                if model.isImporting { cancelPhotoImport() }
+            .onChange(of: model.sessionID) { _, sessionID in
+                // A transfer belongs to its destination conversation, including while downloading from iCloud.
+                if let photoSessionID, photoSessionID != sessionID { cancelPhotoImport() }
                 previewExpanded = model.snapshot != nil
             }
             .onChange(of: scenePhase) { _, phase in if phase != .active { cancelEditingRecovery() } }
@@ -207,9 +208,13 @@ struct CompanionView: View {
         model.startNewConversation()
         let id = UUID()
         let destinationSession = model.sessionID
-        photoRequestID = id; importing = true
+        photoRequestID = id; photoSessionID = destinationSession; importing = true
         photoTask = Task { @MainActor in
-            defer { if photoRequestID == id { importing = false; photoTask = nil; photoRequestID = nil } }
+            defer {
+                if photoRequestID == id {
+                    importing = false; photoTask = nil; photoRequestID = nil; photoSessionID = nil; photoSelection = nil
+                }
+            }
             do {
                 guard let data = try await selection.loadTransferable(type: Data.self) else { throw ClientError.invalidImage }
                 try Task.checkCancellation()
@@ -238,7 +243,7 @@ struct CompanionView: View {
     private func cancelEditingRecovery() { editingRecoveryID = nil; editingRecoveryTask?.cancel(); editingRecoveryTask = nil }
     private func resetInteraction() { cancelEditingRecovery(); cancelPhotoImport(); inputFocused = false }
     private func cancelPhotoImport() {
-        photoRequestID = nil; photoTask?.cancel(); photoTask = nil; importing = false; photoSelection = nil
+        photoRequestID = nil; photoSessionID = nil; photoTask?.cancel(); photoTask = nil; importing = false; photoSelection = nil
     }
 }
 
