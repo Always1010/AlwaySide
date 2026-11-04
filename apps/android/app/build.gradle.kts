@@ -26,4 +26,7 @@ android {
     }
     lint { abortOnError = true }
 }
-dependencies { testImplementation("junit:junit:4.13.2") }
+dependencies {
+    implementation("com.google.android.material:material:1.14.0")
+    testImplementation("junit:junit:4.13.2")
+}

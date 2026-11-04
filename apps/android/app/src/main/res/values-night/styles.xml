@@ -1,10 +1,23 @@
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+    <style name="AppTheme" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#E8EAED</item>
+        <item name="colorOnPrimary">#101820</item>
+        <item name="colorSecondary">#E8EAED</item>
+        <item name="colorOnSecondary">#101820</item>
+        <item name="colorSurface">#24272B</item>
+        <item name="colorOnSurface">#F5F6F7</item>
+        <item name="colorOnSurfaceVariant">#BEC3C9</item>
+        <item name="colorOutline">#717983</item>
+        <item name="colorSurfaceContainerLowest">#101214</item>
+        <item name="colorSurfaceContainerLow">#1B1D20</item>
+        <item name="colorSurfaceContainer">#24272B</item>
+        <item name="colorSurfaceContainerHigh">#2C3035</item>
+        <item name="colorSurfaceContainerHighest">#353A41</item>
         <item name="android:textColorPrimary">#F5F6F7</item>
         <item name="android:textColorSecondary">#BEC3C9</item>
         <item name="android:textColorHint">#ABB2BB</item>
         <item name="android:fontFamily">sans-serif</item>
-        <item name="android:colorAccent">#8DDBAE</item>
+        <item name="android:colorAccent">#E8EAED</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
@@ -12,5 +25,33 @@
         <item name="android:colorBackground">#151719</item>
         <item name="android:navigationBarColor">#151719</item>
         <item name="android:statusBarColor">#151719</item>
+    </style>
+    <style name="AppPalette.Black" parent="">
+        <item name="colorPrimary">#E8EAED</item>
+        <item name="colorOnPrimary">#101820</item>
+        <item name="colorPrimaryContainer">#353A41</item>
+        <item name="colorOnPrimaryContainer">#F5F6F7</item>
+        <item name="colorSecondary">#E8EAED</item>
+        <item name="colorOnSecondary">#101820</item>
+        <item name="colorSecondaryContainer">#353A41</item>
+        <item name="colorOnSecondaryContainer">#F5F6F7</item>
+        <item name="colorTertiary">#BEC3C9</item>
+        <item name="colorOnTertiary">#101820</item>
+        <item name="colorControlActivated">#E8EAED</item>
+        <item name="android:colorAccent">#E8EAED</item>
+    </style>
+    <style name="AppPalette.Blue" parent="">
+        <item name="colorPrimary">#9CC2FF</item>
+        <item name="colorOnPrimary">#101820</item>
+        <item name="colorPrimaryContainer">#233D65</item>
+        <item name="colorOnPrimaryContainer">#DFEAFF</item>
+        <item name="colorSecondary">#9CC2FF</item>
+        <item name="colorOnSecondary">#101820</item>
+        <item name="colorSecondaryContainer">#233D65</item>
+        <item name="colorOnSecondaryContainer">#DFEAFF</item>
+        <item name="colorTertiary">#B2CCF6</item>
+        <item name="colorOnTertiary">#101820</item>
+        <item name="colorControlActivated">#9CC2FF</item>
+        <item name="android:colorAccent">#9CC2FF</item>
     </style>
 </resources>

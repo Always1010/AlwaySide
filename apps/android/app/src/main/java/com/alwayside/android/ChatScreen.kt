@@ -1,7 +1,7 @@
 package com.alwayside.android
 
 import android.app.Activity
-import android.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContextWrapper
@@ -296,7 +296,7 @@ internal class ChatScreen(
 
     private fun showTranscript() {
         if (!ready || session.transcript.isBlank()) return
-        AlertDialog.Builder(this).setTitle("原始音频转写")
+        MaterialAlertDialogBuilder(this).setTitle("原始音频转写")
             .setView(ScrollView(this).apply {
                 addView(column().apply { addView(label(session.transcript).apply { setTextIsSelectable(true) }) })
             }).setPositiveButton("返回对话", null).show()
@@ -304,7 +304,7 @@ internal class ChatScreen(
 
     private fun showSourceText() {
         if (!ready || session.sourceText.isBlank()) return
-        AlertDialog.Builder(this).setTitle("选中文字")
+        MaterialAlertDialogBuilder(this).setTitle("选中文字")
             .setView(ScrollView(this).apply {
                 addView(column().apply { addView(label(session.sourceText).apply { setTextIsSelectable(true) }) })
             }).setPositiveButton("返回对话", null).show()

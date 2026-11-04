@@ -14,7 +14,8 @@ internal fun Context.prototypeIcon(resource: Int): Drawable = getDrawable(when (
     android.R.drawable.ic_menu_more -> R.drawable.ic_line_more
     android.R.drawable.ic_menu_manage, android.R.drawable.ic_menu_preferences -> R.drawable.ic_line_settings
     android.R.drawable.ic_menu_sort_by_size -> R.drawable.ic_line_sliders
-    android.R.drawable.ic_menu_edit, android.R.drawable.ic_menu_info_details -> R.drawable.ic_line_text
+    android.R.drawable.ic_menu_edit -> R.drawable.ic_line_edit
+    android.R.drawable.ic_menu_info_details -> R.drawable.ic_line_text
     android.R.drawable.ic_btn_speak_now -> R.drawable.ic_line_audio
     android.R.drawable.ic_menu_camera -> R.drawable.ic_line_scan
     android.R.drawable.ic_menu_view -> R.drawable.ic_line_sparkles

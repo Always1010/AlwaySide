@@ -15,16 +15,17 @@ import android.widget.LinearLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
+import com.google.android.material.button.MaterialButton
 
 private val nightMode: Boolean get() = AppAppearance.isNight
 internal val BACKGROUND: Int get() = if (nightMode) 0xFF151719.toInt() else Color.WHITE
 internal val SURFACE: Int get() = if (nightMode) 0xFF24272B.toInt() else 0xFFF2F4F5.toInt()
-internal val ACCENT: Int get() = if (nightMode) 0xFF8DDBAE.toInt() else 0xFF246342.toInt()
+internal val ACCENT: Int get() = AppAppearance.accent
 internal val INK: Int get() = if (nightMode) 0xFFF5F6F7.toInt() else 0xFF202428.toInt()
 internal val MUTED: Int get() = if (nightMode) 0xFFBEC3C9.toInt() else 0xFF535B64.toInt()
 internal val HINT: Int get() = if (nightMode) 0xFFABB2BB.toInt() else 0xFF68717C.toInt()
 internal val BORDER: Int get() = if (nightMode) 0xFF717983.toInt() else 0xFF9099A4.toInt()
-internal val ON_ACCENT: Int get() = if (nightMode) 0xFF11271B.toInt() else Color.WHITE
+internal val ON_ACCENT: Int get() = AppAppearance.onAccent
 private val DISABLED_INK: Int get() = if (nightMode) 0xFF858D96.toInt() else 0xFF767E88.toInt()
 private val DISABLED_SURFACE: Int get() = if (nightMode) 0xFF30343A.toInt() else 0xFFE3E6E9.toInt()
 internal fun Context.dp(value: Int) = (value * resources.displayMetrics.density).toInt()
@@ -58,11 +59,16 @@ internal fun Context.selectionBackground() = RippleDrawable(
 
 internal fun Button.applyActionStyle(primary: Boolean = false) {
     isAllCaps = false; backgroundTintList = null; setSingleLine(false)
-    setTextColor(stateColors(if (primary) ON_ACCENT else ACCENT, DISABLED_INK))
-    background = RippleDrawable(ColorStateList.valueOf(((if(primary) ON_ACCENT else ACCENT) and 0x00FFFFFF) or 0x30000000),
+    setTextColor(stateColors(ON_ACCENT, DISABLED_INK))
+    if(this is MaterialButton) {
+        backgroundTintList=stateColors(ACCENT,DISABLED_SURFACE)
+        rippleColor=ColorStateList.valueOf((ON_ACCENT and 0x00FFFFFF) or 0x30000000)
+        cornerRadius=context.dp(12);strokeWidth=0
+        insetTop=0;insetBottom=0
+    } else background = RippleDrawable(ColorStateList.valueOf((ON_ACCENT and 0x00FFFFFF) or 0x30000000),
         StateListDrawable().apply {
             addState(intArrayOf(-android.R.attr.state_enabled), context.controlShape(DISABLED_SURFACE, BORDER))
-            addState(intArrayOf(), context.controlShape(if(primary) ACCENT else SURFACE, ACCENT))
+            addState(intArrayOf(), context.controlShape(ACCENT, ACCENT))
         }, card(Color.WHITE, context.dp(8).toFloat()))
     minHeight = context.dp(48); minimumHeight = context.dp(48)
     setPadding(context.dp(14), context.dp(10), context.dp(14), context.dp(10))
@@ -70,7 +76,7 @@ internal fun Button.applyActionStyle(primary: Boolean = false) {
 internal fun ImageButton.applyIconActionStyle(primary: Boolean = false) {
     backgroundTintList = null
     imageTintList = stateColors(if(primary) ON_ACCENT else INK, DISABLED_INK)
-    background = RippleDrawable(ColorStateList.valueOf((INK and 0x00FFFFFF) or 0x24000000),
+    background = if(!primary) context.touchFeedback() else RippleDrawable(ColorStateList.valueOf((INK and 0x00FFFFFF) or 0x24000000),
         StateListDrawable().apply {
             addState(intArrayOf(-android.R.attr.state_enabled), context.controlShape(DISABLED_SURFACE, BORDER))
             addState(intArrayOf(), context.controlShape(if(primary) ACCENT else SURFACE, if(primary) ACCENT else BORDER))
@@ -92,7 +98,7 @@ internal fun Context.label(value: String, size: Float = 13f, muted: Boolean = fa
     if (size >= 15) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 }
 internal fun LinearLayout.action(title: String, primary: Boolean = false, run: () -> Unit): Button =
-    Button(context).also { button ->
+    MaterialButton(context).also { button ->
         button.text = title; button.textSize = 14f; button.applyActionStyle(primary)
         button.setOnClickListener { run() }
         addView(button, LinearLayout.LayoutParams(-1, -2).apply { topMargin = context.dp(8) })
