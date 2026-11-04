@@ -118,6 +118,7 @@ final class CompanionModel: ObservableObject {
         if sessionID == id { cancelQuestion() }
         do {
             try sessions.delete(id)
+            QuickReadStore.shared.clear(ifMatching: id)
             if sessionID == id { startNewConversation() }
             sessionSummaries = sessions.summaries
         } catch { notice = "删除本机会话失败，请重试。" }
@@ -127,6 +128,7 @@ final class CompanionModel: ObservableObject {
         cancelQuestion()
         do {
             try sessions.deleteAll()
+            QuickReadStore.shared.clear()
             startNewConversation()
             sessionSummaries = []
             notice = "已删除本机聊天与图片；供应商已收到的数据无法撤回。"
@@ -170,6 +172,33 @@ final class CompanionModel: ObservableObject {
         frameStatus = "当前图片 · 追问沿用此图，导入新图会新建对话。"
         notice = nil
     }
+
+    /// Only an explicit card button opens this conversation; accepting a result never resends it.
+    func acceptQuickRead(_ result: QuickReadResult) {
+        if sessions.summaries.contains(where: { $0.id == result.id }) {
+            openSession(result.id)
+            return
+        }
+        choose(result.snapshot)
+        sessionID = result.id
+        provider = result.provider
+        UserDefaults.standard.set(provider.rawValue, forKey: "provider")
+        refreshKeyStatus()
+        let turn = ConversationTurn(question: result.question, answer: result.answer.text,
+            citations: result.answer.citations, searchState: result.answer.searchState)
+        messages = [.init(turn, complete: result.answer.complete)]
+        history = result.answer.complete ? [turn] : []
+        do {
+            try sessions.save(id: sessionID, provider: provider, snapshot: snapshot, turns: messages)
+            sessionSummaries = sessions.summaries
+        } catch {
+            storageWarning = "阅读结果尚未保存到本机历史；当前图片和回答仍可查看。请检查存储空间或会话数量。"
+        }
+        if !result.answer.complete {
+            notice = "本次回答未完成，追问不会携带这段回答；仍会使用同一张图片。"
+        }
+    }
+
     func attachAudioTranscript(_ text: String) {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 20000 else { notice = "音频转写应为 1 至 20,000 字。"; return }

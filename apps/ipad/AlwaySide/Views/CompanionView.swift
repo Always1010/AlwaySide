@@ -33,8 +33,15 @@ struct CompanionView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 18) {
                             if model.messages.isEmpty && !model.isAsking {
-                                ContentUnavailableView("看图翻译，继续追问", systemImage: "bubble.left.and.bubble.right",
-                                    description: Text("长按截屏后接收最新图片，或从相册导入。留空发送即可翻译。"))
+                                ContentUnavailableView {
+                                    Label("看懂，然后继续", systemImage: "text.viewfinder")
+                                } description: {
+                                    Text("长按截屏，在原页面的系统卡片里读懂内容。需要深入讨论时，再来这里追问。")
+                                } actions: {
+                                    Button { showingScreenshotHelp = true } label: {
+                                        Label("设置长按阅读", systemImage: "hand.tap")
+                                    }
+                                }
                             }
                             ForEach(Array(model.messages.enumerated()), id: \.offset) { _, message in
                                 messageView(message)
@@ -92,7 +99,7 @@ struct CompanionView: View {
             .onChange(of: model.sessionID) { _, sessionID in
                 // A transfer belongs to its destination conversation, including while downloading from iCloud.
                 if let photoSessionID, photoSessionID != sessionID { cancelPhotoImport() }
-                previewExpanded = model.snapshot != nil
+                previewExpanded = false
             }
             .onChange(of: scenePhase) { _, phase in if phase != .active { cancelEditingRecovery() } }
             .onDisappear { cancelEditingRecovery(); cancelPhotoImport() }

@@ -1,32 +1,43 @@
 # AlwaySide iPad
 
-个人自用的原生 SwiftUI 屏幕问答助手，目标为 iPadOS 27.0 及以上，工程与共享 scheme 位于 `AlwaySide.xcodeproj`。紧凑聊天界面优先保留输入与回答空间，固定画面以小缩略图显示，点击可展开核对。
+个人自用的原生 SwiftUI 屏幕阅读助手，目标为 iPadOS 27.0 及以上，工程与共享 scheme 位于 `AlwaySide.xcodeproj`。日常入口优先在系统结果卡片中翻译并解释眼前内容；只有主动选择深入追问时才打开完整聊天界面。
 
 **当前修订仍需 Xcode 27.1 编译和 iPad 真机验收。** Windows 静态检查不能证明快捷指令输入、系统窗口入口或真实 API 已运行成功。未签名 IPA 必须个人签名后才能安装，此项目不依赖 Swift Playground。
 
-## 快速问答
+## 原地阅读卡片
+
+1. **先验证载体**：新建只含 AlwaySide「体验原地卡片（不联网）」的快捷指令，绑定 AssistiveTouch 长按。在其他 App 运行，观察示例卡片是否出现、划走后是否仍停留在原页面。此动作不截图、不读密钥、不联网，也不改变现有会话。
+2. 在 App 设置中选择供应商、保存自己的 API Key，然后将日常快捷指令设为系统「截屏」→ AlwaySide「读懂截图（上传并原地显示）」。截图参数显式连接前一步输出；删除「打开 App」「打开 URL」等旧动作，并将更新后的快捷指令绑定 AssistiveTouch 长按。安装新版不会修改现有绑定。
+3. 停留在目标内容长按。新阅读动作在后台将截图发送至所选供应商，系统显示执行进度，完成后返回阅读卡片。**运行这个名称明确包含“上传”的动作即表示本次上传意图**，每次可能产生 API 用量，无须再选图或输入问题。用途固定为翻译并简要解释，尽量在 220 个中文字内；内容较多时要求明确说明是概括。模型、推理、搜索和应用指令沿用当前设置，不更换模型、不暗中修改设置；此入口不使用聊天的自定义默认问题。
+4. 看懂后划走；展开卡片不会再次请求模型。卡片不自动弹键盘、不主动打开 App，也不使用可能重新唤起已关闭卡片的 `SnippetIntent.reload()`。第一版使用系统执行进度及最终卡片，没有卡片内逐字流式输出。具体进度、卡片位置、原应用播放和触控表现由系统决定，均需真机验收。
+5. 模型请求最多等待 25 秒，取消、超时或错误均不自动重试，也不自动切换到 App。新阅读先取消旧请求并清除旧结果；无效新输入不能回退到旧截图。等待中的系统取消会传递到网络任务，但不能撤回已上传数据或保证免计用量。高推理或搜索可能超出这条短路径的等待时间，卡片不会静默降低设置。
+6. 仅在进程内暂存最新一次结果与图片，启动后超过 10 分钟不可继续使用；进程退出后卡片可能提示过期。只有主动点击「在 App 中追问」才请求前台激活，并把相同截图、原接收时间、回答完成状态和来源交给聊天，不重发已有问题；这一步可能全屏，不能承诺恢复 Slide Over。进入 App 后保存到本机历史，保存失败会提示并保留当前可见内容。
+
+本机还没有验证 AssistiveTouch → 快捷指令 → snippet 的完整链路，不能把 Apple 提供 snippet API 等同于当前设备已经通过。Apple 明确不支持从控制中心控件显示 snippets，不用该入口替代验收。受保护画面、截图权限或错误参数会导致取图失败。
+
+## 完整聊天与只收图入口
 
 1. 打开设置，选择供应商并保存自己的 API Key。除密钥外所有参数都有默认值；保存密钥与编辑设置不会进行网络验证。
-2. 按下节配置「系统截屏 → AlwaySide 接收截图」快捷指令，并绑定到 AssistiveTouch 长按。截图入口不启动持续屏幕采集，也不从旧录屏缓存猜测当前画面。
+2. 若希望先收图再手动发送，按下节配置「系统截屏 → AlwaySide 接收截图」快捷指令，并绑定到 AssistiveTouch 长按。只收图动作不启动持续屏幕采集，也不从旧录屏缓存猜测当前画面。
 3. 停留在目标页面长按小球，再从边缘手势唤回已有助手小窗，核对新缩略图后输入问题。照片按钮仍可单选导入图片；不读取整个相册。每次新截图开始新会话、取消旧请求并清空旧图和当前追问；导入失败会明确显示错误，不回退旧图。
 4. 输入问题后发送；输入为空则发送设置中的默认提问。**点击发送即表达本次上传意图**，不再逐次勾选确认。唤起、预览与编辑本身不调用 API。
 5. 回答流式显示，支持 Markdown、代码复制和可点击来源；实际检索状态显示在回答下方。追问沿用当前图片和有界文字上下文。历史菜单可搜索、恢复或删除本机会话，并显示更新日期和时间；新会话按钮清空当前编辑状态。缩略图预览也显示接收日期和时间。
-6. 停止按钮取消本次请求；发送、取消、导入和会话切换都会按各自状态更新。截图入口只传图片，不自动提问、不上传图片。
+6. 停止按钮取消本次请求；发送、取消、导入和会话切换都会按各自状态更新。「接收截图」这两个旧动作仍只传图片、不自动提问或上传；「读懂截图」是独立的显式上传入口。
 
 音频是独立的显式操作：系统音频录制需系统选择器授权，备用麦克风需麦克风权限；每次录制最多 2 分钟，也可导入不超过 20 MiB 的音频。录音结束后由用户选择上传至 OpenAI `gpt-transcribe` 转写，编辑后作为资料附加到聊天，最多 20,000 字，不挤占 2,000 字的问题输入。附加时已有回答会新建会话并保留当前图片；点击发送才把转写资料、当前图片与问题发给所选问答供应商。截图快捷指令与音频录制互不依赖。受保护内容或系统共享限制可能导致无音频；本修订没有视频片段分析。
 
-## 系统入口：Slide Over 与 AssistiveTouch
+## 备用系统入口：Slide Over 与只收图
 
 应用提供适合窄窗口的聊天界面，**窗口位置、大小、置顶和恢复方式由 iPadOS 决定**。代码不能强制进入 Slide Over，也不能创建任意跨 App 常驻的自定义小球。原生「打开 App」入口已观察到全屏打开；不能把这条路径描述为已解决小窗恢复。
 
 - **Slide Over**：由用户通过设备支持的系统多任务操作，把 AlwaySide 放入 Slide Over 并收至边缘，再用系统手势唤回。适用性与具体操作依当前系统多任务模式而定；本项目尚未完成该入口的真机验证。
-- **推荐快捷指令**：依次添加系统「截屏」和 AlwaySide「接收截图（保持当前窗口）」两项动作。接收动作的「截图」参数必须连接前一步「截屏」的输出变量。移除旧的「打开 App」或「打开 URL」，不能先打开助手再截屏。
+- **只收图快捷指令**：依次添加系统「截屏」和 AlwaySide「接收截图（保持当前窗口）」两项动作。接收动作的「截图」参数必须连接前一步「截屏」的输出变量。移除旧的「打开 App」或「打开 URL」，不能先打开助手再截屏。
 - **AssistiveTouch 绑定**：设置 → 辅助功能 → 触控 → AssistiveTouch → 自定操作 → 长按 → 选择上述快捷指令。更新 App 不会自动修改设备里已有的快捷指令或长按绑定；App 内「截图入口设置」页也提供这套步骤。
 - **使用顺序**：目标页面长按小球，后台接收图片，然后从边缘手势唤回已有 Slide Over。默认接收动作只写本机图片收件箱，不要求前台激活；因此仍需一次手势。系统实际是否保持小窗、快捷指令权限及执行时限均需真机验收。
 - **可选直接打开**：第二项可改为「接收截图并打开助手」，同样接收前一步截图。该动作请求前台激活，系统可能全屏，不能承诺恢复原来的小窗。
 - **兼容链接**：`alwayside://ask` 仅打开会话并检查已收到的图片，不截屏。它不适合作为默认的「长按即截图」入口。
 
-本轮代码修订未修改任何设备的 AssistiveTouch、快捷指令或多任务设置。应在两个不同目标页面分别截图，检查每次缩略图确实变化，再验证输入键盘、收起恢复及原应用操作。受保护内容无法绕过系统限制。PiP 不用于冒充可输入、可滚动和可点击来源的聊天窗。
+本轮代码修订未修改任何设备的 AssistiveTouch、快捷指令或多任务设置。卡片主路径不需要预先配置 Slide Over；只收图的备用路径仍需一次恢复手势。应在两个不同目标页面分别截图，核对答案或进入 App 后核对图片确实变化，再验证取消、卡片展开、键盘、收起恢复及原应用操作。受保护内容无法绕过系统限制。PiP 不用于冒充聊天窗。
 
 ## OpenAI 配置
 
@@ -53,7 +64,7 @@
 
 ## 工程验证
 
-单 Application target 使用 SwiftUI、UIKit、AppIntents、ScreenCaptureKit、AVFoundation、ImageIO、PhotosUI、Security 等系统框架，无第三方依赖。最低系统为 27.0、仅 iPad，当前 build 为 6，Debug/Release 共用 `Config/Base.xcconfig`，无额外开发团队、证书或付费服务配置。
+单 Application target 使用 SwiftUI、UIKit、AppIntents、ScreenCaptureKit、AVFoundation、ImageIO、PhotosUI、Security 等系统框架，无第三方依赖。最低系统为 27.0、仅 iPad，当前 build 为 7，Debug/Release 共用 `Config/Base.xcconfig`，无额外开发团队、证书或付费服务配置。
 
 在具有 Xcode 27.1 的 Apple 构建环境中，可进行不签名的编译检查：
 
@@ -83,6 +94,26 @@ xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-a
 ```
 
 CI 在 archive 前执行同一请求契约检查，并运行本机会话持久化、图片恢复、搜索和容量边界的离线检查；图像契约直接运行生产 ImageIO 代码，覆盖接收时间与 JPEG 字节保留、格式与完整性、像素尺寸、3 MiB 交接及 20 MiB 文件边界。检查不调用 API，也不需要密钥。当前 Windows 没有运行上述 Apple 工具链命令，也未调用付费 API。静态检查只覆盖结构与代码状态边界。真机还应覆盖两个不同页面先后截图、后台接收后手势唤回、可选直接打开、无效及过期图片、相册下载中切换会话、转写清空后继续编辑、搜索期间删除历史、无外接键盘、旋转、音频授权与静音来源、停止及中断、密钥锁定后解锁恢复、配置切换、真实流式回答、工具约束、引用与取消。只有成功云构建才提供对应未签名产物；签名安装与运行另需验收。
+
+阅读卡片的离线生命周期契约已接入 CI，覆盖重复读取不重发、最新截图替换、取消传递、超时不重试、迟到结果隔离、过期记录、同图及来源交接和未完成回答。可在上述 Apple 工具链中单独执行（本次 Windows 未执行）：
+
+```sh
+mkdir -p .local
+for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+  apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+  apps/ipad/AlwaySide/Models/Provider.swift \
+  apps/ipad/AlwaySide/Services/PhotoImport.swift \
+  apps/ipad/AlwaySide/Models/QuickReadStore.swift \
+  tests/QuickReadContractChecks.swift; do
+  cat "$source"
+  printf '\n'
+done > .local/QuickReadContractChecks.swift
+xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+  .local/QuickReadContractChecks.swift -o .local/QuickReadContractChecks
+.local/QuickReadContractChecks
+```
+
+卡片的系统依据：[Apple snippets](https://developer.apple.com/documentation/appintents/displaying-static-and-interactive-snippets)、[SnippetIntent 生命周期](https://developer.apple.com/documentation/appintents/snippetintent)、[系统执行进度](https://developer.apple.com/documentation/appintents/progressreportingintent)。这些文档说明 API 行为，不代替 AssistiveTouch、卡片尺寸与关闭后原页面恢复的真机证据。
 
 ## 测试构建
 

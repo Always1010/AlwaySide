@@ -32,7 +32,7 @@ struct ProviderSettingsView: View {
                 Section("默认提问") {
                     TextField("留空发送时使用的问题", text: $model.openAISettings.defaultQuestion, axis: .vertical)
                         .lineLimit(2...5)
-                    Text("点击发送且输入框为空时使用，适用于两家供应商。唤起窗口不会自动发送。")
+                    Text("在聊天中点击发送且输入框为空时使用，适用于两家供应商。原地阅读入口使用固定的翻译与简要解释用途。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 if model.provider == .openAI {
@@ -49,6 +49,7 @@ struct ProviderSettingsView: View {
                     Text("密钥仅存此设备 Keychain，不同步 iCloud。模型、指令与默认问题保存在本机；聊天、来源、音频转写文字和当前图片存入本机应用目录，不纳入 iCloud 备份。")
                     Text("最多保存 30 段会话，每段最多 60 轮、1 张图片及 1 份音频转写；达到会话上限需先删除旧会话，达到轮数上限需新建对话，不自动删除。可从历史搜索、打开或删除聊天与图片。点击发送才将当前图片（如有）、问题与最近 3 轮完整文字发至所选供应商。使用你的 API 账户用量，不自动重试或更换供应商。OpenAI 搜索与音频转写也可能产生用量。录音只在你点击转写后上传，临时音频在关闭录音页时清除。")
                     Text("请求开始时固定配置；正在进行的回答不随此处编辑变化。OpenAI 使用 store=false；清空本机数据无法撤回已发数据，实际保留规则由供应商账户政策决定。")
+                    Text("快捷指令「读懂截图（上传并原地显示）」会在运行时直接上传本次截图并返回系统卡片，使用所选供应商及模型设置；卡片展开不再次请求。卡片结果只暂存在内存，主动进入 App 追问后才保存到聊天历史。「体验原地卡片（不联网）」只展示示例。")
                 }.font(.footnote)
             }
             .navigationTitle("助手设置")

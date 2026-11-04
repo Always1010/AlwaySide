@@ -1,6 +1,6 @@
 import Foundation
 
-enum ModelProvider: String, CaseIterable, Identifiable {
+enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
     case openAI
     case deepSeek
 

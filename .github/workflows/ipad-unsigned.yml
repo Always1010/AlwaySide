@@ -95,6 +95,23 @@ jobs:
           xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
             "$RUNNER_TEMP/ImageImportContractChecks.swift" -o "$RUNNER_TEMP/ImageImportContractChecks"
           "$RUNNER_TEMP/ImageImportContractChecks"
+      - name: Check quick reading cancellation and handoff without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Services/PhotoImport.swift \
+            apps/ipad/AlwaySide/Models/QuickReadStore.swift \
+            tests/QuickReadContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/QuickReadContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/QuickReadContractChecks.swift" -o "$RUNNER_TEMP/QuickReadContractChecks"
+          "$RUNNER_TEMP/QuickReadContractChecks"
       - name: Archive without signing
         shell: bash
         run: |

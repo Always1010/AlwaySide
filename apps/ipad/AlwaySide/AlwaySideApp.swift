@@ -11,12 +11,18 @@ struct AlwaySideApp: App {
             CompanionView(model: model, capture: model.capture)
                 .task {
                     refreshKeyStatusIfAvailable()
-                    if scenePhase == .active { await ScreenshotInboxDelivery.consume(using: model) }
+                    if scenePhase == .active {
+                        await ScreenshotInboxDelivery.consume(using: model)
+                        consumeQuickReadHandoff()
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         refreshKeyStatusIfAvailable()
-                        Task { await ScreenshotInboxDelivery.consume(using: model) }
+                        Task {
+                            await ScreenshotInboxDelivery.consume(using: model)
+                            consumeQuickReadHandoff()
+                        }
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
@@ -34,10 +40,16 @@ struct AlwaySideApp: App {
                         ScreenshotInboxDelivery.begin(using: model, receiptID: receiptID)
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: QuickReadStore.handoffNotification)) { _ in
+                    if scenePhase == .active { consumeQuickReadHandoff() }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeKeyNotification)) { notification in
                     guard let window = notification.object as? UIWindow,
                           window.windowScene?.activationState == .foregroundActive else { return }
-                    Task { await ScreenshotInboxDelivery.consume(using: model) }
+                    Task {
+                        await ScreenshotInboxDelivery.consume(using: model)
+                        consumeQuickReadHandoff()
+                    }
                 }
                 .onOpenURL { url in
                     guard url.scheme?.lowercased() == "alwayside",
@@ -46,6 +58,11 @@ struct AlwaySideApp: App {
                     Task { await ScreenshotInboxDelivery.consume(using: model) }
                 }
         }
+    }
+
+    @MainActor
+    private func consumeQuickReadHandoff() {
+        if let result = QuickReadStore.shared.takeHandoff() { model.acceptQuickRead(result) }
     }
 
     @MainActor

@@ -53,17 +53,8 @@ actor ScreenshotInbox {
             // the next launch sees an incomplete handoff instead of an older screenshot.
             try write(Pending(id: receiptID, receivedAt: receivedAt, jpegData: nil,
                               failure: "本次截图接收未完成，请重新运行「截屏 → 接收截图」。"))
-            // Ask for a concrete representation; do not interpret an arbitrary URL or pasteboard.
-            let representation = try await image.file(contentType: .png)
-            defer {
-                if !representation.openedInPlace {
-                    try? FileManager.default.removeItem(at: representation.fileURL)
-                }
-            }
+            let snapshot = try await ScreenshotFileImport.load(image, receivedAt: receivedAt)
             guard latestReceiptID == receiptID else { return }
-            let scoped = representation.fileURL.startAccessingSecurityScopedResource()
-            defer { if scoped { representation.fileURL.stopAccessingSecurityScopedResource() } }
-            let snapshot = try PhotoImport.snapshot(from: representation.fileURL)
             try write(Pending(id: receiptID, receivedAt: receivedAt, jpegData: snapshot.frame.jpegData, failure: nil))
             isReceiving = false
         } catch {
@@ -138,6 +129,28 @@ actor ScreenshotInbox {
 
     private func announceChange(failure: ReceiptFailure? = nil) async {
         await MainActor.run { NotificationCenter.default.post(name: Self.didChange, object: failure) }
+    }
+}
+
+/// Shared by the local inbox and the explicit upload action; never opens a window or sends data.
+enum ScreenshotFileImport {
+    static func load(_ image: IntentFile, receivedAt: Date) async throws -> EvidenceSnapshot {
+        try Task.checkCancellation()
+        // Ask for a concrete representation, rather than reading a URL or the pasteboard implicitly.
+        let representation = try await image.file(contentType: .png)
+        defer {
+            if !representation.openedInPlace {
+                try? FileManager.default.removeItem(at: representation.fileURL)
+            }
+        }
+        let scoped = representation.fileURL.startAccessingSecurityScopedResource()
+        defer { if scoped { representation.fileURL.stopAccessingSecurityScopedResource() } }
+        try Task.checkCancellation()
+        let imported = try PhotoImport.snapshot(from: representation.fileURL)
+        let frame = CapturedFrame(id: imported.id, timestamp: receivedAt,
+            monotonicSeconds: imported.frame.monotonicSeconds, jpegData: imported.frame.jpegData,
+            width: imported.frame.width, height: imported.frame.height)
+        return EvidenceSnapshot(frame: frame, origin: "快捷指令截图（时间为接收时间）", isImported: true)
     }
 }
 
