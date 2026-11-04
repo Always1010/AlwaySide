@@ -34,6 +34,11 @@ final class ShortcutListening: ObservableObject {
             UserDefaults.standard.set(false, forKey: interruptedKey)
             throw ListeningError.interrupted
         }
+        if pendingFile, !recorder.isRecording, recorder.fileURL == nil {
+            pendingFile = false
+            UserDefaults.standard.set(false, forKey: interruptedKey)
+            throw ListeningError.interrupted
+        }
         busy = true
         defer { busy = false }
         if pendingFile {
