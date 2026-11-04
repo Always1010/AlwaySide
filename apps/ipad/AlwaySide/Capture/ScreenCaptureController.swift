@@ -290,19 +290,17 @@ extension ScreenCaptureController: SCStreamDelegate {
 }
 
 enum ScreenCaptureSource: String, CaseIterable, Identifiable {
-    case display, application, window
+    case display, window
     var id: String { rawValue }
     var title: String {
         switch self {
         case .display: "整个屏幕"
-        case .application: "指定应用（试验）"
         case .window: "指定窗口（试验）"
         }
     }
     fileprivate var style: SCShareableContentStyle {
         switch self {
         case .display: .display
-        case .application: .application
         case .window: .window
         }
     }
