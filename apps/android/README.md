@@ -1,25 +1,70 @@
-# AlwaySide Android
+# Android 工程说明
 
-原生 Kotlin Android 悬浮阅读助手，通过 Responses API 理解整屏或选区，通过文件转写接口处理一段内部播放音频，并在悬浮面板持续追问。最低 Android 10（API 29）。采用用户自行填写 API Key 的个人使用方式。
+产品功能和使用入口见[根目录 README](../../README.md)。本工程为原生 Kotlin 单应用模块，界面使用平台 View / Activity，悬浮窗口由 WindowManager 管理，没有 Compose 或 AndroidX 运行时依赖。
 
-## 构建
+## 固定工具链
 
-需要 JDK 17、Android SDK Platform 36 与 Build-Tools 36.0.0。项目固定 AGP 9.5.0 / Gradle 9.6.0。为该进程设置 JAVA_HOME、ANDROID_HOME、GRADLE_USER_HOME，然后在本目录运行 Gradle Wrapper。
+| 项目 | 工程配置 |
+| --- | --- |
+| JDK | 17 |
+| Android Gradle Plugin | 9.5.0，使用其内置 Kotlin 支持 |
+| Gradle Wrapper | 9.6.0，发行包 SHA256 固定在 wrapper 配置 |
+| compileSdk / targetSdk | 36 / 36 |
+| minSdk | 29 |
+| Build-Tools | 36.0.0 |
+| applicationId | com.alwayside.android |
+
+版本号以 [app/build.gradle.kts](app/build.gradle.kts) 为准。Android Studio 不是命令行构建的必需条件；本机出包无需模拟器、NDK、手机驱动或连接手机。
+
+## 当前工作区构建
+
+在仓库根目录运行已有本机辅助脚本：
+
+```powershell
+python .local/android/build.py :app:assembleDebug :app:lintDebug
+```
+
+该脚本复用现有 JDK 17，仅为构建子进程指定环境变量；SDK、Android 工具状态、Gradle 缓存均位于仓库的 .local 下。它会生成已被 Git 忽略的 apps/android/local.properties。脚本包含本机绝对路径，不作为通用安装器；其他电脑需先准备工具链并配置对应路径。
+
+完整 APK 输出：app/build/outputs/apk/debug/app-debug.apk（相对于本工程目录）。
+
+已有标准工具链的环境也可以在本目录运行：
+
+```powershell
+.\gradlew.bat :app:assembleDebug :app:lintDebug
+```
+
+先为当前终端配置 JDK 17、SDK 路径和所需缓存目录；不要依赖系统默认 Java 的版本。SDK 路径可以通过 local.properties 指定，Windows 冒号及反斜杠须遵循 Java properties 转义规则。
+
+## 测试签名
 
 调试签名仅用于本地测试，私钥不入库；覆盖升级需要使用同一签名。
 
-开发计划、设备测试结果及交付记录在根 `.local/android/`，不纳入 Git。
+覆盖升级必须保留同一私钥。新环境需要原测试签名才能覆盖已安装的包；重新生成同名文件不会恢复原签名。本机 build.py 在签名文件缺失时会生成新密钥，因此已有安装用户的环境必须先确认签名文件仍在。
 
-## 使用
+## 定向验证
 
-先在设置中填写 HTTPS API Base URL（以 /v1 结尾）、API Key 和模型，编辑 Instructions 与画面/音频默认问题。支持命名提示词预设。Key 通过 Android KeyStore 加密保存；配置页禁止截图。没有内置密钥或后台自动发送。
+按实际改动选择测试类，例如请求与会话变化时：
 
-主界面开启悬浮球并允许系统悬浮权限；共享屏幕后返回目标应用。点击球打开面板，长按进入冻结画面框选，拖动可移动并贴边。整屏和框选均提供快速解释与自行提问；框选只发送所选区域。回答流式展示，可复制、取消、收起或展开。
+```powershell
+.\gradlew.bat :app:testDebugUnitTest --tests com.alwayside.android.ProviderProtocolTest --tests com.alwayside.android.ChatSessionTest
+```
 
-追问可选择沿用原图、发送时更新画面或不附图。更新框选时沿用区域，屏幕尺寸/旋转变化要求重新框选。图片显示取图时间；不附图仅去除图片字节，仍携带最近文字上下文，新会话可清空。设置的“每轮更新”用于新会话的默认附图模式，单轮可以另选。
+GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTest 保护地址、流边界和取消；ChatSessionTest 保护旧回调隔离、配置快照和转写复用。测试不会调用真实 API。真实服务、KeyStore、悬浮输入和音源可录性需真机验证。
 
-内部音频需要另行授予录音权限，数据源仅使用 AudioPlaybackCapture。面板开启录制，收起后小球变色，再点击小球结束并解释；也可选择结束后自行提问。每段最多两分钟，可以回听或丢弃。音频先转写，再解释；解释失败时手动重试复用已有转写与原请求配置。音频问题默认不附图，可切换到更新画面后发送。来源应用拒绝采集时可能无声，不切换麦克风。图片不落盘；录音只在私有缓存，停止助手或重新启动服务时清理。
+## 源码职责
 
-文字历史保存在本机，最多 50 个会话；支持查看、复制、删除和恢复文字追问。历史不保存原始媒体，恢复时明确提示重新获取。每次请求固定配置和证据；取消、新会话或服务停止后，迟到的结果不得写回新会话。网络请求不自动重试，也不携带服务端会话 ID。可选推理参数与联网搜索需要模型和服务实际支持，不假定第三方接口完全兼容。
+以下类位于 app/src/main/java/com/alwayside/android/：
 
-构建：`gradlew.bat :app:assembleDebug :app:lintDebug`。按改动选择 `:app:testDebugUnitTest --tests <测试类>`。产物为 `app/build/outputs/apk/debug/app-debug.apk`。单元测试覆盖坐标、WAV、流传输约束和请求隔离等关键边界；真实 API 兼容性与窗口体验需真机验证。
+| 类 | 职责 |
+| --- | --- |
+| MainActivity / SettingsActivity / HistoryActivity | 授权入口、配置、文字历史 |
+| AssistantService | 前台服务、悬浮球、面板、框选和采集操作 |
+| FrameSource / CropView / Geometry | 新画面获取、冻结选择、坐标映射 |
+| PlaybackRecorder / Wav | 内部播放音频采集与 WAV 封装 |
+| ChatSession | 本轮配置与证据快照、追问、取消、重试、转写复用 |
+| AiProvider / ProviderProtocol | HTTPS、Responses SSE、文件转写与有界解析 |
+| SettingsStore / HistoryStore | KeyStore 加密凭据、预设和原子写入文字历史 |
+| Contracts / MarkdownText / Ui / ProbeState | 数据契约、展示及不含媒体和密钥的运行诊断 |
+
+开发计划、验收结果和交付记录只放仓库根 .local/android/。工程 README 描述使用和结构，不承担阶段进度记录。
