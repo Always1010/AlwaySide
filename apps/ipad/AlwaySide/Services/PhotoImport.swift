@@ -3,6 +3,26 @@ import ImageIO
 import UIKit
 
 enum PhotoImport {
+    /// Validate a transferred file before reading it, and cap the read even if it grows meanwhile.
+    static func snapshot(from url: URL) throws -> EvidenceSnapshot {
+        guard url.isFileURL else { throw ClientError.invalidImage }
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true, let size = values.fileSize, size > 0 else {
+            throw ClientError.invalidImage
+        }
+        let maximumBytes = 20 * 1024 * 1024
+        guard size <= maximumBytes else { throw ClientError.tooLarge }
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        var data = Data()
+        while let chunk = try file.read(upToCount: min(64 * 1024, maximumBytes + 1 - data.count)),
+              !chunk.isEmpty {
+            data.append(chunk)
+            guard data.count <= maximumBytes else { throw ClientError.tooLarge }
+        }
+        return try snapshot(from: data)
+    }
+
     /// Downsample before decoding a full-resolution photo; retain only a bounded JPEG in memory.
     static func snapshot(from data: Data) throws -> EvidenceSnapshot {
         guard data.count <= 20 * 1024 * 1024 else { throw ClientError.tooLarge }
