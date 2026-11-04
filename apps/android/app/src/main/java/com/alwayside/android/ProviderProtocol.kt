@@ -1,0 +1,120 @@
+package com.alwayside.android
+
+import java.io.InputStream
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URL
+import java.util.concurrent.CancellationException
+
+/** One cancellation token per request; cancellation also interrupts a blocked network read. */
+internal class RequestCancellation {
+    @Volatile private var cancelled = false
+    private var connection: HttpURLConnection? = null
+
+    fun cancel() {
+        val active = synchronized(this) {
+            cancelled = true
+            connection.also { connection = null }
+        }
+        active?.disconnect()
+    }
+
+    fun throwIfCancelled() {
+        if (cancelled || Thread.currentThread().isInterrupted) throw CancellationException("请求已取消")
+    }
+
+    internal fun attach(active: HttpURLConnection) {
+        synchronized(this) {
+            throwIfCancelled()
+            check(connection == null) { "取消令牌不能同时用于多个请求" }
+            connection = active
+        }
+        // Covers cancellation immediately after attaching and before opening the socket.
+        throwIfCancelled()
+    }
+
+    internal fun detach(active: HttpURLConnection) {
+        synchronized(this) { if (connection === active) connection = null }
+    }
+}
+
+internal class ProviderException(message: String) : Exception(message)
+
+internal object ProviderProtocol {
+    fun endpoint(baseUrl: String, route: String): URL {
+        val uri = try { URI(baseUrl.trim().trimEnd('/')) } catch (_: Exception) {
+            throw ProviderException("API 地址无效，请使用 HTTPS 且以 /v1 结尾")
+        }
+        if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.rawUserInfo != null ||
+            uri.rawQuery != null || uri.rawFragment != null || uri.port !in -1..65535 ||
+            uri.port == 0 || uri.rawPath != uri.path || uri.normalize() != uri ||
+            !uri.path.orEmpty().endsWith("/v1") || uri.path.orEmpty().contains("//") ||
+            route !in setOf("responses", "audio/transcriptions")) {
+            throw ProviderException("API 地址无效，请使用 HTTPS 且以 /v1 结尾，不含账号、查询或片段")
+        }
+        return URL("${uri.toASCIIString()}/$route")
+    }
+}
+
+internal data class ServerEvent(val name: String, val data: String)
+
+/** SSE framing, including multiline data and CRLF, with bounded lines, events and total input. */
+internal class EventStream(
+    input: InputStream,
+    private val cancellation: RequestCancellation,
+    private val deadlineNanos: Long,
+    private val maxLine: Int = 1024 * 1024,
+    private val maxEvent: Int = 2 * 1024 * 1024,
+    private val maxTotal: Int = 16 * 1024 * 1024,
+) {
+    private val reader = InputStreamReader(input, Charsets.UTF_8)
+    private var total = 0
+    private var firstCharacter = true
+    private var skipLf = false
+
+    fun next(): ServerEvent? {
+        var event = "message"
+        val data = StringBuilder()
+        while (true) {
+            val line = readLine() ?: return null // An unclosed event is truncated, never dispatched.
+            if (line.isEmpty()) {
+                if (data.isNotEmpty()) return ServerEvent(event, data.dropLast(1).toString())
+                event = "message"
+                continue
+            }
+            if (line.startsWith(':')) continue
+            val split = line.indexOf(':')
+            val field = if (split < 0) line else line.substring(0, split)
+            val value = if (split < 0) "" else line.substring(split + 1).removePrefix(" ")
+            when (field) {
+                "event" -> event = value
+                "data" -> {
+                    if (data.length + value.length + 1 > maxEvent) throw ProviderException("服务返回内容过大")
+                    data.append(value).append('\n')
+                }
+            }
+        }
+    }
+
+    private fun readLine(): String? {
+        val line = StringBuilder()
+        while (true) {
+            cancellation.throwIfCancelled()
+            if (System.nanoTime() > deadlineNanos) throw ProviderException("请求超时，请手动重试")
+            val code = reader.read()
+            if (code < 0) return null
+            if (++total > maxTotal) throw ProviderException("服务返回内容过大")
+            val char = code.toChar()
+            if (firstCharacter) {
+                firstCharacter = false
+                if (char == '\uFEFF') continue
+            }
+            if (skipLf) { skipLf = false; if (char == '\n') continue }
+            if (char == '\r') { skipLf = true; return line.toString() }
+            if (char == '\n') return line.toString()
+            if (line.length >= maxLine) throw ProviderException("服务返回内容过大")
+            line.append(char)
+        }
+    }
+}
