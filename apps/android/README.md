@@ -1,6 +1,6 @@
 # Android 工程说明
 
-产品功能和使用入口见[根目录 README](../../README.md)。本工程为原生 Kotlin 单应用模块，界面使用平台 View / Activity，悬浮窗口由 WindowManager 管理，没有 Compose 或 AndroidX 运行时依赖。
+产品功能和使用入口见[根目录 README](../../README.md)。本工程为 Kotlin 单应用模块，界面使用 View / Activity 与 Google Material Components 1.14.0，悬浮窗口由 WindowManager 管理。Material3 与 AppCompatDelegate 提供成熟组件及主题，保留平台 Activity 的会话保留逻辑；不使用 Compose 或前端运行时。
 
 ## 固定工具链
 
@@ -13,6 +13,7 @@
 | minSdk | 29 |
 | Build-Tools | 36.0.0 |
 | applicationId | com.alwayside.android |
+| Material Components | 1.14.0（固定版本，含必要 AndroidX 传递依赖） |
 
 版本号以 [app/build.gradle.kts](app/build.gradle.kts) 为准。Android Studio 不是命令行构建的必需条件；本机出包无需模拟器、NDK、手机驱动或连接手机。
 
@@ -56,6 +57,8 @@ AppNavigationTest 保护设置详情返回不弹出分类页、聊天进入设�
 
 AppearanceModeTest 保护跟随系统与强制浅／深色；InteractionDefaultsTest 保护旧默认组合升级和自定义保留；PromptPresetTest 保护旧模板兼容、整页提示配置恢复及凭据隔离。外观变化只重建悬浮 View，取帧、框选和授权期间延迟刷新，保持采集及会话所有权。
 
+SettingsUpdateTest / FieldEditStateTest 保护逐项配置补丁与取消草稿；HistorySelectionTest 保护选择恢复及确认快照删除；ThemeSchemeTest 检查完整配色方案的动作文字对比。新增 Material 依赖首次构建需要下载对应运行和 lint 依赖；依赖齐全后可离线构建。
+
 ## 源码职责
 
 以下类位于 app/src/main/java/com/alwayside/android/：
@@ -64,6 +67,7 @@ AppearanceModeTest 保护跟随系统与强制浅／深色；InteractionDefaults
 | --- | --- |
 | MainActivity / AppNavigation / AppEntry | 单应用窗口、页面返回栈、状态恢复与可信内部入口 |
 | SettingsScreen / ChatScreen / AppConversationUi | 分类设置、原生聊天、记录列表及共享导航标签 |
+| SettingsUpdate / FieldEditState / HistorySelection | 单项配置补丁、局部编辑及多选删除快照 |
 | AppAppearance / AppearanceMode / ThemedActivity / Ui | 持久主题、平台配置上下文、应用与悬浮控件状态 |
 | ColorPicker / PromptPreset | 可视颜色草稿、整页提示模板与旧模板合并 |
 | ProcessTextActivity | 系统 PROCESS_TEXT / SEND 纯文本入口与无悬浮权限回退 |
