@@ -1,0 +1,160 @@
+# Test-tag or manual unsigned build. Standard runner only; no paid overage.
+# Account preflight: sufficient included storage and effective $0 paid
+# Actions Stop-usage protection (or no payment method); never enable paid overage.
+name: iPad unsigned build
+on:
+  push:
+    tags:
+      - 'ipad-test-*'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ipad-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified official ref 2026-11-03
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+      - name: Verify build revision and test tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            if [[ "$GITHUB_REF_TYPE" != "tag" || ! "$GITHUB_REF_NAME" =~ ^ipad-test-[0-9]{8}-[0-9]{3}$ ]]; then
+              printf '%s\n' 'Test tag must use ipad-test-YYYYMMDD-NNN.' >&2
+              exit 1
+            fi
+          fi
+      - name: Verify stable toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          printf 'ImageOS=%s ImageVersion=%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+          xcodebuild -version
+          test "$(xcodebuild -version | head -n 1)" = 'Xcode 27.1'
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = '27.1'
+      - name: Check OpenAI request and stream contracts without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Run once; failures stop before archive and are never retried automatically.
+          # Same-file fixture exercises private production stream code without exposing it in the app.
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Services/VisionClient.swift \
+            apps/ipad/AlwaySide/Services/AudioTranscriptionClient.swift \
+            tests/OpenAIContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/OpenAIContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/OpenAIContractChecks.swift" -o "$RUNNER_TEMP/OpenAIContractChecks"
+          "$RUNNER_TEMP/OpenAIContractChecks"
+      - name: Check local chat persistence contracts without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Models/ChatSessionStore.swift \
+            tests/ChatHistoryContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/ChatHistoryContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/ChatHistoryContractChecks.swift" -o "$RUNNER_TEMP/ChatHistoryContractChecks"
+          "$RUNNER_TEMP/ChatHistoryContractChecks"
+      - name: Check image import contracts without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Services/PhotoImport.swift \
+            tests/ImageImportContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/ImageImportContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/ImageImportContractChecks.swift" -o "$RUNNER_TEMP/ImageImportContractChecks"
+          "$RUNNER_TEMP/ImageImportContractChecks"
+      - name: Check audio explanation cancellation and retry without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Services/AudioTranscriptionClient.swift \
+            apps/ipad/AlwaySide/Models/AudioReadStore.swift \
+            tests/AudioReadContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/AudioReadContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/AudioReadContractChecks.swift" -o "$RUNNER_TEMP/AudioReadContractChecks"
+          "$RUNNER_TEMP/AudioReadContractChecks"
+      - name: Archive without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project apps/ipad/AlwaySide.xcodeproj \
+            -scheme AlwaySide -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/AlwaySide.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO archive
+      - name: Package unsigned IPA for later personal signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/AlwaySide.xcarchive/Products/Applications/AlwaySide.app"
+          test -d "$app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
+          test -f "$app/$executable"
+          lipo -verify_arch arm64 "$app/$executable"
+          extension="$app/Extensions/AlwaySideTranslation.appex"
+          test -d "$extension"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension/Info.plist")" = 'local.alwayside.ipad.translation'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :EXAppExtensionAttributes:EXExtensionPointIdentifier' "$extension/Info.plist")" = 'com.apple.public.translation-ui-provider'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$extension/Info.plist")"
+          extension_executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$extension/Info.plist")
+          lipo -verify_arch arm64 "$extension/$extension_executable"
+          mkdir -p "$RUNNER_TEMP/package/Payload"
+          ditto "$app" "$RUNNER_TEMP/package/Payload/AlwaySide.app"
+          cd "$RUNNER_TEMP/package"
+          /usr/bin/zip -qry "$RUNNER_TEMP/AlwaySide-unsigned.ipa" Payload
+          test -s "$RUNNER_TEMP/AlwaySide-unsigned.ipa"
+          test "$(stat -f%z "$RUNNER_TEMP/AlwaySide-unsigned.ipa")" -le 52428800
+          /usr/bin/unzip -tq "$RUNNER_TEMP/AlwaySide-unsigned.ipa"
+          cd "$RUNNER_TEMP"
+          shasum -a 256 AlwaySide-unsigned.ipa > AlwaySide-unsigned.ipa.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, verified official ref 2026-11-03
+        with:
+          name: AlwaySide-unsigned-REQUIRES-SIGNING
+          path: |
+            ${{ runner.temp }}/AlwaySide-unsigned.ipa
+            ${{ runner.temp }}/AlwaySide-unsigned.ipa.sha256
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
