@@ -130,6 +130,7 @@ class AssistantService : Service() {
         var automaticFirstQuestion = false
         var originalExpanded = false
         var detached = false
+        var openingInApp = false
         var root: OutsideFrame? = null
         var layout: WindowManager.LayoutParams? = null
         var response: LinearLayout? = null
@@ -529,6 +530,7 @@ class AssistantService : Service() {
             node.pin=addIconAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示") {
                 node.pinned=!node.pinned;updatePin(node)
             }
+            addIconAction(2,R.drawable.ic_line_expand,"在应用中打开") { openConversationInApp(node) }
         }
         body.addView(header,LinearLayout.LayoutParams(-1,dp(48)))
         val content=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(15),dp(13),dp(15),dp(8)) }
@@ -618,6 +620,15 @@ class AssistantService : Service() {
         contentDescription=if(node.pinned)"取消固定，之后点外部收起" else "固定窗口，点外部保持显示"
         tooltipText=contentDescription
     }}
+    private fun openConversationInApp(node:FloatingConversation){
+        if(!alive||gathering||node.detached||node.openingInApp)return
+        node.openingInApp=true
+        // Keep the visible overlay until startActivity so the user-initiated launch is allowed.
+        try {
+            startActivity(AppEntry.intent(this,AppPage.CHAT,node.chat.conversationId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            main.postDelayed({if(!node.detached)node.openingInApp=false},1500)
+        } catch(_:RuntimeException){node.openingInApp=false;toast("无法打开应用聊天，请稍后重试")}
+    }
     private fun updateSearch(node:FloatingConversation) {
         node.search?.apply {
             val selected=node.webSearchOverride ?: node.searchDefault
