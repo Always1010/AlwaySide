@@ -572,7 +572,7 @@ class AssistantService : Service() {
         node.status=uiContext.label("",11f,true).apply{setPadding(0,dp(6),0,0)}.also{content.addView(it)}
         val scroll=ScrollView(uiContext).apply { addView(content);isFillViewport=true;isVerticalScrollBarEnabled=true }
         node.scroll=scroll;body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-        val controls=LinearLayout(uiContext).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),0,dp(32),0) }
+        val controls=LinearLayout(uiContext).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),0,dp(8),0) }
         fun compactControl(resource:Int,description:String,action:()->Unit)=icon(resource,description,action).apply {
             iconSize=dp(14);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
             setPadding(dp(9),0,dp(9),0)
@@ -592,6 +592,7 @@ class AssistantService : Service() {
         }.also { followUpEntry.addView(it,FrameLayout.LayoutParams(-2,-1,Gravity.START or Gravity.CENTER_VERTICAL)) }
         node.cancel=compactControl(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答") { node.chat.cancel() }
         node.retry=compactControl(android.R.drawable.ic_popup_sync,"重试原问题与证据") { if(!gathering)node.chat.retry() }
+        val resize=compactControl(R.drawable.ic_resize,"拖动调整窗口大小") {}
         node.copy=compactControl(R.drawable.ic_copy,"复制最近回答") {
             val text=node.chat.partial.ifBlank { node.chat.messages.lastOrNull{it.role=="assistant"}?.text.orEmpty() }
             if(text.isNotBlank()){getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("AlwaySide",text));toast("已复制")}
@@ -638,12 +639,10 @@ class AssistantService : Service() {
         }.also{requestTools.addView(it,LinearLayout.LayoutParams(dp(48),dp(48)).apply{marginStart=dp(4)})}
         node.send=icon(android.R.drawable.ic_menu_send,"发送问题") { sendQuestion(node,node.draft) }.apply{applyIconActionStyle(primary=true)}.also{requestTools.addView(it,LinearLayout.LayoutParams(dp(48),dp(48)).apply{marginStart=dp(4)})}
         composer.addView(row)
-        composer.addView(requestTools,LinearLayout.LayoutParams(-1,-2).apply { marginEnd=dp(24) })
+        composer.addView(requestTools,LinearLayout.LayoutParams(-1,-2))
         composerSection.addView(composer,LinearLayout.LayoutParams(-1,-2))
         body.addView(composerSection,LinearLayout.LayoutParams(-1,-2));root.addView(body,FrameLayout.LayoutParams(-1,-1))
         setComposerExpanded(node,node.composerExpanded)
-        val resize=icon(R.drawable.ic_resize,"拖动调整窗口大小") {}.apply { alpha=.55f;iconSize=dp(14);setPadding(dp(14),dp(14),0,0);minimumWidth=0;minimumHeight=0 }
-        root.addView(resize,FrameLayout.LayoutParams(dp(32),dp(32),Gravity.BOTTOM or Gravity.END))
         installDrag(node,header,root,layout,false);installDrag(node,resize,root,layout,true)
         if(Build.VERSION.SDK_INT>=30)root.setOnApplyWindowInsetsListener{_,insets->
             val ime=insets.getInsets(WindowInsets.Type.ime()).bottom
