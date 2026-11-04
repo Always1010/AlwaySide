@@ -98,7 +98,7 @@ struct VisionClient {
             var input: [[String: Any]] = []
             for turn in recent {
                 input.append(["role": "user", "content": String(turn.question.prefix(2000))])
-                input.append(["role": "assistant", "content": String(turn.answer.prefix(4000))])
+                input.append(["role": "assistant", "content": String(turn.answer.prefix(12000))])
             }
             var content: [[String: Any]] = [["type": "input_text", "text": question]]
             if let image { content.append(["type": "input_image", "image_url": image, "detail": "auto"]) }
@@ -122,7 +122,7 @@ struct VisionClient {
             var messages: [[String: Any]] = [["role": "system", "content": Self.instructions]]
             for turn in recent {
                 messages.append(["role": "user", "content": String(turn.question.prefix(2000))])
-                messages.append(["role": "assistant", "content": String(turn.answer.prefix(4000))])
+                messages.append(["role": "assistant", "content": String(turn.answer.prefix(12000))])
             }
             messages.append(["role": "user", "content": [
                 ["type": "text", "text": question],

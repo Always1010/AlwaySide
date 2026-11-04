@@ -106,6 +106,39 @@ private struct OpenAIContractChecks {
             _ = try client.makeBody(provider: .deepSeek, question: "test", jpeg: nil, history: [])
             fatalError("FAIL: changed legacy DeepSeek image contract")
         } catch ClientError.invalidImage { checks += 1 }
+        let history = (1...4).map { index -> ConversationTurn in
+            let tail = "超过四千字的完整结尾-\(index)"
+            return ConversationTurn(question: "历史问题-\(index)",
+                                    answer: String(repeating: "答", count: 12000 - tail.count) + tail)
+        }
+        for provider in ModelProvider.allCases {
+            for count in [0, 1, 3, 4] {
+                let supplied = Array(history.prefix(count))
+                let request = try client.makeBody(provider: provider, question: "当前问题", jpeg: Data([1]),
+                                                  history: supplied, openAISettings: settings)
+                let body = try JSONSerialization.jsonObject(with: request) as! [String: Any]
+                let messages = body[provider == .openAI ? "input" : "messages"] as! [[String: Any]]
+                let context = provider == .openAI ? messages : Array(messages.dropFirst())
+                let expected = Array(supplied.suffix(3))
+                expect(context.count == expected.count * 2 + 1 && context.last?["role"] as? String == "user",
+                       "\(provider) history retains at most three pairs before the current question")
+                for (index, turn) in expected.enumerated() {
+                    expect(context[index * 2]["role"] as? String == "user" &&
+                           context[index * 2]["content"] as? String == turn.question,
+                           "\(provider) recent history questions remain ordered")
+                    expect(context[index * 2 + 1]["role"] as? String == "assistant" &&
+                           context[index * 2 + 1]["content"] as? String == turn.answer,
+                           "\(provider) preserves the complete 12000-character answer including its tail beyond 4000")
+                }
+            }
+            let oversized = ConversationTurn(question: "过长历史", answer: history[0].answer + "超")
+            let boundedRequest = try client.makeBody(provider: provider, question: "当前问题", jpeg: Data([1]),
+                                                     history: [oversized], openAISettings: settings)
+            let boundedBody = try JSONSerialization.jsonObject(with: boundedRequest) as! [String: Any]
+            let boundedMessages = boundedBody[provider == .openAI ? "input" : "messages"] as! [[String: Any]]
+            let boundedAnswer = boundedMessages.first { $0["role"] as? String == "assistant" }?["content"] as? String
+            expect(boundedAnswer == history[0].answer, "\(provider) bounds malformed oversized history at 12000 characters")
+        }
         let audioURL = FileManager.default.temporaryDirectory.appendingPathComponent("private-fixture-\(UUID()).m4a")
         defer { try? FileManager.default.removeItem(at: audioURL) }
         try Data([1, 2, 3]).write(to: audioURL)
