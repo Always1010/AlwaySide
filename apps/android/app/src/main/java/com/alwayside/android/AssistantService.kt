@@ -32,7 +32,24 @@ class AssistantService : Service() {
     private var ballX=0
     private var ballY=240
     private var draft=""
-    private var message="点击取图查看结果；本包不发送 AI 请求。"
+    private var message="选择眼前的内容，快速解释或自行提问。"
+    private lateinit var chat: ChatSession
+    private var responseView: TextView?=null
+    private var requestStatus: TextView?=null
+    private var transcriptView: TextView?=null
+    private var sendButton: View?=null
+    private var cancelButton: View?=null
+    private var retryButton: View?=null
+    private var imageMode=0 // 0 original, 1 update at send time, 2 none
+    private var useAudio=false
+    private var expanded=false
+    private var gathering=false
+    private var cropBounds: PixelCrop?=null
+    private var cropSourceSize: Pair<Int,Int>?=null
+    private var cropRotation: Int?=null
+    private var lastCaptureRotation=0
+    private var finishAction=0 // save, explain, ask, discard
+    private var clipTime=0L
     private var recorder: PlaybackRecorder?=null
     private var clip: AudioClip?=null
     private var player: MediaPlayer?=null
@@ -62,6 +79,8 @@ class AssistantService : Service() {
     }
     override fun onCreate() {
         super.onCreate()
+        chat=ChatSession(this) { refreshChat() }
+        imageMode=if (runCatching { SettingsStore(this).load().autoUpdateImage }.getOrDefault(false)) 1 else 0
         windows=getSystemService(WindowManager::class.java)
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL,"悬浮助手与采集",NotificationManager.IMPORTANCE_LOW))
@@ -91,6 +110,10 @@ class AssistantService : Service() {
                 }
             }
             ProbeState.lastEvent=message; showBubble()
+            if (intent?.action=="resume_history") {
+                val saved=HistoryStore(this).list().firstOrNull { it.id==intent.getStringExtra("historyId") }
+                if (saved!=null) { newConversation(saved); showPanel() }
+            }
         } catch (e: Exception) {
             failure="开启失败：${e.javaClass.simpleName} ${e.message.orEmpty().take(180)}"
             ProbeState.lastEvent=failure!!
@@ -129,7 +152,7 @@ class AssistantService : Service() {
             setImageResource(R.drawable.ic_assistant)
             background=card(SURFACE,dp(30).toFloat()); elevation=dp(6).toFloat()
             setPadding(dp(3),dp(3),dp(3),dp(3)); accessible("AlwaySide，点击打开，长按框选，拖动移动")
-            setOnClickListener { if (recorder!=null) finishRecording(); showPanel() }
+            setOnClickListener { if (recorder!=null) finishRecording(1); showPanel() }
         }
         val size=screenSize()
         val layout=params(dp(56),dp(56),false).apply {
@@ -170,6 +193,7 @@ class AssistantService : Service() {
     }
     private fun removeBubble() { bubble?.let { windows.removeView(it) }; bubble=null }
     private fun removePanel() {
+        responseView=null; requestStatus=null; transcriptView=null; sendButton=null; cancelButton=null; retryButton=null
         audioLabel=null; audioButton=null
         stopPlayback()
         panel?.let {
@@ -183,63 +207,159 @@ class AssistantService : Service() {
         imageTintList=android.content.res.ColorStateList.valueOf(INK)
         background=card(SURFACE); accessible("收起"); setOnClickListener { action() }
     }
+    private fun icon(resource: Int, title: String, action: () -> Unit)=ImageButton(this).apply {
+        setImageResource(resource); imageTintList=android.content.res.ColorStateList.valueOf(INK)
+        background=card(SURFACE); accessible(title); setOnClickListener { action() }
+    }
     private fun showPanel() {
         if (!alive) return
         removeBubble(); removePanel(); removeSelector()
         val body=column().apply {
             background=card(BACKGROUND)
             addView(LinearLayout(this@AssistantService).apply {
-                addView(label("眼前的内容",22f),LinearLayout.LayoutParams(0,-2,1f))
+                addView(label("AlwaySide",22f),LinearLayout.LayoutParams(0,-2,1f))
+                addView(icon(android.R.drawable.ic_menu_add,"新会话") { newConversation(); showPanel() },LinearLayout.LayoutParams(dp(44),dp(44)))
+                addView(icon(android.R.drawable.ic_menu_crop,"展开／缩小面板") { expanded=!expanded; showPanel() },LinearLayout.LayoutParams(dp(44),dp(44)))
                 addView(closeButton { removePanel(); showBubble() },LinearLayout.LayoutParams(dp(44),dp(44)))
             })
             addView(label(message,14f,true))
+            requestStatus=label("",13f,true).also { addView(it) }
+            responseView=label("",16f).also { it.setTextIsSelectable(true); it.movementMethod=android.text.method.LinkMovementMethod.getInstance(); addView(it) }
+            transcriptView=label("",14f,true).also { it.setTextIsSelectable(true); addView(it) }
+            addView(LinearLayout(this@AssistantService).apply {
+                addView(icon(R.drawable.ic_copy,"复制最近回答") {
+                    val answer=chat.partial.ifEmpty { chat.messages.lastOrNull { it.role=="assistant" }?.text.orEmpty() }
+                    if (answer.isNotEmpty()) {
+                        getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("AlwaySide",answer)); toast("已复制")
+                    }
+                },LinearLayout.LayoutParams(dp(44),dp(44)))
+                cancelButton=icon(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答") { chat.cancel() }.also { addView(it,LinearLayout.LayoutParams(dp(44),dp(44))) }
+                retryButton=icon(android.R.drawable.ic_popup_sync,"重试上次请求（使用原问题和证据）") { if (!gathering) chat.retry() }.also { addView(it,LinearLayout.LayoutParams(dp(44),dp(44))) }
+                addView(icon(android.R.drawable.ic_menu_preferences,"模型与指令设置") {
+                    startActivity(Intent(this@AssistantService,SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); removePanel(); showBubble()
+                },LinearLayout.LayoutParams(dp(44),dp(44)))
+            })
             preview?.let { frame ->
                 addView(ImageView(this@AssistantService).apply {
-                    setImageBitmap(frame.bitmap); adjustViewBounds=true; scaleType=ImageView.ScaleType.FIT_CENTER
-                    accessible("已获取的画面预览")
-                },LinearLayout.LayoutParams(-1,dp(220)))
-                val time=SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(frame.capturedAt))
-                addView(label("$time · ${frame.bitmap.width} × ${frame.bitmap.height}",12f,true))
+                    setImageBitmap(frame.bitmap); scaleType=ImageView.ScaleType.FIT_CENTER; accessible("本次候选图片")
+                },LinearLayout.LayoutParams(-1,dp(120)))
+                addView(label(imageDescription(),12f,true))
             }
-            action("取整屏预览",true) { capture(false) }
-            action("框选当前画面") { capture(true) }
-            addView(label("听一段",20f))
-            audioLabel=label(audioStatus(),14f,true).also { addView(it) }
-            audioButton=action(if (recorder!=null) "结束录音" else "开始听内部声音") {
-                if (recorder!=null) finishRecording() else startRecording()
-            }.apply { isEnabled=!finishingAudio }
-            if (clip!=null && recorder==null) {
-                action("回听上一段") { playClip() }
-                action("丢弃录音") { stopPlayback(); clip?.file?.delete(); clip=null; showPanel() }
-            }
+            action("解释全屏",true) { capture(false) { imageMode=0; submitDefault(false) } }
+            action("整屏自行提问") { capture(false) { imageMode=0; showPanel() } }
+            action("框选画面") { capture(true) }
+            addView(label("提问时附图",14f,true))
+            addView(Spinner(this@AssistantService).apply {
+                adapter=ArrayAdapter(this@AssistantService,android.R.layout.simple_spinner_dropdown_item,listOf("沿用原图","更新画面（沿用选区）","不附图"))
+                setSelection(imageMode)
+                onItemSelectedListener=object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?,view: View?,position: Int,id: Long) { imageMode=position }
+                    override fun onNothingSelected(parent: AdapterView<*>?) {}
+                }
+            })
             addView(EditText(this@AssistantService).apply {
-                hint="输入试试：你想问什么？"; setHintTextColor(MUTED); setTextColor(INK); setText(draft)
-                minLines=2; maxLines=4; textSize=16f
+                hint="输入问题或继续追问…"; setHintTextColor(MUTED); setTextColor(INK); setText(draft)
+                minLines=2; maxLines=5; textSize=16f; filters=arrayOf(android.text.InputFilter.LengthFilter(12000))
                 addTextChangedListener(object : android.text.TextWatcher {
                     override fun beforeTextChanged(s: CharSequence?,start: Int,count: Int,after: Int) {}
                     override fun onTextChanged(s: CharSequence?,start: Int,before: Int,count: Int) { draft=s?.toString().orEmpty() }
                     override fun afterTextChanged(s: android.text.Editable?) {}
                 })
             },LinearLayout.LayoutParams(-1,-2))
-            addView(label("本包仅验证选图和输入，不发送问题。",12f,true))
-            action("返回设置 / 查看诊断") {
-                startActivity(Intent(this@AssistantService,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                removePanel(); showBubble()
+            sendButton=icon(android.R.drawable.ic_menu_send,"发送问题") { sendQuestion(draft) }.also { addView(it,LinearLayout.LayoutParams(-1,dp(48))) }
+            addView(label("发送所选证据与最近文字上下文；不附图不会移除旧讨论文字，新会话可清空上下文。",12f,true))
+            addView(label("听一段",20f))
+            audioLabel=label(audioStatus(),14f,true).also { addView(it) }
+            if (recorder==null) {
+                audioButton=action("开始听内部声音") { startRecording() }.apply { isEnabled=!chat.busy && !gathering }
+            } else {
+                audioButton=action("结束并解释",true) { finishRecording(1) }.apply { isEnabled=!finishingAudio }
+                action("结束后自行提问") { finishRecording(2) }.isEnabled=!finishingAudio
+                action("取消这段录音") { finishRecording(3) }.isEnabled=!finishingAudio
             }
-            action("停止助手") { stopSelf() }
+            if (clip!=null && recorder==null) {
+                addView(CheckBox(this@AssistantService).apply {
+                    text="提问附带这段录音（已转写时复用原文）"; setTextColor(INK); isChecked=useAudio
+                    setOnCheckedChangeListener { _,checked -> useAudio=checked }
+                })
+                action("解释这段录音") { submitDefault(true) }.isEnabled=!chat.busy
+                action("回听上一段") { playClip() }
+                action("丢弃录音") { if (!chat.busy) { stopPlayback(); clip?.file?.delete(); clip=null; useAudio=false; showPanel() } }.isEnabled=!chat.busy
+            }
+            action("返回设置与历史") {
+                startActivity(Intent(this@AssistantService,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); removePanel(); showBubble()
+            }
+            action("停止助手与请求") { stopSelf() }
         }
         val scroll=ScrollView(this).apply { background=card(BACKGROUND); addView(body); isFillViewport=true }
         val size=screenSize()
-        val layout=params(minOf(dp(360),size.first-dp(24)),minOf(dp(650),size.second-dp(100)),true).apply {
-            x=(size.first-width)/2; y=dp(40)
-        }
-        try { windows.addView(scroll,layout); panel=scroll }
+        val layout=params(if (expanded) size.first-dp(16) else minOf(dp(380),size.first-dp(24)),
+            if (expanded) size.second-dp(80) else minOf(dp(710),size.second-dp(100)),true).apply { x=(size.first-width)/2; y=dp(32) }
+        try { windows.addView(scroll,layout); panel=scroll; refreshChat() }
         catch (e: RuntimeException) { toast("无法打开悬浮面板"); showBubble() }
     }
-    private fun capture(crop: Boolean) {
+    private fun refreshChat() {
+        if (!alive) return
+        requestStatus?.text="${chat.status}\n本轮：${chat.evidence}"
+        val text=buildString {
+            chat.messages.takeLast(8).forEach { append(if (it.role=="user") "### 你\n" else "### AlwaySide\n"); append(it.text); append("\n\n") }
+            if (chat.question.isNotEmpty()) { append("### 你\n${chat.question}\n\n"); append(chat.partial) }
+        }.takeLast(100_000)
+        responseView?.text=if (chat.busy) text else MarkdownText.render(text)
+        transcriptView?.text=if (chat.transcript.isEmpty()) "" else "转写原文：\n${chat.transcript}"
+        sendButton?.isEnabled=!chat.busy && !gathering && recorder==null
+        cancelButton?.isEnabled=chat.busy
+        retryButton?.isEnabled=chat.canRetry && !gathering && recorder==null
+        ProbeState.lastEvent=chat.status
+        ProbeState.requesting=chat.busy
+        if (recorder==null) bubble?.background=card(if (chat.busy) 0xFF35566A.toInt() else SURFACE,dp(30).toFloat())
+    }
+    private fun imageDescription(): String {
+        val frame=preview ?: return "无图片"
+        val time=SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(frame.capturedAt))
+        return "${if (cropBounds!=null) "选区" else "整屏"} $time · ${frame.bitmap.width} × ${frame.bitmap.height}"
+    }
+    private fun newConversation(saved: StoredConversation?=null) {
+        requestId++; gathering=false; preview=null; cropBounds=null; cropSourceSize=null; cropRotation=null; draft=""; useAudio=false
+        recorder?.stop(true); recorder=null; finishingAudio=false; finishAction=0; ProbeState.recording=false
+        stopPlayback(); clip?.file?.delete(); clip=null
+        chat.newConversation(saved)
+        imageMode=if (runCatching { SettingsStore(this).load().autoUpdateImage }.getOrDefault(false)) 1 else 0
+        message=if (saved==null) "选择画面或录音，开始一个新会话。" else "已恢复文字历史；重新取图或录音即可继续。"
+    }
+    private fun submitDefault(audio: Boolean) {
+        showPanel()
+        val config=runCatching { SettingsStore(this).load() }.getOrElse { toast("设置无法读取，请重新保存 API Key"); return }
+        useAudio=audio
+        sendQuestion(if (audio) config.audioQuestion else config.defaultQuestion,config)
+    }
+    private fun sendQuestion(text: String, frozen: AppConfig?=null) {
+        if (chat.busy || gathering || recorder!=null) { toast("请先结束当前采集或请求"); return }
+        if (text.isBlank()) { toast("请输入问题"); return }
+        val config=frozen ?: runCatching { SettingsStore(this).load() }.getOrElse { toast("设置无法读取，请重新保存 API Key"); return }
+        if (config.apiKey.isBlank()) { toast("请先在设置填写 API Key"); return }
+        val audio=if (useAudio) clip else null
+        if (audio!=null && audio.peak<0.0001) { toast("这段录音没有有效音量，请重新录制后再发送"); return }
+        val mode=imageMode
+        val submit={
+            val image=if (mode==2) null else preview
+            val label=(if (image==null) "不附图" else imageDescription()) +
+                (if (audio!=null) " · 录音 ${SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(clipTime))} / ${String.format(Locale.getDefault(),"%.1f",audio.seconds)} 秒" else " · 不附录音")
+            try { chat.submit(config,text,image?.bitmap,label,audio?.file); draft=""; showPanel() }
+            catch (e: Exception) { toast(e.message ?: "无法发送") }
+        }
+        if (mode==1) capture(false, reuse=true, after=submit) else submit()
+    }
+    private fun capture(crop: Boolean,reuse: Boolean=false,after: (() -> Unit)?=null) {
+        if (chat.busy || gathering) { toast("请先等待或取消当前请求"); return }
         val source=frames
         if (source==null) { message="请先从主界面开启屏幕共享"; showPanel(); return }
+        val previousCrop=if (reuse) cropBounds else null
+        val previousSize=cropSourceSize
+        val rotation=screenRotation()
         val id=++requestId
+        gathering=true
+        if (!reuse) { cropBounds=null; cropSourceSize=null; cropRotation=null }
         preview=null; removeBubble(); removePanel(); removeSelector()
         val hiddenAt=System.nanoTime()
         Choreographer.getInstance().postFrameCallback {
@@ -247,10 +367,17 @@ class AssistantService : Service() {
                 if (!alive || requestId!=id) return@secondFrame
                 source.snapshot(hiddenAt) { result ->
                     if (!alive || requestId!=id) return@snapshot
+                    gathering=false
                     result.fold(onSuccess={ frame ->
-                        preview=frame; message="已取得新画面，请确认预览是否为目标内容。"
+                        if (screenRotation()!=rotation || (previousCrop!=null &&
+                            (previousSize!=(frame.bitmap.width to frame.bitmap.height) || cropRotation!=rotation))) {
+                            message="屏幕尺寸或方向已变化，请重新框选后再发送。"; showPanel(); return@fold
+                        }
+                        lastCaptureRotation=rotation
+                        preview=if (previousCrop==null) frame else CapturedFrame(Bitmap.createBitmap(frame.bitmap,previousCrop.x,previousCrop.y,previousCrop.width,previousCrop.height),frame.capturedAt)
+                        message="已取得新画面，请确认预览是否为目标内容。"
                         ProbeState.lastEvent="取图成功 ${frame.bitmap.width}x${frame.bitmap.height}"
-                        if (crop) showCrop(frame) else showPanel()
+                        if (crop) showCrop(frame) else if (after!=null) after() else showPanel()
                     },onFailure={ error ->
                         message=error.message ?: "取图失败，请重试"; ProbeState.lastEvent=message; showPanel()
                     })
@@ -260,14 +387,21 @@ class AssistantService : Service() {
     }
     private fun showCrop(frame: CapturedFrame) {
         val crop=CropView(this,frame.bitmap)
+        fun accept(quick: Boolean) {
+            val bounds=crop.selectedBounds()
+            val selected=crop.selected()
+            if (selected==null || bounds==null) { toast("请先拖出一个足够大的区域"); return }
+            cropBounds=bounds; cropSourceSize=frame.bitmap.width to frame.bitmap.height
+            cropRotation=lastCaptureRotation
+            preview=CapturedFrame(selected,frame.capturedAt); imageMode=0; useAudio=false
+            message="已裁剪，只发送所选区域"; removeSelector()
+            if (quick) submitDefault(false) else showPanel()
+        }
         val body=column().apply {
             background=card(BACKGROUND); addView(label("拖动框选 · 画面已冻结",20f))
             addView(crop,LinearLayout.LayoutParams(-1,0,1f))
-            action("使用选区",true) {
-                val selected=crop.selected()
-                if (selected==null) toast("请先拖出一个足够大的区域")
-                else { preview=CapturedFrame(selected,frame.capturedAt); message="已裁剪，只保留所选区域"; removeSelector(); showPanel() }
-            }
+            action("快速解释",true) { accept(true) }
+            action("自行提问") { accept(false) }
             action("取消") { preview=null; removeSelector(); showBubble() }
         }
         val size=screenSize()
@@ -276,18 +410,22 @@ class AssistantService : Service() {
     }
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        requestId++; removeSelector(); removePanel(); removeBubble(); showBubble()
+        requestId++; gathering=false; removeSelector(); removePanel(); removeBubble(); showBubble()
         if (Build.VERSION.SDK_INT<34) { val size=screenSize(); frames?.resize(size.first,size.second) }
     }
+    @Suppress("DEPRECATION")
+    private fun screenRotation()=windows.defaultDisplay.rotation
     private fun clearCapture() {
         finishRecording()
-        requestId++; preview=null; frames?.close(); frames=null
+        requestId++; gathering=false; frames?.close(); frames=null
         val old=projection; projection=null
         old?.unregisterCallback(captureCallback); old?.stop()
         ProbeState.sharing=false
     }
     override fun onDestroy() {
         alive=false; main.removeCallbacksAndMessages(null)
+        chat.close()
+        ProbeState.requesting=false
         recorder?.stop(true); stopPlayback(); clip?.file?.delete(); clip=null
         clearCapture(); removePanel(); removeSelector(); removeBubble()
         ProbeState.serviceRunning=false; ProbeState.recording=false; ProbeState.lastEvent=failure ?: "助手和采集已停止"
@@ -302,21 +440,28 @@ class AssistantService : Service() {
         return String.format(Locale.getDefault(),"%.1f 秒 · %s%s",last.seconds,activity,last.error?.let { "\n$it" }.orEmpty())
     }
     private fun startRecording() {
+        if (chat.busy || gathering) { toast("请先结束当前请求"); return }
         val source=projection
         if (source==null) { toast("请先从主界面共享屏幕"); return }
         if (recorder!=null || finishingAudio) return
+        finishAction=0; useAudio=false
         stopPlayback(); clip?.file?.delete(); clip=null
         val next=PlaybackRecorder(this,main)
         recorder=next
         try {
             next.start(source) { result ->
                 if (!alive || recorder!==next) { result?.file?.delete(); return@start }
-                recorder=null; finishingAudio=false; clip=result; ProbeState.recording=false
+                recorder=null; finishingAudio=false; clip=result; ProbeState.recording=false; clipTime=System.currentTimeMillis()
+                val action=finishAction; finishAction=0
                 message=if (result==null) "没有保存到有效录音，请检查权限与目标应用" else "录音已结束，可回听确认。"
+                if (action==3) message="已取消这段录音"
                 ProbeState.lastEvent=audioStatus()
                 bubble?.background=card(SURFACE,dp(30).toFloat())
                 bubble?.accessible("AlwaySide，点击打开，长按框选，拖动移动")
-                if (panel!=null) showPanel() else {
+                if (result!=null && (action==1 || action==2)) {
+                    useAudio=true; imageMode=2
+                    if (action==1) submitDefault(true) else showPanel()
+                } else if (panel!=null) showPanel() else {
                     showBubble(); toast(message)
                 }
             }
@@ -328,10 +473,11 @@ class AssistantService : Service() {
             message=e.message ?: "无法开始内部录音"; ProbeState.lastEvent=message; showPanel()
         }
     }
-    private fun finishRecording() {
+    private fun finishRecording(action: Int=0) {
         if (recorder==null || finishingAudio) return
+        finishAction=action
         finishingAudio=true; audioButton?.isEnabled=false; audioLabel?.text="正在结束录音…"
-        recorder?.stop()
+        recorder?.stop(action==3)
     }
     private fun stopPlayback() { player?.let { runCatching { it.stop() }; it.release() }; player=null }
     private fun playClip() {

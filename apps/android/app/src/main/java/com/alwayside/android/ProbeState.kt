@@ -6,6 +6,7 @@ internal object ProbeState {
     var serviceRunning = false
     var sharing = false
     var recording = false
+    var requesting = false
     var lastEvent = "尚未开启助手"
     fun diagnostics(): String = """
         AlwaySide ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})
@@ -15,7 +16,8 @@ internal object ProbeState {
         悬浮服务：${if (serviceRunning) "已开启" else "已停止"}
         屏幕共享：${if (sharing) "进行中" else "未共享"}
         内部音频：${if (recording) "录制中" else "未录制"}
+        AI 请求：${if (requesting) "进行中" else "空闲"}
         最近状态：$lastEvent
-        此版本无联网权限，不发送图片或声音。
+        仅在解释或发送时联网；诊断不包含密钥、问题、图片或录音。
     """.trimIndent()
 }

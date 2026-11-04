@@ -29,7 +29,10 @@ class MainActivity : Activity() {
         val content = column().apply {
             addView(label("AlwaySide", 30f))
             addView(label("随手理解眼前的内容", 20f))
-            addView(label("设备能力测试版 · 暂不连接 AI", muted = true))
+            addView(label("屏幕解释 · 听一段 · 连续追问", muted = true))
+            action("模型与指令设置",true) { startActivity(Intent(this@MainActivity,SettingsActivity::class.java)) }
+            action("会话历史") { startActivity(Intent(this@MainActivity,HistoryActivity::class.java)) }
+            addView(label("先在设置中填写你自己的 API Key。点击解释或发送时，所选图片／音频和文字才会发往配置的 API 服务。",muted=true))
             addView(label("先开悬浮球，再共享屏幕。回到你要阅读的应用，点击小球打开面板，长按直接框选。",muted=true))
             action("开启悬浮球",true) {
                 if (!Settings.canDrawOverlays(this@MainActivity)) {

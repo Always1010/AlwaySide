@@ -47,7 +47,8 @@ internal class CropView(context: Context, private val bitmap: Bitmap) : View(con
     }
     override fun performClick(): Boolean { super.performClick(); return true }
     fun selected(): Bitmap? {
-        val crop = Geometry.crop(selection ?: return null,area ?: return null,bitmap.width,bitmap.height) ?: return null
+        val crop = selectedBounds() ?: return null
         return Bitmap.createBitmap(bitmap,crop.x,crop.y,crop.width,crop.height)
     }
+    fun selectedBounds(): PixelCrop? { return Geometry.crop(selection ?: return null,area ?: return null,bitmap.width,bitmap.height) }
 }
