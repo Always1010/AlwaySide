@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.media.MediaPlayer
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.*
@@ -32,6 +33,23 @@ class AssistantService : Service() {
     private var ballY=240
     private var draft=""
     private var message="点击取图查看结果；本包不发送 AI 请求。"
+    private var recorder: PlaybackRecorder?=null
+    private var clip: AudioClip?=null
+    private var player: MediaPlayer?=null
+    private var audioLabel: TextView?=null
+    private var audioButton: Button?=null
+    private var finishingAudio=false
+    private val ticker=object : Runnable {
+        override fun run() {
+            if (!alive) return
+            recorder?.let { current ->
+                if (!finishingAudio) audioLabel?.text=String.format(Locale.getDefault(),"录制 %.1f 秒 · 音量活动 %.0f%%",current.seconds,current.level*100)
+                bubble?.background=card(0xFF753E38.toInt(),dp(30).toFloat())
+                bubble?.contentDescription="正在录制内部音频，点击小球结束录制"
+            }
+            main.postDelayed(this,500)
+        }
+    }
     private val captureCallback=object : MediaProjection.Callback() {
         override fun onStop() {
             if (!alive) return
@@ -48,6 +66,8 @@ class AssistantService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL,"悬浮助手与采集",NotificationManager.IMPORTANCE_LOW))
         ProbeState.serviceRunning=true
+        cacheDir.listFiles()?.filter { it.name.startsWith("listening-") && it.extension=="wav" }?.forEach { it.delete() }
+        main.post(ticker)
     }
     override fun onBind(intent: Intent?) = null
     override fun onStartCommand(intent: Intent?,flags: Int,startId: Int): Int {
@@ -109,7 +129,7 @@ class AssistantService : Service() {
             setImageResource(R.drawable.ic_assistant)
             background=card(SURFACE,dp(30).toFloat()); elevation=dp(6).toFloat()
             setPadding(dp(3),dp(3),dp(3),dp(3)); accessible("AlwaySide，点击打开，长按框选，拖动移动")
-            setOnClickListener { showPanel() }
+            setOnClickListener { if (recorder!=null) finishRecording(); showPanel() }
         }
         val size=screenSize()
         val layout=params(dp(56),dp(56),false).apply {
@@ -150,6 +170,8 @@ class AssistantService : Service() {
     }
     private fun removeBubble() { bubble?.let { windows.removeView(it) }; bubble=null }
     private fun removePanel() {
+        audioLabel=null; audioButton=null
+        stopPlayback()
         panel?.let {
             getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0)
             windows.removeView(it)
@@ -181,6 +203,15 @@ class AssistantService : Service() {
             }
             action("取整屏预览",true) { capture(false) }
             action("框选当前画面") { capture(true) }
+            addView(label("听一段",20f))
+            audioLabel=label(audioStatus(),14f,true).also { addView(it) }
+            audioButton=action(if (recorder!=null) "结束录音" else "开始听内部声音") {
+                if (recorder!=null) finishRecording() else startRecording()
+            }.apply { isEnabled=!finishingAudio }
+            if (clip!=null && recorder==null) {
+                action("回听上一段") { playClip() }
+                action("丢弃录音") { stopPlayback(); clip?.file?.delete(); clip=null; showPanel() }
+            }
             addView(EditText(this@AssistantService).apply {
                 hint="输入试试：你想问什么？"; setHintTextColor(MUTED); setTextColor(INK); setText(draft)
                 minLines=2; maxLines=4; textSize=16f
@@ -249,6 +280,7 @@ class AssistantService : Service() {
         if (Build.VERSION.SDK_INT<34) { val size=screenSize(); frames?.resize(size.first,size.second) }
     }
     private fun clearCapture() {
+        finishRecording()
         requestId++; preview=null; frames?.close(); frames=null
         val old=projection; projection=null
         old?.unregisterCallback(captureCallback); old?.stop()
@@ -256,11 +288,64 @@ class AssistantService : Service() {
     }
     override fun onDestroy() {
         alive=false; main.removeCallbacksAndMessages(null)
+        recorder?.stop(true); stopPlayback(); clip?.file?.delete(); clip=null
         clearCapture(); removePanel(); removeSelector(); removeBubble()
-        ProbeState.serviceRunning=false; ProbeState.lastEvent=failure ?: "助手和采集已停止"
+        ProbeState.serviceRunning=false; ProbeState.recording=false; ProbeState.lastEvent=failure ?: "助手和采集已停止"
         stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy()
     }
     private fun toast(text: String) { Toast.makeText(this,text,Toast.LENGTH_LONG).show() }
+    private fun audioStatus(): String {
+        if (finishingAudio) return "正在保存这段录音…"
+        if (recorder!=null) return "内部音频录制中，最长 2 分钟"
+        val last=clip ?: return "录下当前播放的一段声音，再在这里回听。"
+        val activity=if (last.peak<0.0001) "没有检测到有效声音；可能是静音或音源不允许采集" else "已检测到音量活动，请回听确认内容"
+        return String.format(Locale.getDefault(),"%.1f 秒 · %s%s",last.seconds,activity,last.error?.let { "\n$it" }.orEmpty())
+    }
+    private fun startRecording() {
+        val source=projection
+        if (source==null) { toast("请先从主界面共享屏幕"); return }
+        if (recorder!=null || finishingAudio) return
+        stopPlayback(); clip?.file?.delete(); clip=null
+        val next=PlaybackRecorder(this,main)
+        recorder=next
+        try {
+            next.start(source) { result ->
+                if (!alive || recorder!==next) { result?.file?.delete(); return@start }
+                recorder=null; finishingAudio=false; clip=result; ProbeState.recording=false
+                message=if (result==null) "没有保存到有效录音，请检查权限与目标应用" else "录音已结束，可回听确认。"
+                ProbeState.lastEvent=audioStatus()
+                bubble?.background=card(SURFACE,dp(30).toFloat())
+                bubble?.accessible("AlwaySide，点击打开，长按框选，拖动移动")
+                if (panel!=null) showPanel() else {
+                    showBubble(); toast(message)
+                }
+            }
+            ProbeState.recording=true; ProbeState.lastEvent="内部播放音频录制已开始"
+            message="正在听内部声音，点击结束可保存这一段。"
+            showPanel()
+        } catch (e: Exception) {
+            next.stop(true); recorder=null; ProbeState.recording=false
+            message=e.message ?: "无法开始内部录音"; ProbeState.lastEvent=message; showPanel()
+        }
+    }
+    private fun finishRecording() {
+        if (recorder==null || finishingAudio) return
+        finishingAudio=true; audioButton?.isEnabled=false; audioLabel?.text="正在结束录音…"
+        recorder?.stop()
+    }
+    private fun stopPlayback() { player?.let { runCatching { it.stop() }; it.release() }; player=null }
+    private fun playClip() {
+        val source=clip ?: return
+        stopPlayback()
+        try {
+            val playback=MediaPlayer(); player=playback
+            playback.setDataSource(source.file.absolutePath)
+            playback.setOnPreparedListener { if (player===it) { it.start(); audioLabel?.text="正在回听；收起面板将停止播放" } }
+            playback.setOnCompletionListener { stopPlayback(); audioLabel?.text=audioStatus() }
+            playback.setOnErrorListener { _,_,_ -> stopPlayback(); toast("无法播放这段录音"); true }
+            playback.prepareAsync()
+        } catch (e: Exception) { stopPlayback(); toast("回听失败，请重新录制") }
+    }
     companion object {
         const val START="start"; const val SHARE="share"; const val STOP="stop"
         private const val CHANNEL="assistant"
