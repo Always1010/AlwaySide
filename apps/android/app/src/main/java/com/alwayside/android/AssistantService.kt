@@ -117,6 +117,7 @@ class AssistantService : Service() {
     private inner class FloatingConversation(val kind: String) {
         lateinit var chat: ChatSession
         var frame: CapturedFrame? = null
+        var originalFrame: CapturedFrame? = null
         var bounds: PixelCrop? = null
         var sourceSize: Pair<Int, Int>? = null
         var rotation: Int? = null
@@ -174,8 +175,13 @@ class AssistantService : Service() {
     }
     override fun onBind(intent: Intent?) = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == STOP || !Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
+        if (intent?.action == STOP) {
+            AssistantControl.setEnabled(this, false)
+            stopSelf(); return START_NOT_STICKY
+        }
+        if (!Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
         try {
+            if (intent?.action == START || intent?.action == TEXT) AssistantControl.setEnabled(this, true)
             if(intent?.action == START || intent?.action == SHARE) requestingConsent=false
             foreground(intent?.action == SHARE || projection != null)
             if (intent?.action == SHARE && projection == null) {
@@ -457,6 +463,7 @@ class AssistantService : Service() {
         items.addView(View(uiContext).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)).apply{setMargins(dp(8),dp(4),dp(8),dp(4))})
         item(R.drawable.ic_line_history,"对话记录") { openApplication(AppPage.HISTORY) }
         item(R.drawable.ic_line_settings,"设置") { openApplication(AppPage.SETTINGS) }
+        item(R.drawable.ic_line_power,"关闭悬浮球") { AssistantControl.stop(this) }
         val size=screenSize(); val ball=bubbleLayout
         val w=minOf(dp(204),size.first-dp(16)); val h=minOf(dp(rowCount*48+21),size.second-dp(100))
         val menuX=(if ((ball?.x ?: 0)<size.first/2)dp(47) else size.first-w-dp(47))
@@ -697,7 +704,22 @@ class AssistantService : Service() {
         runCatching{HistoryStore(this).save(node.chat.snapshot().copy(title=when(node.kind){"photo"->"截图待提问";"audio"->"音频待提问";else->node.chat.sourceText.take(60)},evidence=when(node.kind){"photo"->imageDescription(node);"audio"->"内部录音，等待提问";else->"选中文字"},status="等待提问"))}.onFailure{toast("本机历史保存失败，请检查存储空间")}
         persistImage(node)
     }
-    private fun persistImage(node:FloatingConversation){val bitmap=node.frame?.bitmap?:return;if(!preferences.load().saveHistoryImages)return;val id=node.chat.conversationId;mediaWorker.execute{runCatching{val history=HistoryStore(this);val media=ConversationMediaStore(this);if(preferences.load().saveHistoryImages&&history.find(id)!=null){media.saveImage(id,bitmap);if(!preferences.load().saveHistoryImages||history.find(id)==null)media.deleteImage(id)}}.onFailure{main.post{if(alive)toast("回答可继续，但历史图片保存失败")}}}}
+    private fun persistImage(node:FloatingConversation){
+        val bitmap=node.frame?.bitmap?:return
+        if(node.originalFrame==null)node.originalFrame=node.frame
+        val original=node.originalFrame!!.bitmap
+        if(!preferences.load().saveHistoryImages)return
+        val id=node.chat.conversationId
+        mediaWorker.execute{
+            runCatching{
+                val history=HistoryStore(this);val media=ConversationMediaStore(this)
+                if(preferences.load().saveHistoryImages&&history.find(id)!=null){
+                    media.saveImages(id,original,bitmap)
+                    if(!preferences.load().saveHistoryImages||history.find(id)==null)media.deleteImage(id)
+                }
+            }.onFailure{error->main.post{if(alive)toast("回答可继续，但图片未保存：${error.message?:"存储失败"}")}}
+        }
+    }
     private fun submitDefault(node:FloatingConversation){val c=readApiConfig()?:return;node.automaticFirstQuestion=true;sendQuestion(node,when(node.kind){"photo"->c.defaultQuestion;"audio"->c.audioQuestion;else->c.textQuestion},c)}
     private fun readApiConfig():AppConfig?=try{SettingsStore(this).load()}catch(_:Exception){toast("无法读取 API 配置，请在设置中重新保存密钥");null}
     private fun sendQuestion(node:FloatingConversation,text:String,frozen:AppConfig?=null){
@@ -829,7 +851,7 @@ class AssistantService : Service() {
         node.clip?.file?.let{ActiveConversationBridge.retainAudio(it)}
         ActiveConversationBridge.offer(id,HandedOffConversation(node.chat,node.frame?.bitmap,{
             node.chat.close();node.clip?.file?.let{ActiveConversationBridge.releaseAudio(it);it.delete()}
-        },node.clip,node.draft,node.webSearchOverride))
+        },node.clip,node.draft,node.webSearchOverride,node.originalFrame?.bitmap ?: node.frame?.bitmap,node.imageMode!=2))
         ProbeState.requesting=nodes.values.any{it.chat.busy}
         return node.frame?.bitmap
     }
