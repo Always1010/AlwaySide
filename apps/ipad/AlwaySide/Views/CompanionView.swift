@@ -27,44 +27,51 @@ struct CompanionView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                evidenceSummary
-                Divider()
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 18) {
-                            if model.messages.isEmpty && !model.isAsking {
-                                ContentUnavailableView {
-                                    Label("看懂，然后继续", systemImage: "text.viewfinder")
-                                } description: {
-                                    Text("长按截屏，在原页面的系统卡片里读懂内容。需要深入讨论时，再来这里追问。")
-                                } actions: {
-                                    Button { showingScreenshotHelp = true } label: {
-                                        Label("设置长按阅读", systemImage: "hand.tap")
+                if showingAudio {
+                    AudioCompanionView(model: model, onClose: { showingAudio = false }, onFollowUp: { result in
+                        model.acceptAudioRead(result)
+                        showingAudio = false
+                    })
+                } else {
+                    evidenceSummary
+                    Divider()
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 18) {
+                                if model.messages.isEmpty && !model.isAsking {
+                                    ContentUnavailableView {
+                                        Label("看懂，然后继续", systemImage: "text.viewfinder")
+                                    } description: {
+                                        Text("长按截屏，在原页面的系统卡片里读懂内容。需要深入讨论时，再来这里追问。")
+                                    } actions: {
+                                        Button { showingScreenshotHelp = true } label: {
+                                            Label("设置长按阅读", systemImage: "hand.tap")
+                                        }
                                     }
                                 }
-                            }
-                            ForEach(Array(model.messages.enumerated()), id: \.offset) { _, message in
-                                messageView(message)
-                            }
-                            if model.isAsking {
-                                userBubble(model.pendingQuestion)
-                                if !model.answer.isEmpty { MarkdownAnswerView(text: model.answer) }
-                            }
-                            if let warning = model.storageWarning {
-                                Text(warning).font(.footnote).foregroundStyle(.orange)
-                            }
-                            if let notice = model.notice {
-                                Text(notice).font(.footnote).foregroundStyle(.secondary)
-                                    .accessibilityAddTraits(.updatesFrequently)
-                            }
-                            Color.clear.frame(height: 1).id("bottom")
-                        }.padding(16)
+                                ForEach(Array(model.messages.enumerated()), id: \.offset) { _, message in
+                                    messageView(message)
+                                }
+                                if model.isAsking {
+                                    userBubble(model.pendingQuestion)
+                                    if !model.answer.isEmpty { MarkdownAnswerView(text: model.answer) }
+                                }
+                                if let warning = model.storageWarning {
+                                    Text(warning).font(.footnote).foregroundStyle(.orange)
+                                }
+                                if let notice = model.notice {
+                                    Text(notice).font(.footnote).foregroundStyle(.secondary)
+                                        .accessibilityAddTraits(.updatesFrequently)
+                                }
+                                Color.clear.frame(height: 1).id("bottom")
+                            }.padding(16)
+                        }
+                        .defaultScrollAnchor(.bottom)
+                        .onChange(of: model.messages.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                        .onChange(of: model.isAsking) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
                     }
-                    .defaultScrollAnchor(.bottom)
-                    .onChange(of: model.messages.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
-                    .onChange(of: model.isAsking) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+                    composer
                 }
-                composer
             }
             .background(Color(.systemGroupedBackground))
             .background(InteractionWindowReader { model.bindInteractionWindow($0) }.frame(width: 0, height: 0))
@@ -73,11 +80,14 @@ struct CompanionView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     Button { showingHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }
-                        .help("查找与打开本机会话").accessibilityLabel("会话历史")
+                        .help("查找与打开本机会话").accessibilityLabel("会话历史").disabled(showingAudio)
                     Button { resetInteraction(); model.startNewConversation() } label: { Image(systemName: "square.and.pencil") }
-                        .help("新建对话").accessibilityLabel("新建对话")
+                        .help("新建对话").accessibilityLabel("新建对话").disabled(showingAudio)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { resetInteraction(); showingAudio = true } label: { Image(systemName: "waveform") }
+                        .help("陪听：听一段，结束后自动翻译和解释").accessibilityLabel("陪听")
+                        .disabled(showingAudio || model.isAsking || busyImport || model.provider != .openAI)
                     Menu {
                         Button { showingSettings = true } label: { Label("模型与密钥", systemImage: "slider.horizontal.3") }
                         Button { showingScreenshotHelp = true } label: { Label("长按截屏设置", systemImage: "camera.viewfinder") }
@@ -87,7 +97,6 @@ struct CompanionView: View {
             }
             .sheet(isPresented: $showingSettings) { ProviderSettingsView(model: model) }
             .sheet(isPresented: $showingHistory) { ChatHistoryView(model: model) }
-            .sheet(isPresented: $showingAudio) { AudioInputView(model: model) }
             .sheet(isPresented: $showingScreenshotHelp) { ScreenshotSetupView() }
             .photosPicker(isPresented: $showingPhotoPicker, selection: $photoSelection, matching: .images)
             .onChange(of: presentationActive) { _, active in
@@ -138,11 +147,12 @@ struct CompanionView: View {
                 Text(snapshot.origin + " · " + model.frameStatus).font(.caption).foregroundStyle(.secondary)
             }
             if let transcript = model.audioTranscript {
-                HStack {
-                    Label("音频转写 · \(transcript.count) 字", systemImage: "waveform").font(.caption)
-                    Spacer()
+                DisclosureGroup {
+                    Text(verbatim: transcript).font(.callout).textSelection(.enabled)
                     Button { model.removeAudioTranscript() } label: { Image(systemName: "xmark.circle") }
                         .help("移除音频转写并开始新上下文").accessibilityLabel("移除音频转写").disabled(model.isAsking)
+                } label: {
+                    Label("本段原文 · \(transcript.count) 字", systemImage: "waveform").font(.caption)
                 }
             }
             if !model.keyAvailable {
@@ -186,13 +196,9 @@ struct CompanionView: View {
                 HStack { ProgressView().controlSize(.mini); Text(status.label).font(.caption) }
             }
             HStack(alignment: .bottom, spacing: 8) {
-                Menu {
-                    Button { requestQuestionEditing() } label: { Label("编辑问题 / 恢复键盘", systemImage: "keyboard") }
-                    Button { showingAudio = true } label: { Label("音频转文字（OpenAI）", systemImage: "waveform") }
-                        .disabled(model.provider != .openAI)
-                } label: { Image(systemName: "plus.circle").font(.title2).frame(minWidth: 36, minHeight: 44) }
-                .help("键盘与音频").accessibilityLabel("键盘与音频").disabled(model.isAsking || busyImport)
-                TextField("输入问题；留空翻译当前图片", text: $model.question, axis: .vertical)
+                Button { requestQuestionEditing() } label: { Image(systemName: "keyboard").font(.title2).frame(minWidth: 36, minHeight: 44) }
+                .help("编辑问题与恢复键盘").accessibilityLabel("编辑问题与恢复键盘").disabled(model.isAsking || busyImport)
+                TextField(model.audioTranscript == nil ? "输入问题；留空翻译当前图片" : "追问这段音频", text: $model.question, axis: .vertical)
                     .lineLimit(1...4).textFieldStyle(.roundedBorder).focused($inputFocused)
                     .disabled(model.isAsking || busyImport)
                     .onChange(of: model.question) { _, text in if text.count > 2000 { model.question = String(text.prefix(2000)) } }
@@ -337,135 +343,6 @@ private struct ChatHistoryView: View {
                 guard !Task.isCancelled, request == searchRequest else { return }
                 results = matches
             }
-        }
-    }
-}
-
-private struct AudioInputView: View {
-    @ObservedObject var model: CompanionModel
-    @StateObject private var recorder = AudioRecorder()
-    @Environment(\.dismiss) private var dismiss
-    @State private var importingFile = false
-    @State private var selectedURL: URL?
-    @State private var transcribing = false
-    @State private var transcript = ""
-    @State private var hasTranscript = false
-    @State private var errorMessage: String?
-    @State private var work: Task<Void, Never>?
-    @State private var sessionAtOpen: UUID?
-    @State private var closing = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("录制或导入") {
-                    if recorder.isFinishing {
-                        ProgressView("正在完成音频文件…")
-                    } else if recorder.isRecording {
-                        Label("录制中 · \(Int(recorder.elapsedSeconds)) 秒", systemImage: "record.circle").foregroundStyle(.red)
-                        Button { stopRecording() } label: { Label("停止录制", systemImage: "stop.fill") }
-                    } else if recorder.isRequesting {
-                        ProgressView("请在系统窗口中选择音源…")
-                        Button("取消") { Task { await recorder.cancel() } }
-                    } else {
-                        Button { startRecording(microphone: false) } label: { Label("设备音频", systemImage: "speaker.wave.2") }
-                        Button { startRecording(microphone: true) } label: { Label("麦克风", systemImage: "mic") }
-                        Button { importingFile = true } label: { Label("导入音频文件", systemImage: "doc.badge.plus") }
-                    }
-                    Text("设备音频需要系统授权并选择音源，部分受保护内容不可录制。麦克风只录周围声音，不保证收录其他 App。每次最多 2 分钟，停止后由你决定上传转写。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }.disabled(transcribing || recorder.isFinishing)
-                if selectedURL != nil {
-                    Section("转为文字") {
-                        Label("音频已在本机就绪", systemImage: "waveform")
-                        Button { transcribe() } label: { Label("上传到 OpenAI 转写", systemImage: "text.bubble") }
-                            .disabled(transcribing || recorder.isRecording || recorder.isRequesting || recorder.isFinishing)
-                        if transcribing { ProgressView("正在转写…") }
-                        Text("使用 OpenAI Keychain 密钥与 API 用量；文字不会自动发送到聊天。音频仅作临时文件，关闭后清除。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-                if hasTranscript {
-                    Section("核对文字") {
-                        TextEditor(text: $transcript).frame(minHeight: 140)
-                        Text("转写作为资料附加，保留完整文字；已有回答时会新建对话并保留当前图片。最多 20,000 字。").font(.caption).foregroundStyle(.secondary)
-                        Button {
-                            guard sessionAtOpen == model.sessionID else { return }
-                            model.attachAudioTranscript(transcript); dismiss()
-                        } label: { Label("附加到聊天，准备翻译", systemImage: "text.badge.plus") }
-                            .disabled(transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || transcript.count > 20000 || transcribing || sessionAtOpen != model.sessionID)
-                    }
-                }
-                if let sessionAtOpen, sessionAtOpen != model.sessionID {
-                    Text("会话已变化，请关闭后重新打开音频。").font(.footnote).foregroundStyle(.orange)
-                }
-                if let message = errorMessage ?? recorder.lastError { Text(message).font(.footnote).foregroundStyle(.orange) }
-            }
-            .navigationTitle("音频转文字").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) {
-                Button { closeAudio() } label: { Image(systemName: "xmark") }.help("关闭并清除临时音频").accessibilityLabel("关闭音频")
-            } }
-            .onAppear { if sessionAtOpen == nil { sessionAtOpen = model.sessionID } }
-            .interactiveDismissDisabled(closing || recorder.isRecording || recorder.isRequesting || recorder.isFinishing || transcribing)
-            .onChange(of: model.sessionID) { _, _ in closeAudio() }
-            .fileImporter(isPresented: $importingFile, allowedContentTypes: [.audio]) { result in importAudio(result) }
-            .onChange(of: recorder.fileURL) { _, url in if let url { replaceAudio(url) } }
-            .onDisappear { work?.cancel(); Task { await recorder.cancel() }; clearSelectedAudio() }
-        }
-    }
-    private func closeAudio() {
-        guard !closing else { return }
-        closing = true
-        work?.cancel()
-        Task { @MainActor in
-            await recorder.cancel()
-            if recorder.isRecording { errorMessage = recorder.lastError; closing = false }
-            else { dismiss() }
-        }
-    }
-    private func startRecording(microphone: Bool) {
-        guard sessionAtOpen == model.sessionID else { return }
-        errorMessage = nil; clearSelectedAudio(); transcript = ""; hasTranscript = false
-        work = Task { @MainActor in
-            do { if microphone { try await recorder.startMicrophone() } else { try await recorder.start() } }
-            catch { errorMessage = error.localizedDescription }
-        }
-    }
-    private func stopRecording() {
-        work = Task { @MainActor in
-            do { replaceAudio(try await recorder.stop()) } catch { errorMessage = error.localizedDescription }
-        }
-    }
-    private func replaceAudio(_ url: URL) {
-        if selectedURL != url { clearSelectedAudio() }
-        selectedURL = url; transcript = ""; hasTranscript = false
-    }
-    private func clearSelectedAudio() { if let url = selectedURL { try? FileManager.default.removeItem(at: url) }; selectedURL = nil }
-    private func importAudio(_ result: Result<URL, Error>) {
-        guard sessionAtOpen == model.sessionID else { return }
-        do {
-            let url = try result.get()
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
-            guard size <= AudioTranscriptionClient.maximumBytes else { errorMessage = AudioError.tooLarge.localizedDescription; return }
-            let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(url.pathExtension)
-            try FileManager.default.copyItem(at: url, to: copy)
-            replaceAudio(copy)
-        } catch { errorMessage = "音频文件导入失败，请重新选择。" }
-    }
-    private func transcribe() {
-        guard let file = selectedURL, sessionAtOpen == model.sessionID else { return }
-        errorMessage = nil; transcribing = true
-        work = Task { @MainActor in
-            defer { transcribing = false }
-            do {
-                guard let key = try model.credentials.read(.openAI), !key.isEmpty else { throw ClientError.missingKey }
-                let text = try await AudioTranscriptionClient().transcribe(fileURL: file, key: key)
-                try Task.checkCancellation()
-                transcript = text
-                hasTranscript = true
-            } catch { if !Task.isCancelled { errorMessage = error.localizedDescription } }
         }
     }
 }

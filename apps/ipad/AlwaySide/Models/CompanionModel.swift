@@ -211,6 +211,36 @@ final class CompanionModel: ObservableObject {
         notice = "已附加音频转写，留空发送即可优先翻译。发送前仍可输入问题。"
     }
 
+    /// Each clip has its own audio-only conversation; neither saving nor opening resends it.
+    func saveAudioRead(_ result: AudioReadResult) -> String? {
+        let turn = ConversationTurn(question: AudioReadStore.question, answer: result.answer.text,
+                                    citations: result.answer.citations, searchState: result.answer.searchState)
+        do {
+            try sessions.save(id: result.id, provider: .openAI, snapshot: nil,
+                              turns: [.init(turn, complete: result.answer.complete)], audioTranscript: result.transcript)
+            sessionSummaries = sessions.summaries
+            return nil
+        } catch {
+            return "本段尚未保存到历史，请检查存储空间或会话数量；当前原文和解释仍可查看。"
+        }
+    }
+
+    func acceptAudioRead(_ result: AudioReadResult) {
+        startNewConversation()
+        sessionID = result.id
+        provider = .openAI
+        UserDefaults.standard.set(provider.rawValue, forKey: "provider")
+        refreshKeyStatus()
+        audioTranscript = result.transcript
+        let turn = ConversationTurn(question: AudioReadStore.question, answer: result.answer.text,
+                                    citations: result.answer.citations, searchState: result.answer.searchState)
+        messages = [.init(turn, complete: result.answer.complete)]
+        history = result.answer.complete ? [turn] : []
+        storageWarning = saveAudioRead(result)
+        frameStatus = "追问沿用本段原文，不附加之前的截图。"
+        if !result.answer.complete { notice = "解释未完成；追问仍可使用本段原文。" }
+    }
+
     func removeAudioTranscript() {
         if !messages.isEmpty {
             let image = snapshot

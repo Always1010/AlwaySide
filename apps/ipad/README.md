@@ -24,7 +24,15 @@
 5. 回答流式显示，支持 Markdown、代码复制和可点击来源；实际检索状态显示在回答下方。追问沿用当前图片和有界文字上下文。历史菜单可搜索、恢复或删除本机会话，并显示更新日期和时间；新会话按钮清空当前编辑状态。缩略图预览也显示接收日期和时间。
 6. 停止按钮取消本次请求；发送、取消、导入和会话切换都会按各自状态更新。「接收截图」这两个旧动作仍只传图片、不自动提问或上传；「读懂截图」是独立的显式上传入口。
 
-音频是独立的显式操作：系统音频录制需系统选择器授权，备用麦克风需麦克风权限；每次录制最多 2 分钟，也可导入不超过 20 MiB 的音频。录音结束后由用户选择上传至 OpenAI `gpt-transcribe` 转写，编辑后作为资料附加到聊天，最多 20,000 字，不挤占 2,000 字的问题输入。附加时已有回答会新建会话并保留当前图片；点击发送才把转写资料、当前图片与问题发给所选问答供应商。截图快捷指令与音频录制互不依赖。受保护内容或系统共享限制可能导致无音频；本修订没有视频片段分析。
+## 陪听：结束后自动翻译和解释
+
+1. 在主界面顶部点击波形图标，直接进入同一窗口里的陪听界面；使用 OpenAI 配置和已保存密钥。把窗口留在视频旁边，点击「听一段」，按系统选择器授权采集设备音频。无需先去其他 App 录制或转存文件。
+2. 点击「结束并解释」会停止本段录制，并自动串联 `gpt-transcribe` 原文转写与当前 OpenAI 模型的中文翻译、简短解释。原文先显示，翻译和解释流式显示；不要求核对、附加到聊天或再次发送。型号、推理、搜索与应用指令沿用当前设置，在本次请求开始时固定。
+3. 每段最多 2 分钟；到时只在本机完成音频，点击「解释本段」才上传。菜单保留麦克风备用及「导入音频并解释」，导入上限 20 MiB，转写上限 20,000 字。麦克风录周围声音，不能替代设备音频。无内容、权限或网络错误会显示原因，不自动切换来源、不自动重试。
+4. 解释失败时保留原文及已收到的片段；「重试解释」复用原文，不重新上传音频转写。「停止处理」取消请求并保留已收到文字。退出陪听会停止录音并清除临时音频；系统未确认停止时保持界面并提示重试。收起窗口后仅在系统允许的后台时间内尽力完成处理。
+5. 每段结果独立保存到本机历史，不附加旧截图或其他片段。点击「追问这一段」在同一窗口继续，沿用原文及已有解释，不重发已经完成的问题；默认不弹键盘。历史与追问界面可展开原文，未完成的解释不会加入追问上下文。保存失败会提示，当前结果仍可查看。
+
+这一版沿用按段录制：结束本段时会停止系统采集，下一段可能重新显示系统选择器；尚无持续陪看会话、最近 30 秒回溯缓存或边播放边转写字幕。TikTok、X、YouTube 的声音、耳机及后台表现需要在 iPadOS 27.2 真机分别体验；系统共享或来源内容保护可能导致无音频。无视频片段分析，截图入口与音频互不依赖。
 
 ## 备用系统入口：Slide Over 与只收图
 
@@ -64,7 +72,7 @@
 
 ## 工程验证
 
-单 Application target 使用 SwiftUI、UIKit、AppIntents、ScreenCaptureKit、AVFoundation、ImageIO、PhotosUI、Security 等系统框架，无第三方依赖。最低系统为 27.0、仅 iPad，当前 build 为 7，Debug/Release 共用 `Config/Base.xcconfig`，无额外开发团队、证书或付费服务配置。
+单 Application target 使用 SwiftUI、UIKit、AppIntents、ScreenCaptureKit、AVFoundation、ImageIO、PhotosUI、Security 等系统框架，无第三方依赖。最低系统为 27.0、仅 iPad，当前 build 为 8，Debug/Release 共用 `Config/Base.xcconfig`，无额外开发团队、证书或付费服务配置。
 
 在具有 Xcode 27.1 的 Apple 构建环境中，可进行不签名的编译检查：
 
@@ -116,6 +124,8 @@ xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-a
 卡片的系统依据：[Apple snippets](https://developer.apple.com/documentation/appintents/displaying-static-and-interactive-snippets)、[SnippetIntent 生命周期](https://developer.apple.com/documentation/appintents/snippetintent)、[系统执行进度](https://developer.apple.com/documentation/appintents/progressreportingintent)。这些文档说明 API 行为，不代替 AssistiveTouch、卡片尺寸与关闭后原页面恢复的真机证据。
 
 ## 测试构建
+
+陪听的离线契约 `tests/AudioReadContractChecks.swift` 已接入 CI，使用假转写和假解释验证顺序、转写失败不继续解释、重复提交、解释失败重试复用原文、取消传递和迟到结果隔离，不访问网络或设备。Windows 本地不具备 Swift/Xcode，不能用静态检查代替这些契约实际执行及 iPad 编译。真机体验重点是：设备音频授权 → 播放一段 → 结束并解释；再检查停止、两分钟上限、无音频、重试、历史原文和追问。
 
 推送 `ipad-test-YYYYMMDD-NNN` 格式的 Git tag 会触发未签名构建，例如 `ipad-test-20261103-001`。日期后序号每天从 `001` 递增；每次修改使用新 tag，保留旧 tag，不移动或删除，也不创建 GitHub Release。构建固定检出该次事件的 commit，不跟随之后的分支更新。普通分支推送和 PR 不触发此工作流，仍可手动运行 `workflow_dispatch`。
 

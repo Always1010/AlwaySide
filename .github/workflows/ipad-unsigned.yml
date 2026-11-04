@@ -112,6 +112,23 @@ jobs:
           xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
             "$RUNNER_TEMP/QuickReadContractChecks.swift" -o "$RUNNER_TEMP/QuickReadContractChecks"
           "$RUNNER_TEMP/QuickReadContractChecks"
+      - name: Check audio explanation cancellation and retry without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Services/AudioTranscriptionClient.swift \
+            apps/ipad/AlwaySide/Models/AudioReadStore.swift \
+            tests/AudioReadContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/AudioReadContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/AudioReadContractChecks.swift" -o "$RUNNER_TEMP/AudioReadContractChecks"
+          "$RUNNER_TEMP/AudioReadContractChecks"
       - name: Archive without signing
         shell: bash
         run: |
