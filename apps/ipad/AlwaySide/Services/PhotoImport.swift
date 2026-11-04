@@ -1,13 +1,14 @@
 import Foundation
 import ImageIO
-import UIKit
 import UniformTypeIdentifiers
 
 enum PhotoImport {
+    private static let maximumScreenshotAge: TimeInterval = 10 * 60
+
     /// Restore the already bounded handoff without another lossy JPEG conversion.
     /// The envelope is untrusted: check its type, complete decode and actual pixel dimensions.
     static func restoreScreenshot(jpegData: Data, receivedAt: Date) throws -> EvidenceSnapshot {
-        try ScreenshotInbox.validateReceiptDate(receivedAt)
+        try validateReceiptDate(receivedAt)
         guard !jpegData.isEmpty, jpegData.count <= 3 * 1024 * 1024,
               let source = CGImageSourceCreateWithData(jpegData as CFData, nil),
               CGImageSourceGetType(source) as String? == UTType.jpeg.identifier,
@@ -24,7 +25,7 @@ enum PhotoImport {
             throw ScreenshotHandoffError.invalidImage
         }
         // A delayed background decode must not extend the ten-minute handoff window.
-        try ScreenshotInbox.validateReceiptDate(receivedAt)
+        try validateReceiptDate(receivedAt)
         let frame = CapturedFrame(id: UUID(), timestamp: receivedAt,
                                   monotonicSeconds: ProcessInfo.processInfo.systemUptime,
                                   jpegData: jpegData, width: image.width, height: image.height)
@@ -45,6 +46,7 @@ enum PhotoImport {
         var data = Data()
         while let chunk = try file.read(upToCount: min(64 * 1024, maximumBytes + 1 - data.count)),
               !chunk.isEmpty {
+            try Task.checkCancellation()
             data.append(chunk)
             guard data.count <= maximumBytes else { throw ClientError.tooLarge }
         }
@@ -64,13 +66,38 @@ enum PhotoImport {
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                       kCGImageSourceCreateThumbnailWithTransform: true,
                                       kCGImageSourceThumbnailMaxPixelSize: 1280]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
-              let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.75),
-              jpeg.count <= 3 * 1024 * 1024 else { throw ClientError.invalidImage }
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            throw ClientError.invalidImage
+        }
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(encoded as CFMutableData,
+            UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw ClientError.invalidImage
+        }
+        CGImageDestinationAddImage(destination, image,
+                                  [kCGImageDestinationLossyCompressionQuality: 0.75] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { throw ClientError.invalidImage }
+        let jpeg = encoded as Data
+        guard jpeg.count <= 3 * 1024 * 1024 else { throw ClientError.invalidImage }
         let frame = CapturedFrame(id: UUID(), timestamp: Date(),
                                   monotonicSeconds: ProcessInfo.processInfo.systemUptime,
                                   jpegData: jpeg,
                                   width: image.width, height: image.height)
         return EvidenceSnapshot(frame: frame, origin: "手动导入（时间为导入时间）", isImported: true)
+    }
+
+    private static func validateReceiptDate(_ receivedAt: Date) throws {
+        let age = Date().timeIntervalSince(receivedAt)
+        guard age >= -60, age <= maximumScreenshotAge else { throw ScreenshotHandoffError.expired }
+    }
+}
+
+enum ScreenshotHandoffError: LocalizedError {
+    case invalidImage, expired
+    var errorDescription: String? {
+        switch self {
+        case .invalidImage: "没有收到有效截图（原图上限 20 MiB）。请将系统「截屏」的输出连接到接收动作。"
+        case .expired: "待接收截图已超过 10 分钟，请回到目标页面重新截屏。旧图不会代替本次截图。"
+        }
     }
 }

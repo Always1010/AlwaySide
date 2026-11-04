@@ -8,7 +8,6 @@ actor ScreenshotInbox {
     static let didChange = Notification.Name("AlwaySideScreenshotInboxDidChange")
     static let willReceive = Notification.Name("AlwaySideScreenshotInboxWillReceive")
     private static let maximumEnvelopeBytes = 5 * 1024 * 1024
-    private static let maximumAge: TimeInterval = 10 * 60
     private var latestReceiptID = UUID()
     private var isReceiving = false
 
@@ -100,11 +99,6 @@ actor ScreenshotInbox {
         }
     }
 
-    static func validateReceiptDate(_ receivedAt: Date) throws {
-        let age = Date().timeIntervalSince(receivedAt)
-        guard age >= -60, age <= Self.maximumAge else { throw ScreenshotHandoffError.expired }
-    }
-
     func acknowledge(_ id: UUID) throws {
         removeMaterializedFiles()
         // A newer shortcut may have completed while the UI was importing the previous image.
@@ -124,16 +118,6 @@ actor ScreenshotInbox {
 
     private func announceChange() async {
         await MainActor.run { NotificationCenter.default.post(name: Self.didChange, object: nil) }
-    }
-}
-
-enum ScreenshotHandoffError: LocalizedError {
-    case invalidImage, expired
-    var errorDescription: String? {
-        switch self {
-        case .invalidImage: "没有收到有效截图（原图上限 20 MiB）。请将系统「截屏」的输出连接到接收动作。"
-        case .expired: "待接收截图已超过 10 分钟，请回到目标页面重新截屏。旧图不会代替本次截图。"
-        }
     }
 }
 

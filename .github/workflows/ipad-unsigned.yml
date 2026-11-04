@@ -79,6 +79,22 @@ jobs:
           xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
             "$RUNNER_TEMP/ChatHistoryContractChecks.swift" -o "$RUNNER_TEMP/ChatHistoryContractChecks"
           "$RUNNER_TEMP/ChatHistoryContractChecks"
+      - name: Check image import and screenshot handoff contracts without networking
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          for source in apps/ipad/AlwaySide/Capture/CapturedFrame.swift \
+            apps/ipad/AlwaySide/Models/OpenAISettings.swift \
+            apps/ipad/AlwaySide/Models/Provider.swift \
+            apps/ipad/AlwaySide/Services/PhotoImport.swift \
+            tests/ImageImportContractChecks.swift; do
+            cat "$source"
+            printf '\n'
+          done > "$RUNNER_TEMP/ImageImportContractChecks.swift"
+          xcrun --sdk macosx swiftc -swift-version 5 -strict-concurrency=targeted -parse-as-library \
+            "$RUNNER_TEMP/ImageImportContractChecks.swift" -o "$RUNNER_TEMP/ImageImportContractChecks"
+          "$RUNNER_TEMP/ImageImportContractChecks"
       - name: Archive without signing
         shell: bash
         run: |
