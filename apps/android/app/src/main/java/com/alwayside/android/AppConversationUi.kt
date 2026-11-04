@@ -3,7 +3,6 @@ package com.alwayside.android
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
-import android.content.Intent
 import android.graphics.Typeface
 import android.text.TextUtils
 import android.view.Gravity
@@ -28,23 +27,25 @@ internal fun Context.appHeader(back: (() -> Unit)? = null) = LinearLayout(this).
     }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (back != null) marginStart = dp(6) })
 }
 
-internal fun LinearLayout.addHistoryTabs(activity: Activity) {
+internal fun Context.appTabs(selected: AppPage, onHistory: () -> Unit, onSettings: () -> Unit) = LinearLayout(this).apply {
+    val activity = this@appTabs
+    orientation = LinearLayout.VERTICAL
     addView(LinearLayout(activity).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         setPadding(activity.dp(22), 0, activity.dp(22), 0)
-        addView(LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(activity.label("对话记录", 13f).apply {
-                gravity = Gravity.CENTER; setTextColor(ACCENT); minHeight = activity.dp(44)
-                accessible("对话记录，当前页面")
-            })
-            addView(View(activity).apply { setBackgroundColor(ACCENT) }, LinearLayout.LayoutParams(-1, activity.dp(2)))
-        }, LinearLayout.LayoutParams(activity.dp(56), -2))
-        addView(activity.label("设置", 13f, true).apply {
-            gravity = Gravity.CENTER; minHeight = activity.dp(44)
-            isClickable = true; isFocusable = true; accessible("设置")
-            setOnClickListener { activity.startActivity(Intent(activity, SettingsActivity::class.java)) }
-        }, LinearLayout.LayoutParams(activity.dp(44), -2).apply { marginStart = activity.dp(14) })
+        listOf(Triple("对话记录", AppPage.HISTORY, onHistory), Triple("设置", AppPage.SETTINGS, onSettings)).forEach { (title, page, action) ->
+            val active = page == selected
+            addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(activity.label(title, 13f).apply {
+                    gravity = Gravity.CENTER; setTextColor(if(active)ACCENT else MUTED); minHeight = activity.dp(44)
+                    isSelected = active; isClickable = true; isFocusable = true; background = activity.touchFeedback()
+                    accessible(if(active)"$title，当前页面" else title)
+                    setOnClickListener { if(!active)action() }
+                }, LinearLayout.LayoutParams(-1, activity.dp(44)))
+                addView(View(activity).apply { setBackgroundColor(if(active)ACCENT else android.graphics.Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, activity.dp(2)))
+            },LinearLayout.LayoutParams(activity.dp(if(page==AppPage.HISTORY)56 else 44),-2).apply{marginEnd=activity.dp(20)})
+        }
     })
     addView(View(activity).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, activity.dp(1)))
 }
@@ -52,7 +53,7 @@ internal fun LinearLayout.addHistoryTabs(activity: Activity) {
 internal fun conversationDate(value: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(value))
 
-internal fun LinearLayout.addConversationList(activity: Activity, archiveShortcut: Boolean = false, refreshed: () -> Unit) {
+internal fun LinearLayout.addConversationList(activity: Activity, onOpen: (String?) -> Unit, refreshed: () -> Unit) {
     val store = HistoryStore(activity)
     val media = ConversationMediaStore(activity)
     fun failed() = Toast.makeText(activity, "操作未全部完成，请重试并检查本机存储", Toast.LENGTH_LONG).show()
@@ -76,11 +77,7 @@ internal fun LinearLayout.addConversationList(activity: Activity, archiveShortcu
             LinearLayout.LayoutParams(0, -2, 1f))
         addView(count)
         addView(activity.appIcon(android.R.drawable.ic_input_add, "新建文字对话") {
-            activity.startActivity(Intent(activity, ChatActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-        })
-        if (archiveShortcut) addView(activity.appIcon(android.R.drawable.ic_menu_recent_history, "全部会话记录") {
-            activity.startActivity(Intent(activity, HistoryActivity::class.java))
+            onOpen(null)
         })
     })
     val values = try { store.list() } catch (_: Exception) {
@@ -117,9 +114,7 @@ internal fun LinearLayout.addConversationList(activity: Activity, archiveShortcu
             accessible("打开会话：${value.title.ifBlank { "未命名会话" }}；长按删除")
             setOnLongClickListener { delete(); true }
             setOnClickListener {
-                activity.startActivity(Intent(activity, ChatActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    .putExtra(ChatActivity.EXTRA_ID, value.id))
+                onOpen(value.id)
             }
             val kind = when (value.kind) { "audio" -> "音频"; "photo", "screen", "image" -> "截图"; else -> "文字" }
             addView(ImageView(activity).apply {

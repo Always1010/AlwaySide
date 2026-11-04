@@ -12,10 +12,8 @@
         android:label="AlwaySide"
         android:icon="@drawable/ic_assistant"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/AppTheme">
-        <activity android:name=".SettingsActivity" android:exported="false" />
-        <activity android:name=".HistoryActivity" android:exported="false" />
-        <activity android:name=".ChatActivity" android:exported="false" android:launchMode="singleTask" />
         <activity android:name=".CapturePermissionActivity" android:exported="false"
             android:taskAffinity="" android:excludeFromRecents="true" />
         <activity android:name=".ProcessTextActivity" android:exported="true" android:label="询问 AlwaySide">
@@ -30,7 +28,7 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -4,14 +4,13 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Intent
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.text.InputFilter
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
-import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
@@ -21,7 +20,17 @@ import android.widget.TextView
 import android.widget.Toast
 
 /** Full-screen in-app conversation. This path never starts a service or capture. */
-class ChatActivity : Activity() {
+internal class ChatScreen(
+    private val activity: Activity,
+    private val onBack: () -> Unit,
+    private val onSettings: () -> Unit,
+    id: String? = null,
+    savedState: Bundle? = null,
+    retained: RetainedConversation? = null,
+    autoAskText: Boolean = false,
+) : ContextWrapper(activity) {
+    val view: View
+    private val requestedId = savedState?.getString(EXTRA_ID) ?: id
     private lateinit var session: ChatSession
     private lateinit var titleView: TextView
     private lateinit var statusView: TextView
@@ -41,29 +50,27 @@ class ChatActivity : Activity() {
     private var restoredStatus = ""
     private var handoff: HandedOffConversation? = null
     private var openedStoredRecord = false
-    private data class RetainedConversation(
+    internal data class RetainedConversation(
         val session: ChatSession, val image: Bitmap?, val handoff: HandedOffConversation?,
         val title: String, val status: String, val openedStoredRecord: Boolean,
         val draft: String, val reuseImage: Boolean,
     )
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        buildScreen()
-        @Suppress("DEPRECATION")
-        val retained = lastNonConfigurationInstance as? RetainedConversation
+    init {
+        view = buildScreen()
         if (retained != null) {
             session = retained.session; image = retained.image; handoff = retained.handoff
             conversationTitle = retained.title; restoredStatus = retained.status
             openedStoredRecord = retained.openedStoredRecord
             bindConversation(retained.draft, retained.reuseImage)
-            return
+        } else {
+            openConversation(requestedId, savedState?.getString("draft").orEmpty(), savedState?.getBoolean("reuse", true) ?: true)
+            if (savedState == null) maybeAskSelectedText(autoAskText)
         }
-        val id = savedInstanceState?.getString(EXTRA_ID) ?: intent.getStringExtra(EXTRA_ID)
-        openConversation(id, savedInstanceState?.getString("draft").orEmpty(), savedInstanceState?.getBoolean("reuse", true) ?: true)
-        if (savedInstanceState == null) maybeAskSelectedText()
     }
+
+    fun matches(id: String?): Boolean = !closing &&
+        (if (id == null) requestedId == null else if (ready) id == session.conversationId else id == requestedId)
 
     private fun openConversation(id: String?, draft: String = "", reuseImage: Boolean = true) {
         val saved = if (id.isNullOrBlank()) null else try {
@@ -100,22 +107,7 @@ class ChatActivity : Activity() {
         render()
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        val requestedId = intent.getStringExtra(EXTRA_ID)
-        if (ready && requestedId == session.conversationId) return
-        releaseConversation()
-        ready = false; image = null; handoff = null; restoredStatus = ""; openedStoredRecord = false
-        composer.text.clear()
-        messagesView.removeAllViews()
-        openConversation(requestedId)
-        maybeAskSelectedText()
-    }
-
-    private fun maybeAskSelectedText() {
-        val explicitlyRequested = intent.getBooleanExtra(EXTRA_AUTO_TEXT, false)
-        intent.removeExtra(EXTRA_AUTO_TEXT)
+    private fun maybeAskSelectedText(explicitlyRequested: Boolean) {
         if (!explicitlyRequested || !ready || session.sourceText.isBlank() || session.busy ||
             session.messages.isNotEmpty() || session.question.isNotBlank()) return
         try {
@@ -126,7 +118,7 @@ class ChatActivity : Activity() {
         }
     }
 
-    private fun buildScreen() {
+    private fun buildScreen(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BACKGROUND); fitsSystemWindows = true
@@ -134,7 +126,7 @@ class ChatActivity : Activity() {
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), dp(2), dp(6), dp(2))
-            addView(appIcon(android.R.drawable.ic_menu_revert, "返回对话列表") { finish() })
+            addView(appIcon(android.R.drawable.ic_menu_revert, "返回对话列表") { onBack() })
             titleView = label("对话", 13f).apply {
                 maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
@@ -142,7 +134,7 @@ class ChatActivity : Activity() {
             addView(titleView, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
             addView(appIcon(R.drawable.ic_copy, "复制整段会话") { copyConversation() })
             addView(appIcon(android.R.drawable.ic_menu_manage, "设置") {
-                startActivity(Intent(this@ChatActivity, SettingsActivity::class.java))
+                onSettings()
             })
         })
         root.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)))
@@ -161,7 +153,7 @@ class ChatActivity : Activity() {
         contextTools = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END
             setPadding(dp(12), 0, dp(10), 0)
-            reuse = CheckBox(this@ChatActivity).apply {
+            reuse = CheckBox(this@ChatScreen).apply {
                 text = "沿用原图"; textSize = 11f; setTextColor(MUTED); minHeight = dp(44)
                 accessible("追问时附带这段会话的原图")
                 buttonTintList = android.content.res.ColorStateList.valueOf(ACCENT)
@@ -179,7 +171,7 @@ class ChatActivity : Activity() {
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
             setPadding(dp(12), dp(8), dp(10), dp(10))
-            composer = EditText(this@ChatActivity).apply {
+            composer = EditText(this@ChatScreen).apply {
                 hint = "想了解什么？"; setHintTextColor(MUTED); setTextColor(INK); textSize = 13f
                 background = card(SURFACE)
                 setPadding(dp(10), dp(8), dp(10), dp(8))
@@ -197,7 +189,7 @@ class ChatActivity : Activity() {
             }
             addView(send, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(3) })
         })
-        setContentView(root)
+        return root
     }
 
     private fun render() {
@@ -211,7 +203,7 @@ class ChatActivity : Activity() {
         if (session.sourceText.isNotBlank()) {
             messagesView.addView(column().apply {
                 setPadding(dp(10), dp(6), dp(10), dp(10)); background = card(SURFACE)
-                addView(LinearLayout(this@ChatActivity).apply {
+                addView(LinearLayout(this@ChatScreen).apply {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                     addView(label("选中文字", 11f, true), LinearLayout.LayoutParams(0, -2, 1f))
                     addView(appIcon(android.R.drawable.ic_menu_view, "查看完整选中文字") { showSourceText() })
@@ -347,24 +339,24 @@ class ChatActivity : Activity() {
         contextTools.visibility = View.GONE
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
+    fun saveState(outState: Bundle) {
+        // A failed/deleted history entry must remain that entry after recreation, not become a new chat.
+        if (!ready) requestedId?.let { outState.putString(EXTRA_ID, it) }
         if (ready) {
             if (openedStoredRecord || session.messages.isNotEmpty() || session.question.isNotBlank() || session.transcript.isNotBlank())
                 outState.putString(EXTRA_ID, session.conversationId)
             outState.putString("draft", composer.text.toString())
             outState.putBoolean("reuse", reuse.isChecked)
         }
-        super.onSaveInstanceState(outState)
     }
 
-    override fun onDestroy() {
+    fun dispose(retaining: Boolean = false) {
+        if (closing) return
         closing = true
-        if (!isChangingConfigurations || !ready) releaseConversation()
-        super.onDestroy()
+        if (!retaining || !ready) releaseConversation()
     }
 
-    @Suppress("DEPRECATION")
-    override fun onRetainNonConfigurationInstance(): Any? {
+    fun retain(): RetainedConversation? {
         if (!ready) return null
         session.setObserver(null)
         return RetainedConversation(session, image, handoff, conversationTitle, restoredStatus,

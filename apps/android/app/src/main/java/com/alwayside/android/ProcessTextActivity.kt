@@ -43,9 +43,7 @@ class ProcessTextActivity : Activity() {
             kind = "text", status = "已接收选中文字 · 等待提问", sourceText = text,
         )
         HistoryStore(this).save(record)
-        startActivity(Intent(this, ChatActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .putExtra(ChatActivity.EXTRA_ID, record.id).putExtra(ChatActivity.EXTRA_AUTO_TEXT, true))
+        startActivity(AppEntry.intent(this,AppPage.CHAT,record.id,autoAskText=true))
     }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()

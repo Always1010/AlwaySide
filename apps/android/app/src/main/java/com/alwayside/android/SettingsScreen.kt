@@ -1,21 +1,18 @@
 package com.alwayside.android
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.Intent
+import android.content.ContextWrapper
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
-import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.text.method.PasswordTransformationMethod
 import android.view.Gravity
 import android.view.View
-import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.CheckBox
 import android.widget.EditText
@@ -28,7 +25,12 @@ import java.util.Locale
 import java.util.concurrent.CancellationException
 
 /** Category pages intentionally keep their draft only in the current view, never saved instance state. */
-class SettingsActivity : Activity() {
+internal class SettingsScreen(
+    private val activity: Activity,
+    private val onContent: (View) -> Unit,
+    private val onHistory: () -> Unit,
+    initialPage: String? = null,
+) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
         API("API 连接", "服务地址、加密密钥与可用模型", android.R.drawable.ic_menu_manage),
@@ -57,41 +59,59 @@ class SettingsActivity : Activity() {
     private var modelRequest: RequestCancellation? = null
     private var modelProgress: AlertDialog? = null
     private var generation = 0
-    private var backCallback: android.window.OnBackInvokedCallback? = null
+    private var currentRoot: View? = null
+    private val dialogs = mutableSetOf<AlertDialog>()
+    private var disposed = false
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    init {
         store = SettingsStore(this)
         interactionStore = InteractionPreferences(this)
-        if (Build.VERSION.SDK_INT >= 33) {
-            backCallback = android.window.OnBackInvokedCallback { navigateBack() }.also {
-                onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, it)
-            }
+        showPage(Page.entries.firstOrNull { it.name == initialPage } ?: Page.HOME)
+    }
+
+    val isHome: Boolean get() = page == Page.HOME
+
+    fun pageName(): String = page.name
+
+    /** Reattach the existing view so navigating the host does not recreate a draft. */
+    fun show() {
+        if (!disposed) currentRoot?.let(onContent)
+    }
+
+    /** The host owns leaving settings; a category always consumes back itself. */
+    fun back(): Boolean {
+        if (isHome || disposed) return false
+        if (!dirty) {
+            showPage(Page.HOME)
+        } else {
+            AlertDialog.Builder(this).setTitle("放弃此页未保存的修改？")
+                .setMessage("返回分类后，此页草稿会丢弃。密钥草稿不会带到其他页面。")
+                .setNegativeButton("继续编辑", null)
+                .setPositiveButton("放弃并返回") { _, _ -> showPage(Page.HOME) }.showTracked()
         }
-        showPage(Page.HOME)
+        return true
     }
 
-    // API 33+ navigation is handled by the OnBackInvokedCallback registered in onCreate.
-    @Deprecated("Legacy API 29–32 bridge; API 33+ uses OnBackInvokedCallback")
-    @SuppressLint("GestureBackNavigation")
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        if (Build.VERSION.SDK_INT < 33) navigateBack() else super.onBackPressed()
-    }
-
-    private fun navigateBack() {
-        if (page == Page.HOME) { finish(); return }
-        if (!dirty) { showPage(Page.HOME); return }
+    fun requestLeave(leave: () -> Unit) {
+        if (disposed) return
+        if (!dirty) {
+            leave()
+            return
+        }
         AlertDialog.Builder(this).setTitle("放弃此页未保存的修改？")
-            .setMessage("返回分类后，此页草稿会丢弃。密钥草稿不会带到其他页面。")
-            .setNegativeButton("继续编辑", null).setPositiveButton("放弃并返回") { _, _ -> showPage(Page.HOME) }.show()
+            .setMessage("离开设置后，此页草稿会丢弃。密钥草稿不会带到其他页面。")
+            .setNegativeButton("继续编辑", null)
+            .setPositiveButton("放弃并离开") { _, _ ->
+                dirty = false
+                leave()
+            }.showTracked()
     }
 
     private fun showPage(next: Page) {
+        if (disposed) return
         cancelModelRequest()
-        fields["apiKey"]?.text?.clear()
-        fields.clear(); checks.clear(); selections.clear(); ballPreview = null
+        dismissDialogs()
+        clearDraft()
         page = next; generation++; rendering = true; dirty = false
         body = column().apply { setPadding(dp(22), dp(12), dp(22), dp(24)) }
         val root = LinearLayout(this).apply {
@@ -100,8 +120,8 @@ class SettingsActivity : Activity() {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(if(next == Page.HOME)22 else 8), dp(12), dp(10), dp(10))
-            if(next != Page.HOME) addView(iconButton(android.R.drawable.ic_media_previous, "返回设置分类") { navigateBack() })
-            addView(LinearLayout(this@SettingsActivity).apply {
+            if(next != Page.HOME) addView(iconButton(android.R.drawable.ic_media_previous, "返回设置分类") { back() })
+            addView(LinearLayout(this@SettingsScreen).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(label(if (next == Page.HOME) "AlwaySide" else next.title, if (next == Page.HOME) 20f else 18f).apply {
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -139,7 +159,8 @@ class SettingsActivity : Activity() {
         root.addView(ScrollView(this).apply {
             isFillViewport = true; isSaveEnabled = false; clipToPadding = false; addView(body)
         }, LinearLayout.LayoutParams(-1, 0, 1f))
-        setContentView(root)
+        currentRoot = root
+        onContent(root)
         rendering = false; dirty = false
     }
 
@@ -148,42 +169,19 @@ class SettingsActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(-1, dp(1))
     }
 
-    private fun homeTabs() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(LinearLayout(this@SettingsActivity).apply {
-            orientation = LinearLayout.HORIZONTAL; setPadding(dp(22), 0, dp(22), 0)
-            listOf("对话记录", "设置").forEachIndexed { index, title ->
-                addView(LinearLayout(this@SettingsActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(label(title, 13f).apply {
-                        gravity = Gravity.CENTER; minHeight = dp(44); setTextColor(if (index == 1) ACCENT else MUTED)
-                        isSelected = index == 1; isClickable = true; isFocusable = true; background = touchFeedback()
-                        setOnClickListener {
-                            if (index == 0) {
-                                startActivity(Intent(this@SettingsActivity, MainActivity::class.java)
-                                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-                                finish()
-                            }
-                        }
-                    }, LinearLayout.LayoutParams(-1, dp(44)))
-                    addView(View(this@SettingsActivity).apply { setBackgroundColor(if (index == 1) ACCENT else Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, dp(2)))
-                }, LinearLayout.LayoutParams(dp(if (index == 0) 64 else 44), -2).apply { rightMargin = dp(20) })
-            }
-        })
-        addView(divider())
-    }
+    private fun homeTabs() = appTabs(AppPage.SETTINGS, onHistory, {})
 
     private fun category(value: Page) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(64); setPadding(0, dp(14), 0, dp(14)); background = touchFeedback()
             isClickable = true; isFocusable = true; contentDescription = "${value.title}，${value.description}，进入详情"
-            addView(LinearLayout(this@SettingsActivity).apply {
+            addView(LinearLayout(this@SettingsScreen).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(label(value.title, 14f).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
                 addView(label(value.description, 11f, true).apply { setPadding(0, dp(3), 0, 0) })
             }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
-            addView(android.widget.ImageView(this@SettingsActivity).apply {
+            addView(android.widget.ImageView(this@SettingsScreen).apply {
                 setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
                 imageTintList = ColorStateList.valueOf(MUTED)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -208,7 +206,7 @@ class SettingsActivity : Activity() {
                 .setNegativeButton("取消", null).setPositiveButton("重置") { _, _ ->
                     try { store.resetConfiguration(); showPage(Page.API); toast("已重置，请重新填写密钥") }
                     catch (_: Exception) { toast("重置失败，请检查本机存储") }
-                }.show()
+                }.showTracked()
         }
     }
 
@@ -255,7 +253,7 @@ class SettingsActivity : Activity() {
                     // Refresh only this selector's visible value without discarding edited fields.
                     body.findViewWithTag<TextView>("audioOutput")?.text = "音频默认输出：原文 + 翻译与解读"
                     dirty = true; status.text = "已恢复此页草稿，尚未保存"
-                }.show()
+                }.showTracked()
         }
     }
 
@@ -264,7 +262,7 @@ class SettingsActivity : Activity() {
         section("外观预览")
         val previewArea = LinearLayout(this).apply {
             gravity = Gravity.CENTER; background = card(SURFACE, dp(8).toFloat())
-            ballPreview = View(this@SettingsActivity).also { addView(it) }
+            ballPreview = View(this@SettingsScreen).also { addView(it) }
         }
         body.addView(previewArea, LinearLayout.LayoutParams(-1, dp(100)))
         slider("视觉直径", 18, 48, ballSize, "dp") { ballSize = it; updateBallPreview() }
@@ -376,7 +374,7 @@ class SettingsActivity : Activity() {
             AlertDialog.Builder(this).setTitle(title).setSingleChoiceItems(options.values.toTypedArray(), keys.indexOf(selections[name])) { dialog, index ->
                 selections[name] = keys[index]; button.text = "$title：${options.getValue(keys[index])}"
                 dirty = true; dialog.dismiss()
-            }.setNegativeButton("取消", null).show()
+            }.setNegativeButton("取消", null).showTracked()
         }
     }
 
@@ -463,30 +461,30 @@ class SettingsActivity : Activity() {
         val currentGeneration = generation
         modelProgress = AlertDialog.Builder(this).setTitle("正在读取模型")
             .setMessage("仅请求当前 API 地址的 /models，不会发送媒体。")
-            .setNegativeButton("取消") { _, _ -> cancelModelRequest() }.setOnCancelListener { cancelModelRequest() }.show()
+            .setNegativeButton("取消") { _, _ -> cancelModelRequest() }.setOnCancelListener { cancelModelRequest() }.showTracked()
         Thread({
             try {
                 val models = AiProvider().listModels(config, token)
-                runOnUiThread {
-                    if (isFinishing || isDestroyed || generation != currentGeneration || modelRequest !== token) return@runOnUiThread
+                activity.runOnUiThread {
+                    if (disposed || activity.isFinishing || activity.isDestroyed || generation != currentGeneration || modelRequest !== token) return@runOnUiThread
                     modelRequest = null; modelProgress?.dismiss(); modelProgress = null
                     if (models.isEmpty()) { toast("服务未返回可用模型，可手动填写模型 ID"); return@runOnUiThread }
                     if (target != null) {
                         AlertDialog.Builder(this).setTitle(if (target == "model") "选择图文模型 ID" else "选择转写模型 ID")
                             .setItems(models.toTypedArray()) { _, index -> fields[target]?.setText(models[index]) }
-                            .setNegativeButton("取消", null).show()
+                            .setNegativeButton("取消", null).showTracked()
                     } else {
                         val list = label(models.joinToString("\n"), 15f).apply { setTextIsSelectable(true); setPadding(dp(20), dp(8), dp(20), dp(8)) }
                         AlertDialog.Builder(this).setTitle("服务返回的模型 ID")
                             .setView(ScrollView(this).apply { addView(list) })
                             .setMessage("可长按复制。在“模型与生成参数”中也可直接从此列表选择；获取列表不保存连接草稿。")
-                            .setPositiveButton("完成", null).show()
+                            .setPositiveButton("完成", null).showTracked()
                     }
                 }
             } catch (_: CancellationException) { /* Explicit cancellation has no user-facing error. */ }
             catch (error: Exception) {
-                runOnUiThread {
-                    if (isFinishing || isDestroyed || generation != currentGeneration || modelRequest !== token) return@runOnUiThread
+                activity.runOnUiThread {
+                    if (disposed || activity.isFinishing || activity.isDestroyed || generation != currentGeneration || modelRequest !== token) return@runOnUiThread
                     modelRequest = null; modelProgress?.dismiss(); modelProgress = null
                     status.text = if (error is ProviderException) error.message else "读取模型失败，请检查网络与服务兼容性。可继续手动填写模型 ID。"
                 }
@@ -505,7 +503,7 @@ class SettingsActivity : Activity() {
             .setNegativeButton("取消", null).setPositiveButton("移除") { _, _ ->
                 try { store.clearCredential(); showPage(Page.API); toast("已移除本机密钥") }
                 catch (_: Exception) { toast("移除失败，请检查本机存储") }
-            }.show()
+            }.showTracked()
     }
 
     private fun savePreset() {
@@ -523,12 +521,12 @@ class SettingsActivity : Activity() {
                         catch (_: Exception) { toast("保存失败：最多 20 个预设，单项提示词最多 32000 字") }
                     }
                     if (store.presets().containsKey(title)) AlertDialog.Builder(this).setTitle("覆盖同名预设？").setMessage(title)
-                        .setNegativeButton("取消", null).setPositiveButton("覆盖") { _, _ -> perform() }.show()
+                        .setNegativeButton("取消", null).setPositiveButton("覆盖") { _, _ -> perform() }.showTracked()
                     else perform()
                 } catch (_: Exception) { toast("无法读取预设") }
             }
         }
-        dialog.show()
+        dialog.showTracked()
     }
 
     private fun loadPreset() {
@@ -542,7 +540,7 @@ class SettingsActivity : Activity() {
                 fields.getValue("defaultQuestion").setText(preset.defaultQuestion)
                 fields.getValue("audioQuestion").setText(preset.audioQuestion)
                 status.text = "已加载“${names[index]}”，保存此分类后生效"
-            }.setNegativeButton("取消", null).show()
+            }.setNegativeButton("取消", null).showTracked()
         } catch (_: Exception) { toast("无法读取提示词预设") }
     }
 
@@ -562,10 +560,37 @@ class SettingsActivity : Activity() {
     }
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
 
-    override fun onDestroy() {
-        cancelModelRequest(); fields["apiKey"]?.text?.clear(); fields.clear()
-        if (Build.VERSION.SDK_INT >= 33) backCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
-        backCallback = null
-        super.onDestroy()
+    private fun clearDraft() {
+        rendering = true
+        fields.values.forEach { it.text.clear() }
+        fields.clear(); checks.clear(); selections.clear(); ballPreview = null
+        rendering = false
+        dirty = false
+    }
+
+    private fun AlertDialog.Builder.showTracked(): AlertDialog = create().showTracked()
+
+    private fun AlertDialog.showTracked(): AlertDialog {
+        if (disposed) return this
+        dialogs += this
+        setOnDismissListener { dialogs.remove(this) }
+        show()
+        return this
+    }
+
+    private fun dismissDialogs() {
+        dialogs.toList().forEach { it.dismiss() }
+        dialogs.clear()
+    }
+
+    fun dispose() {
+        if (disposed) return
+        disposed = true
+        generation++
+        cancelModelRequest()
+        dismissDialogs()
+        clearDraft()
+        body.removeAllViews()
+        currentRoot = null
     }
 }

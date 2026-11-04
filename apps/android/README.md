@@ -52,13 +52,16 @@ python .local/android/build.py :app:assembleDebug :app:lintDebug
 
 GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTest 保护地址、生成参数、流边界和取消；ChatSessionTest 保护旧回调隔离、配置与选文快照、历史转写和追问；InteractionTest 保护多击互斥、录音取消回调与分状态映射。测试不会调用真实 API。真实服务、KeyStore、悬浮输入、文字选择菜单和音源可录性需真机验证。
 
+AppNavigationTest 保护设置详情返回不弹出分类页、聊天进入设置后回原聊天、重复标签不叠栈和重建后导航来源。应用内导航由 MainActivity 单窗口管理，设置和聊天为可挂载 View 页面；系统采集授权和文字选择处理仍使用独立的临时 Activity。
+
 ## 源码职责
 
 以下类位于 app/src/main/java/com/alwayside/android/：
 
 | 类 | 职责 |
 | --- | --- |
-| MainActivity / SettingsActivity / HistoryActivity / ChatActivity | 应用对话主页、分类设置、权限控制与原生聊天 |
+| MainActivity / AppNavigation / AppEntry | 单应用窗口、页面返回栈、状态恢复与可信内部入口 |
+| SettingsScreen / ChatScreen / AppConversationUi | 分类设置、原生聊天、记录列表及共享导航标签 |
 | ProcessTextActivity | 系统 PROCESS_TEXT / SEND 纯文本入口与无悬浮权限回退 |
 | CapturePermissionActivity | 悬浮动作按需申请音频／屏幕采集授权，成功后继续原动作，取消时恢复悬浮球 |
 | AssistantService | 前台服务、小球手势、贴球菜单、三类独立小窗与采集 |

@@ -179,7 +179,7 @@ class AssistantService : Service() {
             }
             if (intent?.action == "resume_history") {
                 val id = intent.getStringExtra("historyId")
-                if (id != null) startActivity(Intent(this, ChatActivity::class.java).putExtra("conversationId", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                if (id != null) startActivity(AppEntry.intent(this,AppPage.CHAT,id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         } catch (e: Exception) {
             ProbeState.lastEvent = "开启失败：${e.javaClass.simpleName}"
@@ -307,13 +307,13 @@ class AssistantService : Service() {
             AssistantActions.CANCEL_AUDIO -> cancelRecording(true)
             AssistantActions.MENU -> showMenu()
             AssistantActions.LAST -> nodes[lastKind]?.let { showWindow(it) } ?: toast("还没有悬浮会话，先截图或听一段")
-            AssistantActions.HISTORY -> openApplication(MainActivity::class.java)
-            AssistantActions.SETTINGS -> openApplication(SettingsActivity::class.java)
+            AssistantActions.HISTORY -> openApplication(AppPage.HISTORY)
+            AssistantActions.SETTINGS -> openApplication(AppPage.SETTINGS)
         }
     }
-    private fun openApplication(type: Class<out Activity>) {
+    private fun openApplication(page: AppPage) {
         hideUnpinned()
-        startActivity(Intent(this, type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        startActivity(AppEntry.intent(this,page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     private fun requestCaptureConsent(action: String, continuation: (() -> Unit)? = null) {
         if(!alive || requestingConsent)return
@@ -352,8 +352,8 @@ class AssistantService : Service() {
         item(R.drawable.ic_line_text,"最近悬浮对话") { dispatchAction(AssistantActions.LAST) }
         if (nodes["audio"]?.clip != null) item(R.drawable.ic_line_play,"回听上一段") { playClip() }
         items.addView(View(this).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)).apply{setMargins(dp(8),dp(4),dp(8),dp(4))})
-        item(R.drawable.ic_line_history,"对话记录") { openApplication(MainActivity::class.java) }
-        item(R.drawable.ic_line_settings,"设置") { openApplication(SettingsActivity::class.java) }
+        item(R.drawable.ic_line_history,"对话记录") { openApplication(AppPage.HISTORY) }
+        item(R.drawable.ic_line_settings,"设置") { openApplication(AppPage.SETTINGS) }
         body.addView(ScrollView(this).apply{isVerticalScrollBarEnabled=false;addView(items)})
         val size=screenSize(); val ball=bubbleLayout
         val w=minOf(dp(164),size.first-dp(16)); val h=minOf(dp(rowCount*44+21),size.second-dp(100))
