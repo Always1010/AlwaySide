@@ -9,6 +9,7 @@ struct CompanionView: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var capture: ScreenCaptureController
     @ObservedObject private var recovery = WindowRecovery.shared
+    @ObservedObject private var shortcutListening = ShortcutListening.shared
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var inputFocused: Bool
     @State private var showingSettings = false
@@ -36,7 +37,10 @@ struct CompanionView: View {
                             .help("关闭窗口恢复提示").accessibilityLabel("关闭窗口恢复提示")
                     }.padding(10)
                 }
-                if showingAudio {
+                if shortcutListening.isVisible {
+                    ShortcutListeningPanel(session: shortcutListening, recorder: shortcutListening.recorder,
+                                           reading: shortcutListening.reading)
+                } else if showingAudio {
                     AudioCompanionView(model: model, onClose: { showingAudio = false }, onFollowUp: { result in
                         model.acceptAudioRead(result)
                         showingAudio = false
@@ -89,15 +93,16 @@ struct CompanionView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     Button { showingHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }
-                        .help("查找与打开本机会话").accessibilityLabel("会话历史").disabled(showingAudio)
+                        .help("查找与打开本机会话").accessibilityLabel("会话历史").disabled(showingAudio || shortcutListening.isVisible)
                     Button { resetInteraction(); model.startNewConversation() } label: { Image(systemName: "square.and.pencil") }
-                        .help("新建对话").accessibilityLabel("新建对话").disabled(showingAudio)
+                        .help("新建对话").accessibilityLabel("新建对话").disabled(showingAudio || shortcutListening.isVisible)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { resetInteraction(); showingAudio = true } label: { Image(systemName: "waveform") }
                         .help("陪听：听一段，结束后自动翻译和解释").accessibilityLabel("陪听")
-                        .disabled(showingAudio || model.isAsking || busyImport || model.provider != .openAI)
+                        .disabled(showingAudio || shortcutListening.isVisible || model.isAsking || busyImport || model.provider != .openAI)
                     Menu {
+                        Button { model.rememberCurrentWindow() } label: { Label("记住当前窗口（Slide Over 试验）", systemImage: "pin") }
                         Button { showingSettings = true } label: { Label("模型与密钥", systemImage: "slider.horizontal.3") }
                         Button { showingScreenshotHelp = true } label: { Label("长按截屏设置", systemImage: "camera.viewfinder") }
                     } label: { Image(systemName: "ellipsis.circle") }
@@ -115,11 +120,15 @@ struct CompanionView: View {
             .onChange(of: photoSelection) { _, selection in importPhoto(selection) }
             .onChange(of: model.isAsking) { _, asking in if asking { cancelEditingRecovery() } }
             .onChange(of: model.sessionID) { _, sessionID in
+                if shortcutListening.phase == .processing { shortcutListening.cancelProcessing(keepResult: false) }
                 // A transfer belongs to its destination conversation, including while downloading from iCloud.
                 if let photoSessionID, photoSessionID != sessionID { cancelPhotoImport() }
                 previewExpanded = false
             }
             .onChange(of: scenePhase) { _, phase in if phase != .active { cancelEditingRecovery() } }
+            .onChange(of: shortcutListening.phase) { _, phase in
+                if phase != .idle { resetInteraction(); showingAudio = false }
+            }
             .onDisappear { cancelEditingRecovery(); cancelPhotoImport() }
         }
     }

@@ -370,6 +370,9 @@ final class CompanionModel: ObservableObject {
         interactionWindow = window
         WindowRecovery.shared.register(window)
     }
+    func rememberCurrentWindow() {
+        if let window = interactionWindow { WindowRecovery.shared.remember(window) }
+    }
     func setInternalPresentation(_ presented: Bool) { internalPresentation = presented }
     func prepareExplicitQuestionEditing() -> ObjectIdentifier? {
         guard let window = questionEditingWindow else { return nil }

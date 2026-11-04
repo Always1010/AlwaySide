@@ -26,6 +26,20 @@
 
 ## 陪听：结束后自动翻译和解释
 
+### 小球菜单陪听与 Slide Over 恢复试验（build 9）
+
+先手动把 AlwaySide 设为 Slide Over，在右上角菜单选「记住当前窗口（Slide Over 试验）」，再把窗口收至边缘。先建一个仅含 AlwaySide「试验恢复原窗口（不联网）」的快捷指令，在 TikTok 中运行；核对是否恢复同一个侧边窗口、TikTok 是否保留。此动作不录音、不联网，不能把快捷指令显示完成视为窗口恢复成功。
+
+陪听快捷指令只放一个 AlwaySide「陪听（开始或结束并解释）」动作，不添加「打开 App」或 URL 动作。将此快捷指令放入 AssistiveTouch 的自定顶层菜单，保留原有单击、双击、长按绑定。第一次点击请求系统音频选择器授权并开始录音；第二次点击停止本段，自动转写解释，并请求恢复记住的窗口显示处理状态、原文及流式解释。录音由进程级协调器持有，收起或关闭陪听页面不会终止快捷指令录音。每段最多2分钟，到上限只在本机停止；下一次明确点击才上传。系统选择器能否从此入口在后台呈现，仍需真机验证；等待授权最多30秒，可在系统界面取消。
+
+处理失败后再点击可重试，已有原文会复用。处理中重复点击不会开始另一段；放弃录音和停止处理在 App 的小球陪听状态界面提供。进程被系统终止后，不会把下一次点击误当成可恢复旧录音，会提示中断。新截图或切换会话取消尚未完成的陪听结果，迟到结果不能覆盖新内容。
+
+截图的「接收截图并打开助手」及阅读卡片的「在 App 中追问」也改为请求原窗口。截图快捷指令仍需先放系统「截屏」，把输出连接到接收动作；不保留旧「打开 App」。接收动作只收图，不自动问答；原地阅读卡片仍可独立使用。
+
+本试验使用记住的 scene session 发起公开窗口激活请求，找不到时提示重新记住，不主动请求创建替代窗口或通过 Open App 全屏兜底。增加 App Intent 的 scene 路由并按 Apple 要求开启多 scene 声明；窗口形态仍由系统决定，不能声明“默认强制 Slide Over”。恢复提示只表示发起请求，不是成功检测；需看真机实际表现。若仍全屏，本次尝试应判失败并保留证据，不声称已解决。
+
+依据：[Apple scene 路由](https://developer.apple.com/documentation/appintents/directing-app-intents-to-your-apps-scenes)、[App Intent 运行模式](https://developer.apple.com/documentation/appintents/configuring-the-runtime-behavior-of-your-app-intents)。build 9 尚需云端编译与上述真机验收，Windows 只做静态接线检查。
+
 1. 在主界面顶部点击波形图标，直接进入同一窗口里的陪听界面；使用 OpenAI 配置和已保存密钥。把窗口留在视频旁边，点击「听一段」，按系统选择器授权采集设备音频。无需先去其他 App 录制或转存文件。
 2. 点击「结束并解释」会停止本段录制，并自动串联 `gpt-transcribe` 原文转写与当前 OpenAI 模型的中文翻译、简短解释。原文先显示，翻译和解释流式显示；不要求核对、附加到聊天或再次发送。型号、推理、搜索与应用指令沿用当前设置，在本次请求开始时固定。
 3. 每段最多 2 分钟；到时只在本机完成音频，点击「解释本段」才上传。菜单保留麦克风备用及「导入音频并解释」，导入上限 20 MiB，转写上限 20,000 字。麦克风录周围声音，不能替代设备音频。无内容、权限或网络错误会显示原因，不自动切换来源、不自动重试。
@@ -72,7 +86,7 @@
 
 ## 工程验证
 
-单 Application target 使用 SwiftUI、UIKit、AppIntents、ScreenCaptureKit、AVFoundation、ImageIO、PhotosUI、Security 等系统框架，无第三方依赖。最低系统为 27.0、仅 iPad，当前 build 为 8，Debug/Release 共用 `Config/Base.xcconfig`，无额外开发团队、证书或付费服务配置。
+单 Application target 使用 SwiftUI、UIKit、AppIntents、ScreenCaptureKit、AVFoundation、ImageIO、PhotosUI、Security 等系统框架，无第三方依赖。最低系统为 27.0、仅 iPad，当前 build 为 9，Debug/Release 共用 `Config/Base.xcconfig`，无额外开发团队、证书或付费服务配置。
 
 在具有 Xcode 27.1 的 Apple 构建环境中，可进行不签名的编译检查：
 

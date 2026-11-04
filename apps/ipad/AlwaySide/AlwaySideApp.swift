@@ -44,6 +44,9 @@ struct AlwaySideApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: QuickReadStore.handoffNotification)) { _ in
                     if scenePhase == .active { consumeQuickReadHandoff() }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: ShortcutListening.didFinish)) { _ in
+                    if let result = ShortcutListening.shared.takeHandoff() { model.acceptAudioRead(result) }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: UIWindow.didBecomeKeyNotification)) { notification in
                     guard let window = notification.object as? UIWindow,
                           window.windowScene?.activationState == .foregroundActive else { return }
@@ -64,6 +67,7 @@ struct AlwaySideApp: App {
     @MainActor
     private func consumeQuickReadHandoff() {
         if let result = QuickReadStore.shared.takeHandoff() { model.acceptQuickRead(result) }
+        if let result = ShortcutListening.shared.takeHandoff() { model.acceptAudioRead(result) }
     }
 
     @MainActor

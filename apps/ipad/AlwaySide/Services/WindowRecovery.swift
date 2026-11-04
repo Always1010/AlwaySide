@@ -12,9 +12,14 @@ final class WindowRecovery: ObservableObject {
 
     func register(_ window: UIWindow) {
         guard let scene = window.windowScene else { return }
-        if let existing = UserDefaults.standard.string(forKey: defaultsKey),
-           UIApplication.shared.openSessions.contains(where: { $0.persistentIdentifier == existing }) { return }
+        if UserDefaults.standard.string(forKey: defaultsKey) != nil { return }
         UserDefaults.standard.set(scene.session.persistentIdentifier, forKey: defaultsKey)
+    }
+
+    func remember(_ window: UIWindow) {
+        guard let scene = window.windowScene else { return }
+        UserDefaults.standard.set(scene.session.persistentIdentifier, forKey: defaultsKey)
+        status = "已记住当前窗口。请手动设为 Slide Over 后收起，再试恢复。"
     }
 
     func dismissStatus() { status = nil }
@@ -40,7 +45,7 @@ final class WindowRecovery: ObservableObject {
 
 struct RestoreCompanionWindowIntent: AppIntent, TargetContentProvidingIntent {
     static let title: LocalizedStringResource = "试验恢复原窗口（不联网）"
-    static let description = IntentDescription("请求恢复之前的 AlwaySide 窗口，不录音、不上传、不新建窗口；系统决定能否保持 Slide Over。")
+    static let description = IntentDescription("只请求恢复已记住的窗口，找不到则提示重新设置；不录音、不上传，系统决定能否保持 Slide Over。")
     static let supportedModes: IntentModes = .foreground(.dynamic)
     var contentIdentifier: String { WindowRecovery.contentIdentifier }
 
