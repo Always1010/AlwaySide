@@ -35,7 +35,7 @@ internal data class InteractionConfig(
     val rememberWindowPosition: Boolean = true,
     val rememberWindowSize: Boolean = true,
     val defaultPinned: Boolean = false,
-    val saveHistoryImages: Boolean = false,
+    val saveHistoryImages: Boolean = true,
     val autoAskText: Boolean = true,
 ) {
     fun action(taps: Int, recording: Boolean): String = when {

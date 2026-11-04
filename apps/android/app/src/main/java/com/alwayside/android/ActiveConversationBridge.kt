@@ -6,7 +6,8 @@ import java.io.File
 
 /** Main-thread handoff. No service is started and no media is written to disk. */
 internal data class HandedOffConversation(val session: ChatSession, val image: Bitmap?, val dispose: () -> Unit,
-    val audio: AudioClip? = null, val draft: String = "", val webSearchOverride: Boolean? = null)
+    val audio: AudioClip? = null, val draft: String = "", val webSearchOverride: Boolean? = null,
+    val originalImage: Bitmap? = image, val reuseImage: Boolean = true)
 
 internal object ActiveConversationBridge {
     var detachHandler: ((String) -> Bitmap?)? = null

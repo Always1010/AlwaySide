@@ -14,6 +14,7 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -54,6 +55,7 @@ internal class ChatScreen(
         ?: savedState?.takeIf { it.containsKey("webSearchOverride") }?.getBoolean("webSearchOverride")
     private var defaultWebSearch = runCatching { SettingsStore(this).load().webSearch }.getOrDefault(false)
     private var image: Bitmap? = null
+    private var originalImage: Bitmap? = null
     private var ready = false
     private var closing = false
     private var conversationTitle = "文字对话"
@@ -63,13 +65,13 @@ internal class ChatScreen(
     internal data class RetainedConversation(
         val session: ChatSession, val image: Bitmap?, val handoff: HandedOffConversation?,
         val title: String, val status: String, val openedStoredRecord: Boolean,
-        val draft: String, val reuseImage: Boolean, val webSearchOverride: Boolean?,
+        val draft: String, val reuseImage: Boolean, val webSearchOverride: Boolean?, val originalImage: Bitmap?,
     )
 
     init {
         view = buildScreen()
         if (retained != null) {
-            session = retained.session; image = retained.image; handoff = retained.handoff
+            session = retained.session; image = retained.image; originalImage = retained.originalImage; handoff = retained.handoff
             conversationTitle = retained.title; restoredStatus = retained.status
             openedStoredRecord = retained.openedStoredRecord
             bindConversation(retained.draft, retained.reuseImage)
@@ -89,8 +91,13 @@ internal class ChatScreen(
             handoff = ActiveConversationBridge.takeSession(id)
             if (webSearchOverride == null) webSearchOverride = handoff?.webSearchOverride
             image = handoff?.image ?: image
+            originalImage = handoff?.originalImage
             (handoff?.session?.snapshot() ?: HistoryStore(this).find(id)).also {
-                if (image == null) image = runCatching { ConversationMediaStore(this).loadImage(id) }.getOrNull()
+                if (image == null) {
+                    runCatching { ConversationMediaStore(this).loadImages(id) }
+                        .onSuccess { images -> originalImage = images.first; image = images.second }
+                        .onFailure { toast("历史图片暂不可读，仍可查看文字对话") }
+                }
             }
         } catch (_: Exception) {
             showUnavailable("无法读取这段会话，请返回列表重试。")
@@ -106,7 +113,7 @@ internal class ChatScreen(
         openedStoredRecord = saved != null
         restoredStatus = if (handoff == null) saved?.status.orEmpty() else ""
         if (handoff == null) session.newConversation(saved)
-        bindConversation(draft.ifBlank { handoff?.draft.orEmpty() }, reuseImage)
+        bindConversation(draft.ifBlank { handoff?.draft.orEmpty() }, handoff?.reuseImage ?: reuseImage)
     }
 
     private fun bindConversation(draft: String, reuseImage: Boolean) {
@@ -188,10 +195,10 @@ internal class ChatScreen(
             addView(LinearLayout(this@ChatScreen).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 reuse = MaterialCheckBox(this@ChatScreen).apply {
-                    text = "沿用原图"; setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelMedium)
+                    text = "附带图片"; setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelMedium)
                     setTextColor(MUTED); minHeight = dp(48); minWidth = 0
                     maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-                    accessible("追问时附带这段会话的原图")
+                    accessible("追问时附带当前会话图片")
                     setOnCheckedChangeListener { _, _ -> if (ready) renderEvidence() }
                 }
                 addView(reuse, LinearLayout.LayoutParams(-1, -2))
@@ -227,6 +234,8 @@ internal class ChatScreen(
         renderEvidence()
         val atBottom = scroll.getChildAt(0)?.let { it.height - scroll.height - scroll.scrollY <= dp(72) } ?: true
         messagesView.removeAllViews()
+        originalImage?.let { addImagePreview("会话原图", it) }
+        image?.takeIf { it !== originalImage }?.let { addImagePreview("当前追问图片", it) }
         if (session.sourceText.isNotBlank()) {
             addEvidencePreview("选中文字", session.sourceText) { showSourceText() }
         }
@@ -278,10 +287,32 @@ internal class ChatScreen(
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
     }
 
+    private fun addImagePreview(title: String, bitmap: Bitmap) {
+        messagesView.addView(MaterialCardView(this).apply {
+            setCardBackgroundColor(SURFACE); strokeWidth = 0; cardElevation = 0f; radius = dp(12).toFloat()
+            isClickable = true; isFocusable = true; accessible("查看$title，可双指缩放")
+            setOnClickListener {
+                val dialog = MaterialAlertDialogBuilder(this@ChatScreen).setTitle(title)
+                    .setView(ScreenshotView(this@ChatScreen, bitmap))
+                    .setPositiveButton("返回对话", null).create()
+                dialog.show()
+                dialog.window?.setLayout(-1, -1)
+            }
+            addView(column().apply {
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                addView(label("$title · 点按放大", 11f, true))
+                addView(ImageView(this@ChatScreen).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER; setImageBitmap(bitmap)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(-1, dp(180)))
+            })
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+    }
+
     private fun renderEvidence() {
         mediaView.text = when {
-            image != null && reuse.isChecked -> "追问附带原图与本段文字上下文"
-            image != null -> "仅文字追问 · 原图仍可切换使用"
+            image != null && reuse.isChecked -> "追问附带${if (image === originalImage) "会话原图" else "当前图片"}与本段文字上下文"
+            image != null -> "仅文字追问 · 图片仍可切换使用"
             session.kind in setOf("photo", "screen", "image") -> "原图未保留，当前仅使用文字；如需新画面，请从悬浮球重新截图。"
             session.transcript.isNotBlank() -> "追问复用原始转写文字，不重新上传音频"
             session.sourceText.isNotBlank() -> "追问复用本段选中文字"
@@ -334,7 +365,7 @@ internal class ChatScreen(
             }
             val label = when {
                 pendingAudio != null -> "内部播放音频 · ${"%.1f".format(pendingAudio.seconds)} 秒"
-                attachment != null -> "沿用会话原图"
+                attachment != null -> if (image === originalImage) "沿用会话原图" else "沿用当前追问图片"
                 session.transcript.isNotBlank() -> "沿用音频转写文字"
                 session.sourceText.isNotBlank() -> "系统选中文字"
                 else -> "仅文字"
@@ -414,7 +445,7 @@ internal class ChatScreen(
         if (!ready) return null
         session.setObserver(null)
         return RetainedConversation(session, image, handoff, conversationTitle, restoredStatus,
-            openedStoredRecord, composer.text.toString(), reuse.isChecked, webSearchOverride)
+            openedStoredRecord, composer.text.toString(), reuse.isChecked, webSearchOverride, originalImage)
     }
 
     private fun releaseConversation() {

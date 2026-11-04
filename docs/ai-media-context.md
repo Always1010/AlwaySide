@@ -58,6 +58,6 @@
 - [ChatSession.kt](../apps/android/app/src/main/java/com/alwayside/android/ChatSession.kt) 实现先转写、再解释，或仅输出转写。历史恢复保留原始转写和所选文字，后续文字追问仍将其作为引用资料。请求固定配置、问题、原文和证据；取消及新会话用隔离标识阻止迟到结果写回。
 - [AssistantService.kt](../apps/android/app/src/main/java/com/alwayside/android/AssistantService.kt) 分别管理截图、音频与文字小窗；活动会话保留图片，并提供沿用、更新、仅文字的选择。取消录音先使完成回调失效再丢弃片段，不进入转写。待处理会话可移交给应用内聊天。
 - [HistoryStore.kt](../apps/android/app/src/main/java/com/alwayside/android/HistoryStore.kt) 保存有界消息、来源、状态、转写和所选原文，不在 JSON 内嵌媒体。查询开始、取消、失败和完成均归档到原会话。
-- [ConversationMediaStore.kt](../apps/android/app/src/main/java/com/alwayside/android/ConversationMediaStore.kt) 在用户开启图片历史保存后使用私有 noBackup 目录，按数量与容量清理。恢复时只有存在的图片才可继续附原图；原始音频仍不进入长期历史。
+- [ConversationMediaStore.kt](../apps/android/app/src/main/java/com/alwayside/android/ConversationMediaStore.kt) 默认使用私有 noBackup 目录保存首图与当前追问图，两者相同时共用一份文件。图片最长边 2400 像素、JPEG 质量 90，单图不超过 4 MiB，总容量上限 128 MiB；达到容量时提示保存失败，不静默删除其他会话的图片。删除或淘汰会话时同时删除它的两张图片；原始音频仍不进入长期历史。
 
 当前 APK 的功能与使用方式以仓库 README 为准；独立交互原型不能视为已实现功能。

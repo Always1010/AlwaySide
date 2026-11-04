@@ -346,7 +346,7 @@ internal class SettingsScreen(
 
     private fun mediaPage(config: InteractionConfig) {
         check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
-        note("默认关闭。当前会话仍可沿用截图；从历史打开后缺少原图时，可重新截图或只问文字。")
+        note("默认开启。保留会话首张原图和当前追问图片，从历史打开后可查看并继续使用。图片仅保存在应用私有目录，删除会话时一并删除。")
         note("仅影响新写入的历史，不补存旧截图；旧记录能否显示原图，取决于当时是否保存。")
         section("音频与对话记录")
         note("不长期保存原始音频，只保存转写、问题和回答。追问复用转写文字，不重复上传音频。")
