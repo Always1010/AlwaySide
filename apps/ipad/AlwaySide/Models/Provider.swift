@@ -23,7 +23,7 @@ struct ConversationTurn: Identifiable {
     var searchState: AnswerSearchState = .notUsed
 }
 
-struct EvidenceSnapshot: Identifiable {
+struct EvidenceSnapshot: Identifiable, Sendable {
     let frame: CapturedFrame
     let origin: String
     let isImported: Bool

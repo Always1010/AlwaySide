@@ -1,3 +1,4 @@
+import CoreTransferable
 import ImageIO
 import PhotosUI
 import SwiftUI
@@ -216,11 +217,10 @@ struct CompanionView: View {
                 }
             }
             do {
-                guard let data = try await selection.loadTransferable(type: Data.self) else { throw ClientError.invalidImage }
+                guard let imported = try await selection.loadTransferable(type: ImportedPhoto.self) else { throw ClientError.invalidImage }
                 try Task.checkCancellation()
-                let snapshot = try PhotoImport.snapshot(from: data)
                 guard photoRequestID == id, model.sessionID == destinationSession, !Task.isCancelled else { return }
-                model.choose(snapshot)
+                model.choose(imported.snapshot)
                 previewExpanded = true
             } catch { if photoRequestID == id, model.sessionID == destinationSession, !Task.isCancelled { model.reportPhotoError() } }
         }
@@ -244,6 +244,28 @@ struct CompanionView: View {
     private func resetInteraction() { cancelEditingRecovery(); cancelPhotoImport(); inputFocused = false }
     private func cancelPhotoImport() {
         photoRequestID = nil; photoSessionID = nil; photoTask?.cancel(); photoTask = nil; importing = false; photoSelection = nil
+    }
+}
+
+/// Finish reading the temporary transfer file inside the importing closure, before its lifetime ends.
+private struct ImportedPhoto: Transferable, Sendable {
+    let snapshot: EvidenceSnapshot
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            let url = received.file
+            let decoding = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                return try PhotoImport.snapshot(from: url)
+            }
+            return try await withTaskCancellationHandler {
+                let snapshot = try await decoding.value
+                try Task.checkCancellation()
+                return ImportedPhoto(snapshot: snapshot)
+            } onCancel: {
+                decoding.cancel()
+            }
+        }
     }
 }
 
