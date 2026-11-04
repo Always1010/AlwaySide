@@ -11,7 +11,7 @@ class InteractionDefaultsTest {
         assertEquals(AssistantActions.MENU,updated.action(1,false))
         assertEquals(AssistantActions.SCREEN,updated.action(4,false))
         assertEquals(old.copy(singleAction=AssistantActions.MENU,longAction=AssistantActions.SCREEN),updated)
-        assertEquals(AssistantActions.CANCEL_AUDIO,updated.action(1,true))
+        assertEquals(AssistantActions.MENU,updated.action(1,true))
         assertEquals(AssistantActions.CANCEL_AUDIO,updated.action(4,true))
     }
     @Test fun preservesAnyCustomizedIdleScheme() {
@@ -26,7 +26,8 @@ class InteractionDefaultsTest {
         assertEquals(defaults,InteractionDefaults.upgrade(defaults))
         assertEquals(AssistantActions.MENU,defaults.action(1,false))
         assertEquals(AssistantActions.SCREEN,defaults.action(4,false))
-        assertEquals(AssistantActions.CANCEL_AUDIO,defaults.action(1,true))
+        assertEquals(AssistantActions.MENU,defaults.action(1,true))
+        assertEquals(AssistantActions.SCREEN,defaults.action(4,true))
         assertEquals(AssistantActions.CANCEL_AUDIO,defaults.action(3,true))
     }
 }

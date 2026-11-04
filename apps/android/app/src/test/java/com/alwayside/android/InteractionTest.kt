@@ -35,11 +35,11 @@ class InteractionTest {
         val cfg = InteractionConfig()
         assertEquals(AssistantActions.MENU, cfg.action(1, false))
         assertEquals(AssistantActions.SCREEN, cfg.action(4, false))
-        assertEquals(AssistantActions.CANCEL_AUDIO, cfg.action(1, true))
+        assertEquals(AssistantActions.MENU, cfg.action(1, true))
         assertEquals(AssistantActions.AUDIO, cfg.action(2, true))
         assertEquals(AssistantActions.NONE, cfg.action(3, false))
         assertEquals(AssistantActions.CANCEL_AUDIO, cfg.action(3, true))
-        assertEquals(AssistantActions.MENU, cfg.action(4, true))
-        assertEquals(AssistantActions.MENU, cfg.copy(recordingSingleAction = AssistantActions.MENU).action(1, true))
+        assertEquals(AssistantActions.SCREEN, cfg.action(4, true))
+        assertEquals(AssistantActions.CANCEL_AUDIO, cfg.copy(recordingSingleAction = AssistantActions.CANCEL_AUDIO).action(1, true))
     }
 }

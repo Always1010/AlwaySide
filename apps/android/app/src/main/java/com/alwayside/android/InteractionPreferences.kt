@@ -13,7 +13,7 @@ internal object AssistantActions {
     const val SETTINGS = "settings"
     const val CANCEL_AUDIO = "cancel_audio"
     const val NONE = "none"
-    val choices = linkedMapOf(SCREEN to "截图问答", AUDIO to "开始／结束录音并处理", MENU to "贴球菜单",
+    val choices = linkedMapOf(SCREEN to "截图问答", AUDIO to "开始／结束录音并处理", MENU to "展开菜单",
         CROP to "框选问答", LAST to "最近悬浮对话", HISTORY to "应用内对话记录", SETTINGS to "设置",
         CANCEL_AUDIO to "取消并丢弃录音", NONE to "不执行动作")
 }
@@ -26,10 +26,10 @@ internal data class InteractionConfig(
     val doubleAction: String = AssistantActions.AUDIO,
     val tripleAction: String = AssistantActions.NONE,
     val longAction: String = AssistantActions.SCREEN,
-    val recordingSingleAction: String = AssistantActions.CANCEL_AUDIO,
+    val recordingSingleAction: String = AssistantActions.MENU,
     val recordingDoubleAction: String = AssistantActions.AUDIO,
     val recordingTripleAction: String = AssistantActions.CANCEL_AUDIO,
-    val recordingLongAction: String = AssistantActions.MENU,
+    val recordingLongAction: String = AssistantActions.SCREEN,
     val autoAskImage: Boolean = true,
     val autoAskAudio: Boolean = true,
     val rememberWindowPosition: Boolean = true,
