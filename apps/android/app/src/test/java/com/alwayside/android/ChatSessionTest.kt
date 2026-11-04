@@ -11,6 +11,28 @@ import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.TimeUnit
 
 class ChatSessionTest {
+    @Test fun titleComesFromTheFirstCompleteAnswerAndSurvivesHistoryTrimmingAndRestore() {
+        val h = Harness()
+        h.gateway.response = { "## **翻译如下：**\n\n**您的订阅将在下个月自动续费**\n具体说明" }
+        h.session.submit(h.config, "请翻译", null, "text")
+        assertEquals("文字处理中", h.session.title)
+        h.worker.runNext(); h.drainMain()
+        val title = "您的订阅将在下个月自动续费"
+        assertEquals(title, h.session.title)
+        h.gateway.response = { "另一个回答，不应覆盖已有标题" }
+        repeat(21) {
+            h.session.submit(h.config, "继续追问", null, "text")
+            h.worker.runNext(); h.drainMain()
+        }
+        assertEquals(title, h.saved.single().title)
+        h.session.newConversation(h.saved.single())
+        assertEquals(title, h.session.title)
+        assertEquals("原问题", ConversationTitle.resolve("原问题", listOf(ChatMessage("user", "原问题"))))
+        assertEquals(title, ConversationTitle.resolve("请翻译", listOf(ChatMessage("user", "请翻译"), ChatMessage("assistant", title))))
+        assertEquals("订阅将在下个月自动续费", ConversationTitle.fromAnswer("译文： [订阅将在下个月自动续费](https://example.com)"))
+        assertEquals(32, ConversationTitle.fromAnswer("😀".repeat(40)).codePointCount(0, 64))
+    }
+
     @Test fun completionOnlyExplainsContextLimitOnceTwentyFourMessagesAreAvailable() {
         val h = Harness()
         repeat(13) { round ->

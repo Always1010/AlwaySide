@@ -43,6 +43,11 @@ internal class ChatSession(
     var evidence = "未附媒体"; private set
     var transcript = ""; private set
     private var selectedText = ""
+    private var answerTitle = ""
+    val title: String get() = answerTitle.ifBlank {
+        val label = when (kind) { "photo" -> "截图"; "audio" -> "音频"; else -> "文字" }
+        label + if (busy) "处理中" else "待提问"
+    }
     val sourceText: String get() = selectedText
     fun setSourceText(text: String) {
         require(text.length <= 12000) { "选中文字过长，请控制在 12000 字以内" }
@@ -120,6 +125,7 @@ internal class ChatSession(
                 cancel.throwIfCancelled()
                 post {
                     if (epoch != token) return@post
+                    if (answerTitle.isBlank()) answerTitle = ConversationTitle.fromAnswer(answer)
                     messages.add(ChatMessage("user", request.question, request.evidence))
                     messages.add(ChatMessage("assistant", answer))
                     while (messages.size > 40) { messages.removeAt(0); messages.removeAt(0) }
@@ -151,6 +157,8 @@ internal class ChatSession(
         this.kind = saved?.kind ?: kind
         updatedAt = saved?.updatedAt ?: System.currentTimeMillis()
         messages.clear(); messages.addAll(saved?.messages.orEmpty())
+        answerTitle = if (saved != null && saved.messages.any { it.role == "assistant" })
+            ConversationTitle.resolve(saved.title, saved.messages) else ""
         partial = ""; question = ""; transcript = saved?.transcript.orEmpty(); cachedAudio = null
         selectedText = saved?.sourceText.orEmpty().take(12000)
         evidence = "未附媒体"
@@ -165,7 +173,7 @@ internal class ChatSession(
     fun snapshot(): StoredConversation {
         val pending = if (question.isNotBlank()) listOf(ChatMessage("user", question, evidence)) else emptyList()
         val all = messages.toList() + pending
-        return StoredConversation(id, updatedAt, all.firstOrNull()?.text?.take(60).orEmpty(), all, evidence, transcript, kind, status, sourceText)
+        return StoredConversation(id, updatedAt, title, all, evidence, transcript, kind, status, sourceText)
     }
     private fun archive() {
         updatedAt = maxOf(System.currentTimeMillis(), updatedAt + 1)

@@ -227,6 +227,7 @@ internal class ChatScreen(
     }
 
     private fun render() {
+        conversationTitle = session.title
         toolbar.title = conversationTitle
         val hasPending = session.question.isNotBlank()
         statusView.text = if (restoredStatus.isNotBlank()) "上次状态：$restoredStatus" else session.status

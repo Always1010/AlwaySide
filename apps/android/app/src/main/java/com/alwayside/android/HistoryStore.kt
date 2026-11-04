@@ -67,7 +67,7 @@ internal class HistoryStore(context: Context) {
             if (budget <= 0 || message.role !in setOf("user", "assistant", "system")) null
             else message.copy(text = message.text.take(minOf(20000, budget)),evidence=message.evidence.take(1000)).also { budget -= it.text.length }
         }.asReversed()
-        return value.copy(id = value.id.take(128), title = value.title.take(160), messages = messages,
+        return value.copy(id = value.id.take(128), title = ConversationTitle.resolve(value.title, messages).take(160), messages = messages,
             evidence = value.evidence.take(2000), transcript = value.transcript.take(32000),
             kind = value.kind.takeIf { it in setOf("photo", "audio", "text") } ?: "text", status = value.status.take(300),
             sourceText = value.sourceText.take(12000))
