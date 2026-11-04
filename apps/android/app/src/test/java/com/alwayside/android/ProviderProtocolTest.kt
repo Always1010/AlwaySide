@@ -11,7 +11,10 @@ import java.util.concurrent.CancellationException
 
 class ProviderProtocolTest {
     @Test fun optionalGenerationOptionsAreOnlySentWhenSet() {
-        assertTrue(ProviderProtocol.responseOptions(AppConfig(maxOutputTokens = 0)).isEmpty())
+        assertTrue(ProviderProtocol.responseOptions(AppConfig(maxOutputTokens = 0, reasoning = "")).isEmpty())
+        val defaults = ProviderProtocol.responseOptions(AppConfig())
+        assertEquals(8192, defaults["max_output_tokens"])
+        assertEquals(mapOf("effort" to "none"), defaults["reasoning"])
         val options = ProviderProtocol.responseOptions(AppConfig(maxOutputTokens = 16, reasoning = "max", verbosity = "high", temperature = 0.4, webSearch = true))
         assertEquals(16, options["max_output_tokens"])
         assertEquals(mapOf("effort" to "max"), options["reasoning"])
