@@ -8,8 +8,8 @@ android {
         applicationId = "com.alwayside.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.4.0"
+        versionCode = 12
+        versionName = "0.5.4"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -9,15 +9,20 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.text.InputFilter
 import android.text.InputType
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
-import android.widget.CheckBox
-import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 
 /** Full-screen in-app conversation. This path never starts a service or capture. */
 internal class ChatScreen(
@@ -32,17 +37,22 @@ internal class ChatScreen(
     val view: View
     private val requestedId = savedState?.getString(EXTRA_ID) ?: id
     private lateinit var session: ChatSession
-    private lateinit var titleView: TextView
+    private lateinit var toolbar: MaterialToolbar
     private lateinit var statusView: TextView
     private lateinit var mediaView: TextView
     private lateinit var messagesView: LinearLayout
     private lateinit var scroll: ScrollView
-    private lateinit var composer: EditText
-    private lateinit var send: ImageButton
-    private lateinit var retry: ImageButton
-    private lateinit var transcript: ImageButton
-    private lateinit var reuse: CheckBox
+    private lateinit var composer: TextInputEditText
+    private lateinit var composerLayout: TextInputLayout
+    private lateinit var send: MaterialButton
+    private lateinit var retry: MaterialButton
+    private lateinit var transcript: MaterialButton
+    private lateinit var webSearch: MaterialButton
+    private lateinit var reuse: MaterialCheckBox
     private lateinit var contextTools: LinearLayout
+    private var webSearchOverride: Boolean? = retained?.webSearchOverride
+        ?: savedState?.takeIf { it.containsKey("webSearchOverride") }?.getBoolean("webSearchOverride")
+    private var defaultWebSearch = runCatching { SettingsStore(this).load().webSearch }.getOrDefault(false)
     private var image: Bitmap? = null
     private var ready = false
     private var closing = false
@@ -53,7 +63,7 @@ internal class ChatScreen(
     internal data class RetainedConversation(
         val session: ChatSession, val image: Bitmap?, val handoff: HandedOffConversation?,
         val title: String, val status: String, val openedStoredRecord: Boolean,
-        val draft: String, val reuseImage: Boolean,
+        val draft: String, val reuseImage: Boolean, val webSearchOverride: Boolean?,
     )
 
     init {
@@ -77,6 +87,7 @@ internal class ChatScreen(
             // Transfer before reading: the overlay no longer owns or writes this conversation.
             image = ActiveConversationBridge.detach(id)
             handoff = ActiveConversationBridge.takeSession(id)
+            if (webSearchOverride == null) webSearchOverride = handoff?.webSearchOverride
             image = handoff?.image ?: image
             (handoff?.session?.snapshot() ?: HistoryStore(this).find(id)).also {
                 if (image == null) image = runCatching { ConversationMediaStore(this).loadImage(id) }.getOrNull()
@@ -122,22 +133,20 @@ internal class ChatScreen(
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BACKGROUND); fitsSystemWindows = true
-        }
-        root.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(2), dp(6), dp(2))
-            addView(appIcon(android.R.drawable.ic_menu_revert, "返回对话列表") { onBack() })
-            titleView = label("对话", 13f).apply {
-                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-            }
-            addView(titleView, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(4) })
-            addView(appIcon(R.drawable.ic_copy, "复制整段会话") { copyConversation() })
-            addView(appIcon(android.R.drawable.ic_menu_manage, "设置") {
-                onSettings()
+            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    // The existing chat view is reattached when returning from Settings.
+                    defaultWebSearch = runCatching { SettingsStore(this@ChatScreen).load().webSearch }.getOrDefault(defaultWebSearch)
+                    renderWebSearch()
+                }
+                override fun onViewDetachedFromWindow(view: View) = Unit
             })
-        })
-        root.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)))
+        }
+        toolbar = materialToolbar("对话", onBack).apply {
+            addIconAction(1, R.drawable.ic_copy, "复制整段会话") { copyConversation() }
+            addIconAction(2, android.R.drawable.ic_menu_manage, "设置") { onSettings() }
+        }
+        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(64)))
         statusView = label("", 11f, true).apply { setPadding(dp(22), dp(8), dp(22), 0) }
         root.addView(statusView)
         mediaView = label("", 10f, true).apply { setPadding(dp(22), dp(4), dp(22), 0) }
@@ -150,50 +159,68 @@ internal class ChatScreen(
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)))
-        contextTools = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END
-            setPadding(dp(12), 0, dp(10), 0)
-            reuse = CheckBox(this@ChatScreen).apply {
-                text = "沿用原图"; textSize = 11f; setTextColor(MUTED); minHeight = dp(44)
-                accessible("追问时附带这段会话的原图")
-                buttonTintList = android.content.res.ColorStateList.valueOf(ACCENT)
-                setOnCheckedChangeListener { _, _ -> if (ready) renderEvidence() }
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), 0)
+            composerLayout = TextInputLayout(this@ChatScreen, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
+                hint = "想了解什么？"
+                boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
             }
-            addView(reuse, LinearLayout.LayoutParams(0, -2, 1f))
+            composer = TextInputEditText(composerLayout.context).apply {
+                setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
+                minHeight = dp(56); minLines = 1; maxLines = 4
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                filters = arrayOf(InputFilter.LengthFilter(12000))
+                accessible("问题输入框")
+                addTextChangedListener(object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { composerLayout.error = null }
+                    override fun afterTextChanged(s: Editable?) = Unit
+                })
+            }
+            composerLayout.addView(composer, LinearLayout.LayoutParams(-1, -2))
+            addView(composerLayout, LinearLayout.LayoutParams(-1, -2))
+        })
+        contextTools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(4), dp(10), dp(10))
+            // Reserve only the space left by four 48dp actions, including on 320dp screens.
+            addView(LinearLayout(this@ChatScreen).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                reuse = MaterialCheckBox(this@ChatScreen).apply {
+                    text = "沿用原图"; setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelMedium)
+                    setTextColor(MUTED); minHeight = dp(48); minWidth = 0
+                    maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                    accessible("追问时附带这段会话的原图")
+                    setOnCheckedChangeListener { _, _ -> if (ready) renderEvidence() }
+                }
+                addView(reuse, LinearLayout.LayoutParams(-1, -2))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            webSearch = iconButton(R.drawable.ic_globe, "联网搜索：关闭") {
+                webSearchOverride = !(webSearchOverride ?: defaultWebSearch)
+                renderWebSearch()
+            }.apply { isCheckable = true }
+            addView(webSearch)
             transcript = appIcon(android.R.drawable.ic_menu_info_details, "查看原始音频转写") { showTranscript() }
             addView(transcript)
             retry = appIcon(android.R.drawable.ic_popup_sync, "重试上次请求") {
                 if (ready) { restoredStatus = ""; session.retry() }
             }
             addView(retry)
-        }
-        root.addView(contextTools)
-        root.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
-            setPadding(dp(12), dp(8), dp(10), dp(10))
-            composer = EditText(this@ChatScreen).apply {
-                hint = "想了解什么？"; setHintTextColor(MUTED); setTextColor(INK); textSize = 13f
-                background = card(SURFACE)
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                minHeight = dp(40); minLines = 1; maxLines = 4
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                filters = arrayOf(InputFilter.LengthFilter(12000))
-                accessible("问题输入框")
-                applyInputStyle()
-            }
-            addView(composer, LinearLayout.LayoutParams(0, -2, 1f))
             send = appIcon(android.R.drawable.ic_menu_send, "发送问题") {
                 if (ready && session.busy) session.cancel() else submit()
             }.apply {
                 applyIconActionStyle(primary=true)
             }
-            addView(send, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(3) })
-        })
+            addView(send, LinearLayout.LayoutParams(dp(48), dp(48)))
+        }
+        root.addView(contextTools)
+        renderWebSearch()
         return root
     }
 
     private fun render() {
-        titleView.text = conversationTitle
+        toolbar.title = conversationTitle
         val hasPending = session.question.isNotBlank()
         statusView.text = if (restoredStatus.isNotBlank()) "上次状态：$restoredStatus" else session.status
         statusView.visibility = if (statusView.text.isNullOrBlank()) View.GONE else View.VISIBLE
@@ -201,16 +228,10 @@ internal class ChatScreen(
         val atBottom = scroll.getChildAt(0)?.let { it.height - scroll.height - scroll.scrollY <= dp(72) } ?: true
         messagesView.removeAllViews()
         if (session.sourceText.isNotBlank()) {
-            messagesView.addView(column().apply {
-                setPadding(dp(10), dp(6), dp(10), dp(10)); background = card(SURFACE)
-                addView(LinearLayout(this@ChatScreen).apply {
-                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                    addView(label("选中文字", 11f, true), LinearLayout.LayoutParams(0, -2, 1f))
-                    addView(appIcon(android.R.drawable.ic_menu_view, "查看完整选中文字") { showSourceText() })
-                })
-                addView(label("“${session.sourceText.take(240)}${if (session.sourceText.length > 240) "…" else ""}”", 12f)
-                    .apply { maxLines = 5; setTextIsSelectable(true) })
-            })
+            addEvidencePreview("选中文字", session.sourceText) { showSourceText() }
+        }
+        if (session.transcript.isNotBlank()) {
+            addEvidencePreview("音频转写", session.transcript) { showTranscript() }
         }
         if (session.messages.isEmpty() && !hasPending) {
             messagesView.addView(label(if (session.transcript.isNotBlank()) "原始转写已恢复，可以继续询问这段内容。" else "输入问题，开始对话。", 12f, true).apply {
@@ -222,15 +243,39 @@ internal class ChatScreen(
             addMessage("user", session.question, session.evidence)
             if (session.partial.isNotBlank()) addMessage("assistant", session.partial, if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文")
         }
-        send.setImageDrawable(prototypeIcon(if (session.busy) android.R.drawable.ic_menu_close_clear_cancel else android.R.drawable.ic_menu_send))
+        send.icon = prototypeIcon(if (session.busy) android.R.drawable.ic_menu_close_clear_cancel else android.R.drawable.ic_menu_send)
         send.accessible(if (session.busy) "取消当前请求" else "发送问题")
         retry.visibility = if (session.canRetry) View.VISIBLE else View.GONE
         transcript.visibility = if (session.transcript.isNotBlank()) View.VISIBLE else View.GONE
-        contextTools.visibility = if (reuse.visibility == View.VISIBLE || retry.visibility == View.VISIBLE || transcript.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         reuse.isEnabled = image != null && !session.busy
-        composer.isEnabled = !session.busy
-        composer.hint = if (session.messages.isEmpty() && !hasPending) "想了解什么？" else "继续追问…"
+        webSearch.isEnabled = !session.busy
+        renderWebSearch()
+        composerLayout.isEnabled = !session.busy
+        composerLayout.hint = if (session.messages.isEmpty() && !hasPending) "想了解什么？" else "继续追问…"
         if (atBottom) scroll.post { if (!closing) scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun renderWebSearch() {
+        val selected = webSearchOverride ?: defaultWebSearch
+        webSearch.isChecked = selected
+        webSearch.applySearchToggleStyle(selected)
+        webSearch.accessible(if (selected) "联网搜索：开启，点按关闭" else "联网搜索：关闭，点按开启")
+    }
+
+    private fun addEvidencePreview(title: String, text: String, expand: () -> Unit) {
+        messagesView.addView(MaterialCardView(this).apply {
+            setCardBackgroundColor(SURFACE); strokeWidth = 0; cardElevation = 0f
+            radius = dp(12).toFloat(); isClickable = true; isFocusable = true
+            accessible("展开完整$title"); setOnClickListener { expand() }
+            addView(column().apply {
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                addView(label("$title · 点按展开", 11f, true))
+                addView(label(text, 12f).apply {
+                    maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, dp(6), 0, 0)
+                })
+            })
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
     }
 
     private fun renderEvidence() {
@@ -254,23 +299,31 @@ internal class ChatScreen(
         val block = column().apply {
             setPadding(if (isUser) dp(10) else 0, if (isUser) dp(7) else 0,
                 if (isUser) dp(10) else 0, if (isUser) dp(7) else 0)
-            if (isUser) background = card(SURFACE)
+            if (isUser) background = card(TONAL_SURFACE, dp(20).toFloat())
             if (role != "assistant" && role != "user") addView(label("上下文", 10f, true))
-            if (evidence.isNotBlank()) addView(label(evidence, 10f, true).apply { setPadding(0, 0, 0, dp(4)) })
             addView(label("", if (isUser) 12f else 13f).apply {
+                setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
                 text = MarkdownText.render(value); setTextIsSelectable(true)
                 setLineSpacing(dp(4).toFloat(), 1f)
+                if (isUser) { maxWidth = dp(320); setTextColor(ON_TONAL_SURFACE) }
             })
+            if (!isUser && evidence.contains("未完成")) addView(label(evidence, 10f, true).apply { setPadding(0, dp(6), 0, 0) })
         }
-        messagesView.addView(block, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4); bottomMargin = dp(12) })
+        messagesView.addView(block, LinearLayout.LayoutParams(if (isUser) -2 else -1, -2).apply {
+            gravity = if (isUser) Gravity.END else Gravity.START
+            if (isUser) marginStart = dp(32)
+            topMargin = dp(4); bottomMargin = dp(16)
+        })
     }
 
     private fun submit() {
         if (!ready || session.busy) return
         val text = composer.text.toString().trim()
-        if (text.isBlank()) { composer.error = "请输入问题"; return }
+        if (text.isBlank()) { composerLayout.error = "请输入问题"; return }
         try {
-            val config = SettingsStore(this).load()
+            val defaults = SettingsStore(this).load()
+            defaultWebSearch = defaults.webSearch
+            val config = defaults.copy(webSearch = webSearchOverride ?: defaults.webSearch)
             SettingsStore.validate(config)
             val attachment = image?.takeIf { reuse.isChecked }
             val pendingAudio = handoff?.audio?.takeIf { session.transcript.isBlank() }
@@ -288,7 +341,7 @@ internal class ChatScreen(
             }
             restoredStatus = ""
             session.submit(config, text, attachment, label, pendingAudio?.file)
-            composer.text.clear()
+            composer.text?.clear()
         } catch (error: Exception) {
             toast(error.message?.take(180) ?: "发送失败，请检查 API 设置")
         }
@@ -329,12 +382,12 @@ internal class ChatScreen(
     }
 
     private fun showUnavailable(message: String) {
-        titleView.text = "会话不可用"
+        toolbar.title = "会话不可用"
         statusView.text = message
         statusView.visibility = View.VISIBLE
         mediaView.text = ""
         mediaView.visibility = View.GONE
-        composer.isEnabled = false; send.isEnabled = false
+        composerLayout.isEnabled = false; send.isEnabled = false
         retry.visibility = View.GONE; transcript.visibility = View.GONE; reuse.visibility = View.GONE
         contextTools.visibility = View.GONE
     }
@@ -347,6 +400,7 @@ internal class ChatScreen(
                 outState.putString(EXTRA_ID, session.conversationId)
             outState.putString("draft", composer.text.toString())
             outState.putBoolean("reuse", reuse.isChecked)
+            webSearchOverride?.let { outState.putBoolean("webSearchOverride", it) }
         }
     }
 
@@ -360,7 +414,7 @@ internal class ChatScreen(
         if (!ready) return null
         session.setObserver(null)
         return RetainedConversation(session, image, handoff, conversationTitle, restoredStatus,
-            openedStoredRecord, composer.text.toString(), reuse.isChecked)
+            openedStoredRecord, composer.text.toString(), reuse.isChecked, webSearchOverride)
     }
 
     private fun releaseConversation() {

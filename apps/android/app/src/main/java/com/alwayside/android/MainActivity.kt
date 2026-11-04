@@ -32,8 +32,6 @@ class MainActivity : ThemedActivity() {
     private var historyScreen: HistoryListScreen? = null
     private var historyView: View? = null
     private var historyPermission: View? = null
-    private var historyHeader: View? = null
-    private var historyTabs: View? = null
     private var restoredHistorySelection = emptyList<String>()
     private var backCallback: android.window.OnBackInvokedCallback? = null
     private var retainedChatOffered = false
@@ -75,8 +73,6 @@ class MainActivity : ThemedActivity() {
             (view.parent as? ViewGroup)?.removeView(view)
             container.removeAllViews(); container.addView(view,FrameLayout.LayoutParams(-1,-1))
         }
-        if(navigation.current == AppPage.SETTINGS)window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         updateBackCallback()
     }
 
@@ -136,8 +132,7 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun createSettings(page: String? = null) {
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        settingsScreen=SettingsScreen(this,::present,::openHistory,page)
+        settingsScreen=SettingsScreen(this,::present,::navigateBack,page)
     }
 
     private fun createChat(id: String? = null,savedState: Bundle? = null,
@@ -172,20 +167,19 @@ class MainActivity : ThemedActivity() {
     private fun showHistory() {
         var root = historyView
         if(root == null) {
-            val history = HistoryListScreen(this, onOpen = { openChat(it) },
+            val history = HistoryListScreen(this, onOpen = { openChat(it) }, onSettings = ::openSettings,
                 onSelectionChanged = ::historySelectionChanged, initialSelection = restoredHistorySelection)
             restoredHistorySelection = emptyList()
             historyScreen = history
             historyScroll = history.scrollView
             root = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND)
-                historyHeader=appHeader().also { addView(it) }
-                historyTabs=appTabs(AppPage.HISTORY, ::openHistory, ::openSettings).also { addView(it) }
+                addView(history.toolbar)
                 historyPermission = column().apply {
                     addView(label("允许悬浮显示后，即可从小球截图或听一段。", 12f, true))
                     action("允许悬浮显示", true) { requestOverlayPermission() }
                 }.also { addView(it) }
-                addView(history.view, LinearLayout.LayoutParams(-1, 0, 1f))
+                addView(history.scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
             }
             historyView = root
             history.restoreScroll(historyY)
@@ -196,8 +190,6 @@ class MainActivity : ThemedActivity() {
 
     private fun historySelectionChanged() {
         val selecting=historyScreen?.selecting == true
-        historyHeader?.visibility=if(selecting)View.GONE else View.VISIBLE
-        historyTabs?.visibility=if(selecting)View.GONE else View.VISIBLE
         historyPermission?.visibility=if(selecting || Settings.canDrawOverlays(this))View.GONE else View.VISIBLE
         updateBackCallback()
     }

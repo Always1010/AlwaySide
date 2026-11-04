@@ -41,7 +41,8 @@ internal class FrameSource(
 
     private fun makeReader(width: Int, height: Int): ImageReader =
         ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3).apply {
-            setOnImageAvailableListener({ source -> if (pending != null) consume(source) }, worker)
+            // Keep the producer moving even when no screenshot is requested.
+            setOnImageAvailableListener({ source -> consume(source) }, worker)
         }
 
     fun snapshot(afterNanos: Long, callback: (Result<CapturedFrame>) -> Unit) {
@@ -49,16 +50,28 @@ internal class FrameSource(
             if (closed) { main.post { callback(Result.failure(IllegalStateException("共享已停止"))) }; return@post }
             finish(Result.failure(IllegalStateException("取图已取消")))
             cutoff = afterNanos; pending = callback
-            worker.postDelayed(timeout, 3000)
-            reader?.let { consume(it) }
+            try {
+                // A new target cannot contain queued overlay pixels. Changing surface identity
+                // also requests composition for a static screen without creating another display.
+                val previous = checkNotNull(reader) { "共享已停止" }
+                val currentDisplay = checkNotNull(display) { "共享已停止" }
+                val replacement = makeReader(previous.width, previous.height)
+                try { currentDisplay.surface = replacement.surface }
+                catch (e: Exception) { replacement.close(); throw e }
+                reader = replacement
+                previous.close()
+                worker.postDelayed(timeout, 3000)
+            } catch (e: Exception) { finish(Result.failure(e)) }
         }
     }
 
     private fun consume(source: ImageReader) {
+        // Resize can leave an availability callback queued for the released reader.
+        if (closed || source !== reader) return
         try {
             val image = source.acquireLatestImage() ?: return
             image.use {
-                if (pending == null || image.timestamp < cutoff) return
+                if (pending == null || image.timestamp <= cutoff) return
                 val plane = image.planes[0]
                 val paddedWidth = plane.rowStride / plane.pixelStride
                 val padded = Bitmap.createBitmap(paddedWidth, image.height, Bitmap.Config.ARGB_8888)

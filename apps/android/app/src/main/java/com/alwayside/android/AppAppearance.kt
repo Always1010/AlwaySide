@@ -34,6 +34,10 @@ internal object AppAppearance {
     }
     val accent: Int get() = selectedScheme.accent(isNight)
     val onAccent: Int get() = selectedScheme.onAccent(isNight)
+    val tonalSurface: Int get() = when(selectedScheme) {
+        ThemeScheme.BLACK -> if(isNight)0xFF353A41.toInt() else 0xFFE1E5E9.toInt()
+        ThemeScheme.BLUE -> if(isNight)0xFF233D65.toInt() else 0xFFDEE8FF.toInt()
+    }
     private fun paletteStyle(): Int = if(selectedScheme==ThemeScheme.BLUE)R.style.AppPalette_Blue else R.style.AppPalette_Black
     fun applyPalette(context: Context) { mode(context);context.theme.applyStyle(paletteStyle(),true) }
     fun save(context: Context, mode: String) {

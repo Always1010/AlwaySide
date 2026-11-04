@@ -10,45 +10,12 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
+import com.google.android.material.appbar.MaterialToolbar
 import java.text.DateFormat
 import java.util.Date
 
 internal fun Context.appIcon(resource: Int, description: String, action: () -> Unit) =
     iconButton(resource, description, action)
-
-internal fun Context.appHeader(back: (() -> Unit)? = null) = LinearLayout(this).apply {
-    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-    setPadding(dp(if (back == null) 22 else 8), dp(12), dp(10), dp(10))
-    if (back != null) addView(appIcon(android.R.drawable.ic_menu_revert, "返回", back))
-    addView(LinearLayout(context).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(label("AlwaySide", 20f).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
-        addView(label("留在当下，随手问一句。", 11f, true).apply { setPadding(0, dp(3), 0, 0) })
-    }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (back != null) marginStart = dp(6) })
-}
-
-internal fun Context.appTabs(selected: AppPage, onHistory: () -> Unit, onSettings: () -> Unit) = LinearLayout(this).apply {
-    val activity = this@appTabs
-    orientation = LinearLayout.VERTICAL
-    addView(LinearLayout(activity).apply {
-        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        setPadding(activity.dp(22), 0, activity.dp(22), 0)
-        listOf(Triple("对话记录", AppPage.HISTORY, onHistory), Triple("设置", AppPage.SETTINGS, onSettings)).forEach { (title, page, action) ->
-            val active = page == selected
-            addView(LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(activity.label(title, 13f).apply {
-                    gravity = Gravity.CENTER; setTextColor(if(active)ACCENT else MUTED); minHeight = activity.dp(44)
-                    isSelected = active; isClickable = true; isFocusable = true; background = activity.touchFeedback()
-                    accessible(if(active)"$title，当前页面" else title)
-                    setOnClickListener { if(!active)action() }
-                }, LinearLayout.LayoutParams(-1, activity.dp(44)))
-                addView(View(activity).apply { setBackgroundColor(if(active)ACCENT else android.graphics.Color.TRANSPARENT) }, LinearLayout.LayoutParams(-1, activity.dp(2)))
-            },LinearLayout.LayoutParams(activity.dp(if(page==AppPage.HISTORY)56 else 44),-2).apply{marginEnd=activity.dp(20)})
-        }
-    })
-    addView(View(activity).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, activity.dp(1)))
-}
 
 internal fun conversationDate(value: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(value))
@@ -57,6 +24,7 @@ internal fun conversationDate(value: Long): String =
 internal class HistoryListScreen(
     private val activity: Activity,
     private val onOpen: (String?) -> Unit,
+    private val onSettings: () -> Unit,
     private val onSelectionChanged: () -> Unit,
     initialSelection: List<String> = emptyList(),
 ) {
@@ -66,12 +34,8 @@ internal class HistoryListScreen(
     private var values = emptyList<StoredConversation>()
     private var readFailed = false
     private var pendingScrollY: Int? = null
-    val view = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-    private val toolbar = LinearLayout(activity).apply {
-        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        setPadding(activity.dp(22), activity.dp(6), activity.dp(10), activity.dp(6))
-    }
-    private val rows = activity.column().apply { setPadding(activity.dp(14), 0, activity.dp(14), activity.dp(18)) }
+    val toolbar:MaterialToolbar=activity.materialToolbar("全部对话")
+    private val rows = activity.column().apply { setPadding(activity.dp(16), activity.dp(8), activity.dp(16), activity.dp(24)) }
     val scrollView = android.widget.ScrollView(activity).apply {
         isFillViewport = true
         addView(rows)
@@ -79,8 +43,6 @@ internal class HistoryListScreen(
     val selecting: Boolean get() = selection.selecting
 
     init {
-        view.addView(toolbar, LinearLayout.LayoutParams(-1, activity.dp(60)))
-        view.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
         refresh()
     }
 
@@ -145,17 +107,15 @@ internal class HistoryListScreen(
 
     private fun render() {
         val targetY = pendingScrollY ?: scrollView.scrollY
-        toolbar.removeAllViews(); rows.removeAllViews()
-        toolbar.addView(activity.label(if (selecting) "已选择 ${selection.snapshot().size} 项" else "全部对话", 15f),
-            LinearLayout.LayoutParams(0, -2, 1f))
+        toolbar.menu.clear();rows.removeAllViews()
+        toolbar.title=if(selecting)"已选择 ${selection.snapshot().size} 项" else "全部对话"
+        toolbar.subtitle=if(selecting)null else "${values.size} 个对话"
         if (selecting) {
-            toolbar.addView(activity.appIcon(android.R.drawable.ic_menu_delete, "删除选中的会话") { confirmDeletion() }.apply {
-                isEnabled = selection.snapshot().isNotEmpty()
-            })
-            toolbar.addView(activity.appIcon(android.R.drawable.ic_menu_close_clear_cancel, "取消选择") { back() })
+            toolbar.addIconAction(1,android.R.drawable.ic_menu_delete,"删除选中的会话",::confirmDeletion).isEnabled=selection.snapshot().isNotEmpty()
+            toolbar.addIconAction(2,android.R.drawable.ic_menu_close_clear_cancel,"取消选择") { back() }
         } else {
-            toolbar.addView(activity.label("${values.size} 个对话", 11f, true))
-            toolbar.addView(activity.appIcon(android.R.drawable.ic_input_add, "新建文字对话") { onOpen(null) })
+            toolbar.addIconAction(3,android.R.drawable.ic_input_add,"新建文字对话") { onOpen(null) }
+            toolbar.addIconAction(4,android.R.drawable.ic_menu_manage,"设置",onSettings)
         }
         if (readFailed) {
             rows.addView(activity.label("无法读取会话记录。可以重试，或明确清空损坏的本机记录。", 12f, true))
@@ -175,10 +135,9 @@ internal class HistoryListScreen(
         val title = value.title.ifBlank { "待提问会话" }
         val kind = when (value.kind) { "audio" -> "音频"; "photo", "screen", "image" -> "截图"; else -> "文字" }
         val card = com.google.android.material.card.MaterialCardView(activity).apply {
-            radius = activity.dp(12).toFloat(); cardElevation = 0f
-            setCardBackgroundColor(if (checked) SURFACE else BACKGROUND)
-            strokeWidth = if(checked)activity.dp(2).coerceAtLeast(1) else 0
-            strokeColor = if (checked) ACCENT else BORDER
+            radius = activity.dp(16).toFloat(); cardElevation = 0f
+            setCardBackgroundColor(if (checked) TONAL_SURFACE else BACKGROUND)
+            strokeWidth = 0
             isCheckable = selecting; isClickable = true; isFocusable = true
             isChecked = checked
             // The visible checkbox below supplies the selection indicator.
@@ -191,13 +150,12 @@ internal class HistoryListScreen(
             }
         }
         val entry = LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP
-            setPadding(activity.dp(12), activity.dp(15), activity.dp(12), activity.dp(15))
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(activity.dp(12), activity.dp(16), activity.dp(12), activity.dp(16))
         }
         if (selecting) entry.addView(com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
             isChecked = checked; isClickable = false; isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            buttonTintList = android.content.res.ColorStateList.valueOf(ACCENT)
             setPadding(0, 0, 0, 0); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
         }, LinearLayout.LayoutParams(activity.dp(28), activity.dp(28)).apply { marginEnd = activity.dp(8) })
         else entry.addView(ImageView(activity).apply {
@@ -208,23 +166,23 @@ internal class HistoryListScreen(
             }))
             imageTintList = android.content.res.ColorStateList.valueOf(ACCENT)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(activity.dp(17), activity.dp(17)).apply {
-            marginEnd = activity.dp(11); topMargin = activity.dp(2)
+            }, LinearLayout.LayoutParams(activity.dp(24), activity.dp(24)).apply {
+            marginEnd = activity.dp(16)
         })
         entry.addView(LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            addView(activity.label(title, 13f).apply {
+            addView(activity.label(title, 16f).apply {
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             })
             val preview = value.messages.lastOrNull { it.role == "assistant" }?.text.orEmpty()
                 .ifBlank { value.messages.lastOrNull()?.text.orEmpty() }.ifBlank { value.evidence }
                 .ifBlank { "等待你输入第一个问题。" }
-            addView(activity.label(preview.take(180), 11f, true).apply {
+            addView(activity.label(preview.take(180), 14f, true).apply {
                 maxLines = 2; ellipsize = TextUtils.TruncateAt.END
                 setLineSpacing(activity.dp(2).toFloat(), 1f); setPadding(0, activity.dp(5), 0, 0)
             })
-            addView(activity.label("${conversationDate(value.updatedAt)} · $kind · ${value.status.ifBlank { "已保存" }}", 10f, true).apply {
+            addView(activity.label("${conversationDate(value.updatedAt)} · $kind · ${value.status.ifBlank { "已保存" }}", 12f, true).apply {
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setPadding(0, activity.dp(5), 0, 0)
             })
         }, LinearLayout.LayoutParams(0, -2, 1f))

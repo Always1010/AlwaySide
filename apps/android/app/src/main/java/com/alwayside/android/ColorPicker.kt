@@ -1,7 +1,6 @@
 package com.alwayside.android
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ComposeShader
@@ -9,11 +8,11 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.Shader
-import android.graphics.drawable.GradientDrawable
 import android.view.MotionEvent
 import android.view.View
 import android.widget.LinearLayout
-import android.widget.SeekBar
+import com.google.android.material.slider.Slider
+import com.google.android.material.slider.LabelFormatter
 
 /** A visual HSV picker. Its private draft is applied only when the owner confirms. */
 internal class ColorPicker(context: Context, initialColor: Int) : LinearLayout(context) {
@@ -28,20 +27,12 @@ internal class ColorPicker(context: Context, initialColor: Int) : LinearLayout(c
         addView(context.label("左右选鲜艳程度，上下选明暗", 12f, true))
         addView(plane, LayoutParams(-1, context.dp(200)).apply { topMargin = context.dp(10) })
         addView(context.label("色彩", 12f).apply { setPadding(0, context.dp(16), 0, 0) })
-        addView(SeekBar(context).apply {
-            max = 359; progress = hsv[0].toInt()
+        addView(Slider(context).apply {
+            // RGB colors can produce fractional hue values, so keep the slider continuous.
+            valueFrom=0f;valueTo=360f;stepSize=0f;value=hsv[0].coerceIn(0f,360f)
             contentDescription = "色彩，拖动选择颜色"
-            progressDrawable = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED))
-                .apply { cornerRadius = context.dp(6).toFloat() }
-            thumbTintList = ColorStateList.valueOf(ACCENT)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    hsv[0] = progress.toFloat(); update()
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-            })
+            labelBehavior=LabelFormatter.LABEL_GONE
+            addOnChangeListener { _,value,_ -> hsv[0]=value;update() }
         }, LayoutParams(-1, context.dp(48)))
         addView(context.label("颜色预览", 12f).apply { setPadding(0, context.dp(8), 0, context.dp(8)) })
         addView(preview, LayoutParams(-1, context.dp(44)))

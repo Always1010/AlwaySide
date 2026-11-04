@@ -4,35 +4,29 @@ import android.app.Activity
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.textfield.TextInputLayout
-import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.slider.Slider
 import android.content.ContextWrapper
 import android.content.res.ColorStateList
 import android.graphics.Color
-import android.graphics.Typeface
-import android.os.Build
 import android.text.Editable
-import android.text.InputType
 import android.text.TextWatcher
-import android.text.method.PasswordTransformationMethod
 import android.view.Gravity
 import android.view.View
-import android.view.inputmethod.EditorInfo
-import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.view.MenuItem
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.button.MaterialButton
 import java.util.concurrent.CancellationException
 
 /** Category pages intentionally keep their draft only in the current view, never saved instance state. */
 internal class SettingsScreen(
     private val activity: Activity,
     private val onContent: (View) -> Unit,
-    private val onHistory: () -> Unit,
+    private val onBack: () -> Unit,
     initialPage: String? = null,
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
@@ -53,6 +47,8 @@ internal class SettingsScreen(
     private lateinit var status: TextView
     private var activeEdit: FieldEditState? = null
     private var closeEditor: (() -> Unit)? = null
+    private var discardConfirmation: AlertDialog? = null
+    private var templateSheet: BottomSheetDialog? = null
     private var group: LinearLayout? = null
     private val selections = linkedMapOf<String, String>()
     private val audioOutputOptions = linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 翻译", "interpret" to "原文 + 翻译与解读")
@@ -102,9 +98,10 @@ internal class SettingsScreen(
     }
 
     private fun finishEditing(next: () -> Unit) {
+        if (discardConfirmation?.isShowing == true) return
         if (activeEdit?.changed == true) {
-            MaterialAlertDialogBuilder(this).setTitle("放弃未保存的修改？")
-                .setMessage("仅当前编辑项尚未保存。")
+            discardConfirmation = MaterialAlertDialogBuilder(this).setTitle("放弃未保存的修改？")
+                .setMessage("当前编辑内容还未保存。")
                 .setNegativeButton("继续编辑", null)
                 .setPositiveButton("放弃修改") { _, _ -> closeEditor?.invoke(); next() }.showTracked()
         } else { closeEditor?.invoke(); next() }
@@ -116,26 +113,19 @@ internal class SettingsScreen(
         dismissDialogs()
         clearDraft()
         page = next; generation++; group = null
-        body = column().apply { setPadding(dp(22), dp(12), dp(22), dp(24)) }
+        body = column().apply { setPadding(dp(16), dp(12), dp(16), dp(24)) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND); fitsSystemWindows = true
         }
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(if(next == Page.HOME)22 else 8), dp(12), dp(10), dp(10))
-            if(next != Page.HOME) addView(iconButton(android.R.drawable.ic_media_previous, "返回设置分类") { back() })
-            addView(LinearLayout(this@SettingsScreen).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(label(if (next == Page.HOME) "AlwaySide" else next.title, if (next == Page.HOME) 20f else 18f).apply {
-                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                })
-                if (next == Page.HOME) addView(label("留在当下，随手问一句。", 11f, true).apply { setPadding(0, dp(2), 0, 0) })
-            }, LinearLayout.LayoutParams(0, -2, 1f).apply { if(next != Page.HOME) leftMargin = dp(8) })
-
+        val header = materialToolbar(next.title, if (next == Page.HOME) onBack else ({ back(); Unit })).apply {
+            if (next == Page.PROMPTS) {
+                addIconAction(4201, android.R.drawable.ic_menu_agenda, "模板") { finishEditing { showTemplateActions() } }
+                    .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+            }
         }
         root.addView(header)
-        if (next == Page.HOME) root.addView(homeTabs()) else root.addView(divider())
-        status = label("", 11f, true).apply {
+        root.addView(divider())
+        status = label("", 14f, true).apply {
             visibility = View.GONE
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -149,9 +139,8 @@ internal class SettingsScreen(
         val config = try { store.load().also { readable = true } } catch (_: Exception) { readable = false; AppConfig() }
         val interaction = interactionStore.load()
         if (!readable) status.text = "无法读取配置或解密密钥。请到 API 连接移除密钥；仍失败时可重置连接与模型配置。不会使用明文备用密钥。"
-        if (next != Page.HOME) section(next.title)
         when (next) {
-            Page.HOME -> { section("偏好设置"); Page.entries.filter { it != Page.HOME }.forEach { category(it) } }
+            Page.HOME -> Page.entries.filter { it != Page.HOME }.forEach { category(it) }
             Page.API -> apiPage(config)
             Page.MODELS -> modelPage(config)
             Page.PROMPTS -> promptPage(config)
@@ -173,8 +162,6 @@ internal class SettingsScreen(
         layoutParams = LinearLayout.LayoutParams(-1, dp(1))
     }
 
-    private fun homeTabs() = appTabs(AppPage.SETTINGS, onHistory, {})
-
     private fun category(value: Page) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -182,8 +169,8 @@ internal class SettingsScreen(
             isClickable = true; isFocusable = true; contentDescription = "${value.title}，${value.description}，进入详情"
             addView(LinearLayout(this@SettingsScreen).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(label(value.title, 14f).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) })
-                addView(label(value.description, 11f, true).apply { setPadding(0, dp(3), 0, 0) })
+                addView(label(value.title, 16f))
+                addView(label(value.description, 14f, true).apply { setPadding(0, dp(4), 0, 0) })
             }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
             addView(android.widget.ImageView(this@SettingsScreen).apply {
                 setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
@@ -200,7 +187,7 @@ internal class SettingsScreen(
         input("baseUrl", "服务地址", "示例：https://api.openai.com/v1", config.baseUrl)
         note("以 /v1 结尾。密钥会发送到此地址，请确认服务可信；不要包含账号、查询参数或 # 片段。")
         input("apiKey", "API 密钥", "请输入密钥", secret = true)
-        note("密钥加密保存，不回填；编辑时输入新密钥。本页禁止截图。")
+        note("密钥加密保存，编辑时输入新密钥。")
         action("查看可用模型") { fetchModels() }
         note("仅请求模型列表，不上传屏幕、音频或聊天。列出的模型不一定支持所有功能。")
         action("移除密钥") { finishEditing { clearCredential() } }.destructive()
@@ -231,8 +218,8 @@ internal class SettingsScreen(
         choice("verbosity", "回答详细程度", config.verbosity, linkedMapOf("" to "不设置（模型默认）", "low" to "low · 简短", "medium" to "medium · 适中", "high" to "high · 详细"))
         input("maxOutputTokens", "输出上限（tokens）", "请输入上限（选填）", config.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty(), numeric = true)
         note("可填 16–131072，实际上限由模型决定。留空或 0 使用模型默认。")
-        check("webSearch", "请求联网搜索", config.webSearch)
-        note("需服务和模型支持，可能增加费用；引用以实际返回为准。")
+        check("webSearch", "默认联网搜索", config.webSearch)
+        note("问答窗口可单独切换。需服务和模型支持，可能增加费用。")
         input("temperature", "Temperature", "0–2，留空使用默认值", config.temperature?.toString().orEmpty(), decimal = true)
         note("值低更稳定，值高更灵活。")
         input("topP", "Top P", "0–1，留空使用默认值", config.topP?.toString().orEmpty(), decimal = true)
@@ -241,34 +228,52 @@ internal class SettingsScreen(
     }
 
     private fun promptPage(config: AppConfig) {
-        input("instructions", "助手回答方式", "请输入希望助手遵循的要求", config.instructions, multiline = true)
-        input("defaultQuestion", "截图默认问题", "请输入截图后要问的问题", config.defaultQuestion, multiline = true)
-        input("textQuestion", "选中文字默认问题", "请输入选中文字后要问的问题", config.textQuestion, multiline = true)
-        input("audioQuestion", "音频默认问题", "请输入转写后要问的问题", config.audioQuestion, multiline = true)
+        section("回复规则")
+        input("instructions", "助手回答方式", "设置语气、格式及希望助手遵循的要求", config.instructions, multiline = true)
+        section("快捷提问")
+        input("defaultQuestion", "截图问题", "截图后自动填入的问题", config.defaultQuestion, multiline = true)
+        input("textQuestion", "选中文字问题", "选中文字后自动填入的问题", config.textQuestion, multiline = true)
+        input("audioQuestion", "音频问题", "转写后交给助手的问题", config.audioQuestion, multiline = true)
+        section("音频处理")
         input("transcriptionPrompt", "转写提示", "示例：专有名词、背景或语言", config.transcriptionPrompt, multiline = true)
-        note("帮助识别原语言和专有名词，不用于要求翻译或解读。")
         choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions)
-        note("原文与 AI 回答分别保存。“仅原始转写”跳过首次 AI 请求，之后仍可追问。")
-        section("提示词模板")
-        note("模板捕获已保存的全部提示配置。应用前需确认；旧模板保留未包含的配置。")
-        action("保存模板") { finishEditing { savePreset() } }
-        action("使用模板") { finishEditing { loadPreset() } }
-        action("恢复默认") { finishEditing {
+        note("仅原始转写会跳过首次 AI 回复，之后仍可追问。转写提示用于识别语言与专有名词。")
+    }
+
+    private fun showTemplateActions() {
+        templateSheet?.dismiss()
+        val sheet = BottomSheetDialog(this)
+        templateSheet = sheet
+        val content = column().apply { setPadding(dp(16), dp(8), dp(16), dp(24)) }
+        content.addView(label("模板包含六项已保存的提示配置。", 14f, true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        fun templateAction(title: String, run: () -> Unit) {
+            content.addView(MaterialButton(this, null, androidx.appcompat.R.attr.borderlessButtonStyle).apply {
+                text = title; applyActionStyle(false)
+                setOnClickListener { sheet.dismiss(); finishEditing(run) }
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+        templateAction("保存为模板") { savePreset() }
+        templateAction("使用已有模板") { loadPreset() }
+        templateAction("恢复默认提示词") {
             MaterialAlertDialogBuilder(this).setTitle("恢复默认提示词？")
-                .setMessage("立即恢复本页六项提示配置，保留模板、模型与密钥。")
+                .setMessage("恢复本页六项配置，保留已有模板。")
                 .setNegativeButton("取消", null).setPositiveButton("恢复默认") { _, _ ->
-                    finishEditing {
-                        if (persist(SettingsUpdate.Prompts(PromptPreset.capture(AppConfig())))) showPage(page)
-                    }
+                    finishEditing { if (persist(SettingsUpdate.Prompts(PromptPreset.capture(AppConfig())))) showPage(page) }
                 }.showTracked()
-        } }
+        }
+        sheet.setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(materialToolbar("提示词模板", compact = true))
+            addView(content)
+        })
+        sheet.setOnDismissListener { if (templateSheet === sheet) templateSheet = null }
+        sheet.show()
     }
 
     private fun ballPage(config: InteractionConfig) {
         ballSize = config.ballSize; ballOpacity = config.ballOpacity; ballColor = config.ballColor
-        section("外观预览")
         val previewArea = LinearLayout(this).apply {
-            gravity = Gravity.CENTER; background = card(SURFACE, dp(8).toFloat())
+            gravity = Gravity.CENTER; background = card(SURFACE, dp(16).toFloat())
             ballPreview = View(this@SettingsScreen).also { addView(it) }
         }
         body.addView(previewArea, LinearLayout.LayoutParams(-1, dp(100)))
@@ -340,106 +345,88 @@ internal class SettingsScreen(
 
     private fun input(name: String, title: String, hintValue: String, initial: String = "", multiline: Boolean = false,
                       secret: Boolean = false, numeric: Boolean = false, decimal: Boolean = false) {
-        var saved = initial
-        val content = column().apply { setPadding(0, 0, 0, 0) }
-        val row = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(58)
-            setPadding(dp(16), dp(8), dp(4), dp(8))
+        val content = column().apply {
+            setPadding(dp(16), dp(8), dp(8), dp(16))
+            background = touchFeedback()
+            isClickable = true; isFocusable = true
         }
-        val valueView = label(if (secret) credentialStatus() else saved.ifBlank { "未设置" }, 13f, true).apply {
-            gravity = Gravity.END; maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+        val valueView = label(if (secret) credentialStatus() else initial.ifBlank { "未设置" }).apply {
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
+            setTextColor(INK)
+            maxLines = if (multiline) 3 else 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setLineSpacing(dp(3).toFloat(), 1f)
         }
         valueViews[name] = valueView
         if (secret) credentialState = valueView
-        row.addView(label(title, 14f), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(valueView, LinearLayout.LayoutParams(0, -2, 1f))
-        val editor = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; visibility = View.GONE
-            setPadding(dp(16), 0, dp(8), dp(12))
-            isSaveEnabled = false; isSaveFromParentEnabled = false
+        val header = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(44)
+            addView(label(title, 16f), LinearLayout.LayoutParams(0, -2, 1f))
         }
-        val inputLayout = TextInputLayout(this).apply {
-            hint = hintValue; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_FILLED
-            setBoxBackgroundColor(SURFACE); isSaveEnabled = false; isSaveFromParentEnabled = false
-        }
-        val field = TextInputEditText(inputLayout.context).apply {
-            textSize = 15f; setTextColor(INK); setHintTextColor(MUTED)
-            inputType = when {
-                secret -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                numeric -> InputType.TYPE_CLASS_NUMBER
-                multiline -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            }
-            isSaveEnabled = false; isSaveFromParentEnabled = false
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-            if (secret) {
-                transformationMethod = PasswordTransformationMethod.getInstance()
-                imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
-                if (Build.VERSION.SDK_INT >= 30) importantForContentCapture = View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
-                setAutofillHints(null)
-            }
-            setSingleLine(!multiline)
-            if (multiline) { minLines = 3; gravity = Gravity.TOP or Gravity.START }
-            contentDescription = title
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (activeEdit?.name == name) activeEdit?.draft = s.toString()
-                    inputLayout.error = null
+        val open = {
+            finishEditing {
+                val start = if (secret) "" else try {
+                    SettingsUpdate.TextField.valueOf(name).read(store.load())
+                } catch (_: Exception) {
+                    toast("无法读取配置，请先修复 API 连接")
+                    return@finishEditing
                 }
-                override fun afterTextChanged(s: Editable?) = Unit
-            })
-        }
-        inputLayout.addView(field, LinearLayout.LayoutParams(-1, -2)); editor.addView(inputLayout)
-        val editButton = iconButton(android.R.drawable.ic_menu_edit, "编辑$title") {}
-        row.addView(editButton)
-        val dismiss = {
-            activeEdit = null; closeEditor = null; field.text?.clear(); field.clearFocus()
-            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(field.windowToken, 0)
-            editor.visibility = View.GONE; editButton.visibility = View.VISIBLE; inputLayout.error = null
-        }
-        editButton.setOnClickListener { finishEditing {
-            val start = if (secret) "" else try { SettingsUpdate.TextField.valueOf(name).read(store.load()) } catch (_: Exception) { saved }
-            activeEdit = FieldEditState(name, start); closeEditor = dismiss
-            field.setText(start); editor.visibility = View.VISIBLE; editButton.visibility = View.GONE
-            field.requestFocus(); field.setSelection(field.length())
-            field.post { (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }
-        } }
-        val actions = LinearLayout(this).apply { gravity = Gravity.END }
-        actions.addView(iconButton(android.R.drawable.ic_menu_close_clear_cancel, "取消编辑$title") { finishEditing {} })
-        actions.addView(iconButton(android.R.drawable.ic_menu_save, "保存$title") {
-            val draft = field.text.toString()
-            val update = SettingsUpdate.Text(SettingsUpdate.TextField.valueOf(name), draft)
-            val save: (Boolean) -> Unit = { replace ->
-                if (persist(update.copy(replaceSampling = replace))) {
-                    saved = if (secret) "" else draft; if (secret) savedCredential = true
-                    valueView.text = if (secret) credentialStatus() else saved.ifBlank { "未设置" }
-                    if (name == "temperature") valueViews["topP"]?.text = try { store.load().topP?.toString() ?: "未设置" } catch (_: Exception) { "未设置" }
-                    if (name == "topP") valueViews["temperature"]?.text = try { store.load().temperature?.toString() ?: "未设置" } catch (_: Exception) { "未设置" }
-                    dismiss()
-                } else inputLayout.error = "未保存，请检查输入或重试"
+                activeEdit = FieldEditState(name, start)
+                lateinit var panel: SettingsEditPanel
+                panel = SettingsEditPanel(this, title, hintValue, start, multiline, secret, numeric, decimal,
+                    onDraft = { draft -> if (activeEdit?.name == name) activeEdit?.draft = draft },
+                    onRequestClose = { finishEditing {} },
+                    onSave = { draft, error -> saveText(name, draft, secret, valueView, error) })
+                closeEditor = {
+                    activeEdit = null; closeEditor = null
+                    panel.close()
+                }
+                panel.show()
             }
-            try {
-                val current = store.load()
-                val conflict = draft.isNotBlank() && ((name == "temperature" && current.topP != null) || (name == "topP" && current.temperature != null))
-                if (conflict) MaterialAlertDialogBuilder(this).setTitle("替换另一项采样参数？")
-                    .setMessage("temperature 与 top_p 只能设置一项。保存此值会清空另一项；也可取消后清空当前输入。")
-                    .setNegativeButton("继续编辑", null).setPositiveButton("替换并保存") { _, _ -> save(true) }.showTracked()
-                else save(false)
-            } catch (_: Exception) { inputLayout.error = "无法读取配置，未保存" }
-        })
-        editor.addView(actions); content.addView(row); content.addView(editor); addRow(content)
+        }
+        content.addView(header, LinearLayout.LayoutParams(-1, -2))
+        content.addView(valueView, LinearLayout.LayoutParams(-1, -2).apply { rightMargin = dp(8); topMargin = dp(2) })
+        content.contentDescription = "编辑$title"
+        content.setOnClickListener { open() }
+        // Every long field gets its own full-width card, preserving readable previews.
+        if (multiline) group = null
+        addRow(content)
+        if (multiline) group = null
     }
 
-    private fun placeholder(value: String) = value
+    private fun saveText(name: String, draft: String, secret: Boolean, valueView: TextView, error: (String) -> Unit) {
+        val update = SettingsUpdate.Text(SettingsUpdate.TextField.valueOf(name), draft)
+        val save: (Boolean) -> Unit = { replace ->
+            if (persist(update.copy(replaceSampling = replace), error)) {
+                if (secret) savedCredential = true
+                valueView.text = if (secret) credentialStatus() else draft.ifBlank { "未设置" }
+                if (name == "temperature") valueViews["topP"]?.text = try { store.load().topP?.toString() ?: "未设置" } catch (_: Exception) { "未设置" }
+                if (name == "topP") valueViews["temperature"]?.text = try { store.load().temperature?.toString() ?: "未设置" } catch (_: Exception) { "未设置" }
+                closeEditor?.invoke()
+            }
+        }
+        try {
+            val current = store.load()
+            // Validate input before asking to replace the other sampling parameter.
+            val candidate = update.copy(replaceSampling = true).applyTo(current)
+            SettingsStore.validate(candidate)
+            val conflict = draft.isNotBlank() && ((name == "temperature" && current.topP != null) || (name == "topP" && current.temperature != null))
+            if (conflict) MaterialAlertDialogBuilder(this).setTitle("替换另一项采样参数？")
+                .setMessage("Temperature 与 Top P 只设置一项。保存会清空另一项。")
+                .setNegativeButton("继续编辑", null).setPositiveButton("替换并保存") { _, _ -> save(true) }.showTracked()
+            else save(false)
+        } catch (failure: IllegalArgumentException) { error(failure.message ?: "请检查输入") }
+        catch (_: Exception) { error("无法读取配置，未保存") }
+    }
+
     private fun credentialStatus() = if (savedCredential) "已保存" else "未设置"
 
     private fun check(name: String, title: String, initial: Boolean) {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(58); setPadding(dp(16), dp(5), dp(12), dp(5))
         }
-        row.addView(label(title, 14f), LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(label(title, 16f), LinearLayout.LayoutParams(0, -2, 1f))
         var restoring = false
         row.addView(MaterialSwitch(this).apply {
             isSaveEnabled = false; isChecked = initial; contentDescription = title
@@ -471,14 +458,17 @@ internal class SettingsScreen(
             gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(58); setPadding(dp(16), dp(10), dp(16), dp(10))
             background = touchFeedback(); isClickable = true; isFocusable = true
         }
-        row.addView(label(title, 14f), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(label(options[initial] ?: initial, 13f, true).apply { tag = name; gravity = Gravity.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label(title, 16f))
+            addView(label(options[initial] ?: initial, 14f, true).apply { tag = name; setPadding(0, dp(4), 0, 0) })
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
         row.addView(android.widget.ImageView(this).apply {
             setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
             imageTintList = ColorStateList.valueOf(MUTED)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(16), dp(16)).apply { leftMargin = dp(8) })
-        row.setOnClickListener {
+        row.setOnClickListener { finishEditing {
             val keys = options.keys.toList()
             MaterialAlertDialogBuilder(this).setTitle(title).setSingleChoiceItems(options.values.toTypedArray(), keys.indexOf(selections[name])) { dialog, index ->
                 if (persistChoice(name, keys[index])) {
@@ -487,7 +477,7 @@ internal class SettingsScreen(
                     dialog.dismiss()
                 }
             }.setNegativeButton("取消", null).showTracked()
-        }
+        } }
         addRow(row)
     }
 
@@ -513,7 +503,7 @@ internal class SettingsScreen(
 
     private fun slider(title: String, minimum: Int, maximum: Int, initial: Int, unit: String, changed: (Int) -> Unit) {
         val wrap = column().apply { setPadding(dp(16), dp(12), dp(16), dp(8)) }
-        val caption = label("$title：$initial $unit", 14f)
+        val caption = label("$title：$initial $unit", 16f)
         wrap.addView(caption)
         var saved = initial
         var dragging = false
@@ -542,11 +532,11 @@ internal class SettingsScreen(
     private fun renderColorPalette() {
         val palette = colorPalette ?: return
         palette.removeAllViews()
-        val colors = (listOf(ballColor to "当前颜色") + listOf(
+        val colors = listOf(
             0xFF72968E.toInt() to "松绿", 0xFF426BCA.toInt() to "蓝色", 0xFF8D62BD.toInt() to "紫色",
             0xFFCC5C74.toInt() to "玫红", 0xFFE09636.toInt() to "橙色", 0xFF34403A.toInt() to "墨色",
             0xFFF3E9D2.toInt() to "米白",
-        )).distinctBy { it.first }
+        )
         colors.chunked(4).forEach { group ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             group.forEach { (color, name) ->
@@ -585,15 +575,15 @@ internal class SettingsScreen(
         }
     }
 
-    private fun persist(update: SettingsUpdate): Boolean = try {
+    private fun persist(update: SettingsUpdate, onError: (String) -> Unit = ::toast): Boolean = try {
         val next = update.applyTo(store.load())
         SettingsStore.validate(next); store.save(next)
-        status.text = "已保存"; true
-    } catch (error: IllegalArgumentException) { toast(error.message ?: "设置无效"); false }
-    catch (_: Exception) { toast("保存失败，请检查设备安全存储后重试"); false }
+        toast("已保存"); true
+    } catch (error: IllegalArgumentException) { onError(error.message ?: "设置无效"); false }
+    catch (_: Exception) { onError("保存失败，请检查设备安全存储后重试"); false }
 
     private fun persistInteraction(update: (InteractionConfig) -> InteractionConfig): Boolean = try {
-        interactionStore.save(update(interactionStore.load())); status.text = "已保存"; true
+        interactionStore.save(update(interactionStore.load())); toast("已保存"); true
     } catch (_: Exception) { toast("保存失败，请重试"); false }
 
     private fun saveBallColor(color: Int) {
@@ -668,29 +658,32 @@ internal class SettingsScreen(
     }
 
     private fun savePreset() {
-        val name = EditText(this).apply {
-            hint = placeholder("请输入模板名称（最多 60 字）"); isSaveEnabled = false; isSaveFromParentEnabled = false; textSize = 15f
-            applyInputStyle()
-        }
-        val dialog = MaterialAlertDialogBuilder(this).setTitle("保存提示词模板").setView(name)
-            .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val title = name.text.toString().trim()
-                if (title.isBlank() || title.length > 60) { toast("名称需为 1 至 60 字"); return@setOnClickListener }
-                try {
-                    val perform = {
-                        try { store.savePreset(title, PromptPreset.capture(store.load()))
-                            dialog.dismiss(); toast("模板已保存") }
-                        catch (_: Exception) { toast("保存失败：最多 20 个模板，单项提示词最多 32000 字") }
-                    }
-                    if (store.presets().containsKey(title)) MaterialAlertDialogBuilder(this).setTitle("覆盖同名模板？").setMessage(title)
-                        .setNegativeButton("取消", null).setPositiveButton("覆盖") { _, _ -> perform() }.showTracked()
-                    else perform()
-                } catch (_: Exception) { toast("无法读取模板") }
-            }
-        }
-        dialog.showTracked()
+        activeEdit = FieldEditState("presetName", "")
+        lateinit var panel: SettingsEditPanel
+        panel = SettingsEditPanel(this, "模板名称", "1–60 字，保存当前六项已存配置", "", false, false, false, false,
+            onDraft = { activeEdit?.takeIf { it.name == "presetName" }?.draft = it },
+            onRequestClose = { finishEditing {} },
+            onSave = { draft, error ->
+                val title = draft.trim()
+                if (title.isBlank() || title.length > 60) {
+                    error("名称需为 1 至 60 字")
+                } else {
+                    try {
+                        val perform = {
+                            try {
+                                store.savePreset(title, PromptPreset.capture(store.load()))
+                                closeEditor?.invoke(); toast("模板已保存")
+                            } catch (_: Exception) { error("保存失败，请检查模板数量与提示词长度") }
+                        }
+                        if (store.presets().containsKey(title)) MaterialAlertDialogBuilder(this).setTitle("覆盖同名模板？")
+                            .setMessage(title).setNegativeButton("取消", null)
+                            .setPositiveButton("覆盖") { _, _ -> perform() }.showTracked()
+                        else perform()
+                    } catch (_: Exception) { error("无法读取模板") }
+                }
+            })
+        closeEditor = { activeEdit = null; closeEditor = null; panel.close() }
+        panel.show()
     }
 
     private fun loadPreset() {
@@ -710,7 +703,7 @@ internal class SettingsScreen(
                     .joinToString("\n\n") { (title, value) -> "$title\n${value.ifBlank { "未设置" }}" }
                 MaterialAlertDialogBuilder(this).setTitle("应用“${names[index]}”？")
                     .setMessage("确认以下六项提示配置后立即应用。")
-                    .setView(ScrollView(this).apply { addView(label(summary, 13f).apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }) })
+                    .setView(ScrollView(this).apply { addView(label(summary, 14f).apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }) })
                     .setNegativeButton("取消", null).setPositiveButton("应用模板") { _, _ ->
                         finishEditing {
                             if (persist(SettingsUpdate.Prompts(preset))) showPage(page)
@@ -723,25 +716,29 @@ internal class SettingsScreen(
 
     private val dangerColor: Int get() = if (Color.red(INK) > 160) 0xFFFFB4AB.toInt() else 0xFFB3261E.toInt()
 
-    private fun Button.destructive() { applyActionStyle() }
+    private fun MaterialButton.destructive() { applyActionStyle(false); setTextColor(dangerColor) }
 
-    private fun action(title: String, run: () -> Unit): Button {
+    private fun action(title: String, run: () -> Unit): MaterialButton {
         group = null
-        return body.action(title, run = run)
+        return MaterialButton(this).also { button ->
+            button.text = title; button.applyActionStyle(true)
+            button.setOnClickListener { run() }
+            body.addView(button, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+        }
     }
 
     private fun section(text: String) {
         group = null
-        body.addView(label(text, 12f, true).apply { typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) },
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); bottomMargin = dp(8); leftMargin = dp(12) })
+        body.addView(label(text, 14f, true),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = if (body.childCount <= 1) dp(4) else dp(20); bottomMargin = dp(8); leftMargin = dp(16) })
     }
 
     private fun addRow(view: View) {
         val container = group ?: column().apply { setPadding(0, 0, 0, 0) }.also { content ->
             body.addView(MaterialCardView(this).apply {
-                radius = dp(18).toFloat(); cardElevation = 0f; strokeWidth = 0; setCardBackgroundColor(SURFACE)
+                radius = dp(16).toFloat(); cardElevation = 0f; strokeWidth = 0; setCardBackgroundColor(SURFACE)
                 addView(content, android.widget.FrameLayout.LayoutParams(-1, -2))
-            }, LinearLayout.LayoutParams(-1, -2))
+            }, LinearLayout.LayoutParams(-1, -2).apply { if (body.childCount > 1) topMargin = dp(8) })
             group = content
         }
         if (container.childCount > 0) container.addView(divider().apply {
@@ -752,9 +749,9 @@ internal class SettingsScreen(
 
     private fun note(text: String) {
         val currentGroup = group
-        val caption = label(text, 11f, true).apply { setLineSpacing(dp(2).toFloat(), 1f) }
+        val caption = label(text, 12f, true).apply { setLineSpacing(dp(3).toFloat(), 1f) }
         if (currentGroup != null) {
-            caption.setPadding(dp(16), 0, dp(16), dp(12))
+            caption.setPadding(dp(16), dp(8), dp(16), dp(16))
             currentGroup.addView(caption, LinearLayout.LayoutParams(-1, -2))
         } else {
             body.addView(caption, LinearLayout.LayoutParams(-1, -2).apply {
@@ -762,7 +759,7 @@ internal class SettingsScreen(
             })
         }
     }
-    private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
+    private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
     private fun clearDraft() {
         closeEditor?.invoke(); activeEdit = null; closeEditor = null
@@ -783,6 +780,8 @@ internal class SettingsScreen(
     }
 
     private fun dismissDialogs() {
+        templateSheet?.dismiss(); templateSheet = null
+        discardConfirmation = null
         dialogs.toList().forEach { it.dismiss() }
         dialogs.clear()
     }
