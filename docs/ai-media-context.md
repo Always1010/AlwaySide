@@ -52,11 +52,12 @@
 
 ## 当前 Android 实现
 
-以下描述现有代码，不表示交互原型中的新增功能已在 APK 实施：
+以下描述当前 Android 实现：
 
 - [AiProvider.kt](../apps/android/app/src/main/java/com/alwayside/android/AiProvider.kt) 使用 Responses 流式请求、`store: false` 和客户端提供的文字历史；当前没有使用服务端会话或响应链。原图通过当前请求的 `input_image` 附入。
-- [ChatSession.kt](../apps/android/app/src/main/java/com/alwayside/android/ChatSession.kt) 已实现先转写、再解释，并在活动会话中缓存转写。请求固定问题、配置与证据，取消及新会话用隔离标识阻止迟到结果写回。
-- [AssistantService.kt](../apps/android/app/src/main/java/com/alwayside/android/AssistantService.kt) 在活动会话保留候选图片，提供沿用、更新、不附图的选择。当前图片不进入长期历史，录音使用有界私有缓存。
-- [HistoryStore.kt](../apps/android/app/src/main/java/com/alwayside/android/HistoryStore.kt) 保存有界消息文字、证据说明及转写字段，不保存原始图片或音频。当前恢复流程主要恢复消息文字；保存了转写字段不代表恢复时自动将该字段重新作为媒体证据传入模型。
+- [ChatSession.kt](../apps/android/app/src/main/java/com/alwayside/android/ChatSession.kt) 实现先转写、再解释，或仅输出转写。历史恢复保留原始转写和所选文字，后续文字追问仍将其作为引用资料。请求固定配置、问题、原文和证据；取消及新会话用隔离标识阻止迟到结果写回。
+- [AssistantService.kt](../apps/android/app/src/main/java/com/alwayside/android/AssistantService.kt) 分别管理截图、音频与文字小窗；活动会话保留图片，并提供沿用、更新、仅文字的选择。取消录音先使完成回调失效再丢弃片段，不进入转写。待处理会话可移交给应用内聊天。
+- [HistoryStore.kt](../apps/android/app/src/main/java/com/alwayside/android/HistoryStore.kt) 保存有界消息、来源、状态、转写和所选原文，不在 JSON 内嵌媒体。查询开始、取消、失败和完成均归档到原会话。
+- [ConversationMediaStore.kt](../apps/android/app/src/main/java/com/alwayside/android/ConversationMediaStore.kt) 在用户开启图片历史保存后使用私有 noBackup 目录，按数量与容量清理。恢复时只有存在的图片才可继续附原图；原始音频仍不进入长期历史。
 
 当前 APK 的功能与使用方式以仓库 README 为准；独立交互原型不能视为已实现功能。

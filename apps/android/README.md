@@ -50,7 +50,7 @@ python .local/android/build.py :app:assembleDebug :app:lintDebug
 .\gradlew.bat :app:testDebugUnitTest --tests com.alwayside.android.ProviderProtocolTest --tests com.alwayside.android.ChatSessionTest
 ```
 
-GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTest 保护地址、流边界和取消；ChatSessionTest 保护旧回调隔离、配置快照和转写复用。测试不会调用真实 API。真实服务、KeyStore、悬浮输入和音源可录性需真机验证。
+GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTest 保护地址、生成参数、流边界和取消；ChatSessionTest 保护旧回调隔离、配置与选文快照、历史转写和追问；InteractionTest 保护多击互斥、录音取消回调与分状态映射。测试不会调用真实 API。真实服务、KeyStore、悬浮输入、文字选择菜单和音源可录性需真机验证。
 
 ## 源码职责
 
@@ -58,13 +58,16 @@ GeometryTest 保护裁剪坐标；WavTest 保护 WAV 封装；ProviderProtocolTe
 
 | 类 | 职责 |
 | --- | --- |
-| MainActivity / SettingsActivity / HistoryActivity | 授权入口、配置、文字历史 |
-| AssistantService | 前台服务、悬浮球、面板、框选和采集操作 |
+| MainActivity / SettingsActivity / HistoryActivity / ChatActivity | 应用对话主页、分类设置、权限控制与原生聊天 |
+| ProcessTextActivity | 系统 PROCESS_TEXT / SEND 纯文本入口与无悬浮权限回退 |
+| AssistantService | 前台服务、小球手势、贴球菜单、三类独立小窗与采集 |
+| InteractionPreferences / TapSequence | 外观与分状态动作、窗口记忆、多击及取消录音隔离 |
+| ActiveConversationBridge | 在悬浮与应用内页面间移交活动会话与媒体所有权 |
 | FrameSource / CropView / Geometry | 新画面获取、冻结选择、坐标映射 |
 | PlaybackRecorder / Wav | 内部播放音频采集与 WAV 封装 |
 | ChatSession | 本轮配置与证据快照、追问、取消、重试、转写复用 |
 | AiProvider / ProviderProtocol | HTTPS、Responses SSE、文件转写与有界解析 |
-| SettingsStore / HistoryStore | KeyStore 加密凭据、预设和原子写入文字历史 |
+| SettingsStore / HistoryStore / ConversationMediaStore | 加密凭据、预设、状态与原文历史、可选私有图片 |
 | Contracts / MarkdownText / Ui / ProbeState | 数据契约、展示及不含媒体和密钥的运行诊断 |
 
 开发计划、验收结果和交付记录只放仓库根 .local/android/。工程 README 描述使用和结构，不承担阶段进度记录。
