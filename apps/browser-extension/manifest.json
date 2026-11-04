@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "AlwaySide",
+  "version": "0.1.0",
+  "description": "手动选取网页资料，在侧栏使用自己的 OpenAI API Key 进行问答。",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel", "activeTab", "scripting", "storage"],
+  "host_permissions": ["https://api.openai.com/*"],
+  "background": { "service_worker": "background.mjs", "type": "module" },
+  "action": { "default_title": "打开 AlwaySide，并允许读取当前网页" },
+  "side_panel": { "default_path": "panel.html" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src https://api.openai.com; img-src 'self' data:; style-src 'self'; base-uri 'none'; frame-src 'none'"
+  }
+}
