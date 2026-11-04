@@ -1,8 +1,36 @@
 import Foundation
 import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 
 enum PhotoImport {
+    /// Restore the already bounded handoff without another lossy JPEG conversion.
+    /// The envelope is untrusted: check its type, complete decode and actual pixel dimensions.
+    static func restoreScreenshot(jpegData: Data, receivedAt: Date) throws -> EvidenceSnapshot {
+        try ScreenshotInbox.validateReceiptDate(receivedAt)
+        guard !jpegData.isEmpty, jpegData.count <= 3 * 1024 * 1024,
+              let source = CGImageSourceCreateWithData(jpegData as CFData, nil),
+              CGImageSourceGetType(source) as String? == UTType.jpeg.identifier,
+              CGImageSourceGetCount(source) == 1,
+              CGImageSourceGetStatus(source) == .statusComplete,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0, width <= 1280, height <= 1280,
+              let image = CGImageSourceCreateImageAtIndex(source, 0,
+                  [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
+              CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
+              image.width == width, image.height == height else {
+            throw ScreenshotHandoffError.invalidImage
+        }
+        // A delayed background decode must not extend the ten-minute handoff window.
+        try ScreenshotInbox.validateReceiptDate(receivedAt)
+        let frame = CapturedFrame(id: UUID(), timestamp: receivedAt,
+                                  monotonicSeconds: ProcessInfo.processInfo.systemUptime,
+                                  jpegData: jpegData, width: image.width, height: image.height)
+        return EvidenceSnapshot(frame: frame, origin: "快捷指令截图（时间为接收时间）", isImported: true)
+    }
+
     /// Validate a transferred file before reading it, and cap the read even if it grows meanwhile.
     static func snapshot(from url: URL) throws -> EvidenceSnapshot {
         guard url.isFileURL else { throw ClientError.invalidImage }

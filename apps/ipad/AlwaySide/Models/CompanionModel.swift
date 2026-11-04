@@ -140,25 +140,21 @@ final class CompanionModel: ObservableObject {
     }
 
     /// Import starts by clearing the old attachment, so invalid new input can never send an older screenshot.
-    func receiveScreenshot(url: URL) async {
+    func receiveScreenshot(jpegData: Data, receivedAt: Date) async {
         startNewConversation()
         let id = UUID()
         importID = id; isImporting = true
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let value = try await Task.detached(priority: .userInitiated) {
-                let values = try url.resourceValues(forKeys: [.fileSizeKey])
-                guard (values.fileSize ?? Int.max) <= 20 * 1024 * 1024 else { throw ClientError.tooLarge }
-                return try PhotoImport.snapshot(from: Data(contentsOf: url, options: .mappedIfSafe))
+                try PhotoImport.restoreScreenshot(jpegData: jpegData, receivedAt: receivedAt)
             }.value
             guard importID == id else { return }
             isImporting = false; importID = nil
-            choose(EvidenceSnapshot(frame: value.frame, origin: "快捷指令截图（时间为接收时间）", isImported: true))
+            choose(value)
         } catch {
             guard importID == id else { return }
             isImporting = false; importID = nil
-            reportPhotoError()
+            receiveScreenshotFailure(message: error.localizedDescription)
         }
     }
 

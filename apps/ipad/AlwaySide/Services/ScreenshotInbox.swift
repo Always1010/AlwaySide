@@ -7,7 +7,6 @@ actor ScreenshotInbox {
     static let shared = ScreenshotInbox()
     static let didChange = Notification.Name("AlwaySideScreenshotInboxDidChange")
     static let willReceive = Notification.Name("AlwaySideScreenshotInboxWillReceive")
-    private static let maximumInputBytes = 20 * 1024 * 1024
     private static let maximumEnvelopeBytes = 5 * 1024 * 1024
     private static let maximumAge: TimeInterval = 10 * 60
     private var latestReceiptID = UUID()
@@ -60,12 +59,7 @@ actor ScreenshotInbox {
             guard latestReceiptID == receiptID else { return }
             let scoped = representation.fileURL.startAccessingSecurityScopedResource()
             defer { if scoped { representation.fileURL.stopAccessingSecurityScopedResource() } }
-            let values = try representation.fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-            guard values.isRegularFile == true, let size = values.fileSize,
-                  size > 0, size <= Self.maximumInputBytes else { throw ScreenshotHandoffError.invalidImage }
-            let data = try Data(contentsOf: representation.fileURL, options: .mappedIfSafe)
-            guard !data.isEmpty, data.count <= Self.maximumInputBytes else { throw ScreenshotHandoffError.invalidImage }
-            let snapshot = try PhotoImport.snapshot(from: data)
+            let snapshot = try PhotoImport.snapshot(from: representation.fileURL)
             try write(Pending(id: receiptID, receivedAt: receivedAt, jpegData: snapshot.frame.jpegData, failure: nil))
             isReceiving = false
         } catch {
@@ -87,6 +81,8 @@ actor ScreenshotInbox {
     }
 
     func pending() throws -> Pending? {
+        // Older versions materialized a JPEG before delivery. Recover without retaining those files.
+        removeMaterializedFiles()
         guard !isReceiving else { return nil }
         let url = try pendingURL
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
@@ -104,21 +100,12 @@ actor ScreenshotInbox {
         }
     }
 
-    func materialize(_ pending: Pending) throws -> URL {
-        let age = Date().timeIntervalSince(pending.receivedAt)
+    static func validateReceiptDate(_ receivedAt: Date) throws {
+        let age = Date().timeIntervalSince(receivedAt)
         guard age >= -60, age <= Self.maximumAge else { throw ScreenshotHandoffError.expired }
-        guard let jpeg = pending.jpegData, !jpeg.isEmpty, jpeg.count <= 3 * 1024 * 1024 else {
-            throw ScreenshotHandoffError.invalidImage
-        }
-        // Remove remnants of an interrupted prior import before creating the single UI handoff.
-        removeMaterializedFiles()
-        let url = try directory.appendingPathComponent("\(pending.id.uuidString).jpg")
-        try jpeg.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        return url
     }
 
-    func acknowledge(_ id: UUID, materializedURL: URL?) throws {
-        if let materializedURL { try? FileManager.default.removeItem(at: materializedURL) }
+    func acknowledge(_ id: UUID) throws {
         removeMaterializedFiles()
         // A newer shortcut may have completed while the UI was importing the previous image.
         if let latest = try pending(), latest.id == id {
@@ -170,19 +157,19 @@ enum ScreenshotInboxDelivery {
             while true {
                 currentGeneration = generation
                 guard let pending = try await ScreenshotInbox.shared.pending() else { break }
-                var materializedURL: URL?
                 if let failure = pending.failure {
                     if currentGeneration == generation { model.receiveScreenshotFailure(message: failure) }
                 } else {
                     do {
-                        let url = try await ScreenshotInbox.shared.materialize(pending)
-                        materializedURL = url
-                        if currentGeneration == generation { await model.receiveScreenshot(url: url) }
+                        guard let jpeg = pending.jpegData else { throw ScreenshotHandoffError.invalidImage }
+                        if currentGeneration == generation {
+                            await model.receiveScreenshot(jpegData: jpeg, receivedAt: pending.receivedAt)
+                        }
                     } catch {
                         if currentGeneration == generation { model.receiveScreenshotFailure(message: error.localizedDescription) }
                     }
                 }
-                try await ScreenshotInbox.shared.acknowledge(pending.id, materializedURL: materializedURL)
+                try await ScreenshotInbox.shared.acknowledge(pending.id)
             }
         } catch {
             if currentGeneration == generation {
