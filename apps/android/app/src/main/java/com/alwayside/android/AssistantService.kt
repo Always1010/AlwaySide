@@ -509,7 +509,8 @@ class AssistantService : Service() {
         if(restoredLayout==null)node.composerExpanded=focusQuestion||!config.collapseFollowUpByDefault
         val size=screenSize();val saved=preferences.window(node.kind)
         val width=minOf(dp(if(config.rememberWindowSize)saved?.widthDp ?: 320 else 320),size.first-dp(24)).coerceAtLeast(dp(180))
-        val height=minOf(dp(if(config.rememberWindowSize)saved?.heightDp ?: 340 else 340),size.second-dp(100)).coerceAtLeast(dp(220))
+        val defaultHeight=uiContext.assistantWindowHeightDp()
+        val height=minOf(dp(if(config.rememberWindowSize)saved?.heightDp ?: defaultHeight else defaultHeight),size.second-dp(100)).coerceAtLeast(dp(220))
         val layout=restoredLayout ?: params(width,height,true).apply {
             x=if(config.rememberWindowPosition&&saved!=null)((size.first-width)*saved.xFraction).toInt() else (size.first-width)/2
             y=if(config.rememberWindowPosition&&saved!=null)((size.second-height-dp(60))*saved.yFraction).toInt()+dp(8) else (size.second-height-dp(32))/2
@@ -564,12 +565,12 @@ class AssistantService : Service() {
         if(node.kind=="text")node.transcript?.apply{visibility=View.VISIBLE;maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}
         node.imageChoice?.apply {
             val choices=listOf("沿用本次截图","发送时更新画面","仅文字上下文")
-            text="${choices[node.imageMode]}  ▾";accessible("图片上下文：${choices[node.imageMode]}，点按选择")
+            text=choices[node.imageMode];accessible("图片上下文：${choices[node.imageMode]}，点按选择")
             setOnClickListener { anchor ->
                 PopupMenu(uiContext,anchor).apply {
                     choices.forEachIndexed { index,label -> menu.add(0,index,index,label).apply { isCheckable=true;isChecked=index==node.imageMode } }
                     setOnMenuItemClickListener { item ->
-                        node.imageMode=item.itemId;text="${choices[item.itemId]}  ▾"
+                        node.imageMode=item.itemId;text=choices[item.itemId]
                         accessible("图片上下文：${choices[item.itemId]}，点按选择");true
                     }
                 }.show()
@@ -579,7 +580,7 @@ class AssistantService : Service() {
             setText(node.draft);accessible("${when(node.kind){"photo"->"截图";"audio"->"音频";else->"文字"}}追问")
             addTextChangedListener(object:TextWatcher {
                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int)=Unit
-                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty();updateComposerToggle(node)}
+                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty();updateComposerToggle(node);updateSendEnabled(node)}
                 override fun afterTextChanged(s:Editable?)=Unit
             })
         }
@@ -629,23 +630,10 @@ class AssistantService : Service() {
         }
     }
     private fun updateComposerToggle(node:FloatingConversation) {
-        node.composerToggle?.apply {
-            icon=uiContext.prototypeIcon(if(node.composerExpanded)R.drawable.ic_line_chevron_down else R.drawable.ic_line_chevron_up)
-            text=when {
-                node.composerExpanded -> "收起输入框"
-                node.draft.isNotBlank() -> "继续编辑"
-                else -> "继续提问"
-            }
-            isActivated=node.draft.isNotBlank()
-            val color=if(isActivated)ACCENT else INK
-            setTextColor(color)
-            iconTint=android.content.res.ColorStateList.valueOf(color)
-            accessible(when {
-                node.composerExpanded -> "收起追问输入框"
-                node.draft.isNotBlank() -> "展开追问输入框，继续编辑草稿"
-                else -> "展开追问输入框"
-            })
-        }
+        node.composerToggle?.setAssistantComposerState(node.composerExpanded,node.draft.isNotBlank())
+    }
+    private fun updateSendEnabled(node:FloatingConversation) {
+        node.send?.isEnabled=node.draft.isNotBlank()&&!node.awaitingAudioApproval&&!node.chat.busy&&!gathering&&recorder==null
     }
     private fun updatePin(node:FloatingConversation){node.pin?.apply{
         icon=uiContext.prototypeIcon(if(node.pinned)R.drawable.ic_pin_filled else R.drawable.ic_line_pin)
@@ -708,7 +696,7 @@ class AssistantService : Service() {
         node.apiSnapshot?.let { api -> node.status?.text = (if(node.chat.busy || node.chat.question.isNotBlank())node.chat.requestProviderLabel else ProviderCapabilities.label(api)) + "\n" + node.status?.text?.toString().orEmpty() }
         node.audioApproval?.visibility=if(node.awaitingAudioApproval)View.VISIBLE else View.GONE
         node.composerToggle?.isEnabled=!node.awaitingAudioApproval
-        node.send?.isEnabled=!node.awaitingAudioApproval&&!node.chat.busy&&!gathering&&recorder==null
+        updateSendEnabled(node)
         node.cancel?.visibility=if(node.chat.busy)View.VISIBLE else View.GONE
         node.retry?.visibility=if(node.chat.canRetry&&!gathering)View.VISIBLE else View.GONE
         node.retry?.accessible(node.chat.retryLabel)

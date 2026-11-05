@@ -1,4 +1,31 @@
 <resources>
+    <!-- Floating surfaces retain their specified neutral fill at any parent elevation. -->
+    <style name="ThemeOverlay.AlwaySide.AssistantCard" parent="">
+        <item name="elevationOverlayEnabled">false</item>
+    </style>
+    <style name="TextAppearance.AlwaySide.AssistantTitle" parent="TextAppearance.Material3.TitleSmall">
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+    <style name="TextAppearance.AlwaySide.AssistantBody" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textSize">14sp</item>
+        <item name="lineHeight">22sp</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+    <style name="TextAppearance.AlwaySide.AssistantQuestion" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textSize">12sp</item>
+        <item name="lineHeight">18sp</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+    <style name="TextAppearance.AlwaySide.AssistantAction" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textSize">12sp</item>
+        <item name="fontFamily">sans-serif</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
     <style name="AppTheme" parent="Theme.Material3.Light.NoActionBar">
         <item name="colorPrimary">#191C20</item>
         <item name="colorOnPrimary">#FFFFFF</item>

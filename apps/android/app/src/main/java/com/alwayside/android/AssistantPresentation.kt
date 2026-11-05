@@ -6,9 +6,11 @@ import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.ContextThemeWrapper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -58,6 +60,8 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
 
 internal enum class AssistantMenuAction { SCREEN, AUDIO, CANCEL_AUDIO, CROP, LAST, PLAY, HISTORY, SETTINGS, STOP }
 
+internal fun Context.assistantWindowHeightDp() = (432 * resources.configuration.fontScale.coerceAtLeast(1f)).toInt()
+
 internal class AssistantMenuViews(context: Context, recording: Boolean = false, hasClip: Boolean = false,
     webSearch: Boolean = false, useDefaultQuestion: Boolean = true, webSearchAvailable: Boolean = true,
     onWebSearchChanged: (Boolean) -> Unit = {}, onDefaultQuestionChanged: (Boolean) -> Unit = {},
@@ -77,7 +81,7 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
                 applyActionStyle(false);iconTint=ColorStateList.valueOf(MUTED);stateListAnimator=null;elevation=0f;translationZ=0f
                 setTextColor(INK);cornerRadius=dp(8);insetTop=0;insetBottom=0
                 minHeight=dp(40);minimumHeight=dp(40);minWidth=0;minimumWidth=0
-                textSize=13f;maxLines=2
+                textSize=13f;typeface=Typeface.create("sans-serif",Typeface.NORMAL);letterSpacing=0f;maxLines=2
                 setPadding(dp(8),dp(6),dp(8),dp(6));accessible(title)
                 setOnClickListener { onAction(action) }
             }
@@ -94,7 +98,7 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
         })
         fun option(title:String,checked:Boolean,description:String,enabled:Boolean=true,changed:(Boolean)->Unit) {
             val check=MaterialCheckBox(this).apply {
-                text=title;isChecked=checked;textSize=13f;setTextColor(INK)
+                text=title;isChecked=checked;textSize=13f;setTextColor(INK);letterSpacing=0f
                 minHeight=dp(38);minimumHeight=dp(38);minWidth=0;minimumWidth=0
                 setPadding(dp(8),0,dp(8),0);compoundDrawablePadding=dp(4)
                 buttonTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(ACCENT,MUTED))
@@ -131,22 +135,27 @@ internal class AssistantWindowActions(
 
 /** Exactly the same window hierarchy and controls for the service and the local tutorial. */
 internal class AssistantWindowViews(context: Context, title: String, image: Boolean, actions: AssistantWindowActions) {
-    val body = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
-    val header = context.materialToolbar(title,null,compact=true)
+    val body = LinearLayout(context).apply {
+        orientation=LinearLayout.VERTICAL;setPadding(context.dp(1),context.dp(1),context.dp(1),context.dp(1))
+    }
+    val header = context.materialToolbar(title,null,compact=true).apply {
+        setTitleTextAppearance(context,R.style.TextAppearance_AlwaySide_AssistantTitle)
+    }
     val pin = header.addIconAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示",actions.pin)
     val content = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(15),context.dp(13),context.dp(15),context.dp(8)) }
-    val sourceContent = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(12),context.dp(10),context.dp(12),context.dp(10)) }
+    val sourceContent = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(12),context.dp(5),context.dp(12),context.dp(5)) }
     val response = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(0,context.dp(12),0,0) }
-    val status = context.label("",11f,true).apply { setPadding(0,context.dp(6),0,0) }
+    val status = context.label("",11f,true).apply { textSize=11f;letterSpacing=0f;setPadding(0,context.dp(6),0,0) }
     val scroll = ScrollView(context).apply { addView(content);isFillViewport=true;isVerticalScrollBarEnabled=true }
     private val controls = LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(context.dp(8),0,context.dp(8),0) }
     val toggle = MaterialButton(context,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
-        applyActionStyle();setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelMedium)
+        applyActionStyle();setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantAction)
         iconSize=context.dp(14);iconPadding=context.dp(4);iconGravity=MaterialButton.ICON_GRAVITY_TEXT_END
         minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
         insetLeft=0;insetRight=0;insetTop=0;insetBottom=0
         setPadding(context.dp(8),0,context.dp(8),0);cornerRadius=context.dp(8)
-        maxLines=1;ellipsize=TextUtils.TruncateAt.END;backgroundTintList=ColorStateList.valueOf(TONAL_SURFACE)
+        maxLines=1;ellipsize=TextUtils.TruncateAt.END
+        backgroundTintList=ColorStateList.valueOf(if(AppAppearance.isNight)TONAL_SURFACE else 0xFFEAF0FF.toInt())
         setOnClickListener { actions.toggle() }
     }
     val cancel: MaterialButton
@@ -156,20 +165,30 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val composerSection = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     val imageChoice: MaterialButton?
     val inputLayout = TextInputLayout(context,null,com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-        hint="想了解什么？";boxBackgroundMode=TextInputLayout.BOX_BACKGROUND_OUTLINE
+        isHintEnabled=false;boxBackgroundMode=TextInputLayout.BOX_BACKGROUND_OUTLINE
+        boxStrokeWidth=context.dp(1);boxStrokeWidthFocused=context.dp(1)
+        setBoxCornerRadii(context.dp(5).toFloat(),context.dp(5).toFloat(),context.dp(5).toFloat(),context.dp(5).toFloat())
+        setBoxStrokeColorStateList(ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled),
+            intArrayOf(android.R.attr.state_focused),intArrayOf()),intArrayOf(BORDER,ACCENT,
+                if(AppAppearance.isNight)HINT else 0xFF929AA5.toInt())))
     }
     val input = TextInputEditText(inputLayout.context).apply {
-        setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
-        minLines=1;maxLines=3;minHeight=context.dp(48)
+        setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantBody)
+        textSize=13f;setTextColor(INK);setHintTextColor(HINT);hint="想了解什么？"
+        minLines=1;maxLines=3;minHeight=context.dp(50)
+        setPadding(context.dp(12),context.dp(10),context.dp(12),context.dp(10))
         filters=arrayOf(android.text.InputFilter.LengthFilter(12000))
     }
     val search = context.iconButton(R.drawable.ic_globe,"联网搜索",actions.search)
-    val send = context.iconButton(android.R.drawable.ic_menu_send,"发送问题",actions.send).apply { applyIconActionStyle(primary=true) }
+    val send = context.iconButton(android.R.drawable.ic_menu_send,"发送问题",actions.send).apply {
+        applyIconActionStyle(primary=true);applyAssistantSendShape();isEnabled=false
+    }
 
     init { with(context) {
         header.addIconAction(2,R.drawable.ic_line_expand,"在应用中打开",actions.expand)
         body.addView(header,LinearLayout.LayoutParams(-1,dp(48)))
-        val sourceCard=MaterialCardView(this).apply { setCardBackgroundColor(SURFACE);strokeWidth=0;cardElevation=0f;radius=dp(12).toFloat() }
+        body.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
+        val sourceCard=assistantCard(12)
         sourceCard.addView(sourceContent);content.addView(sourceCard,LinearLayout.LayoutParams(-1,-2))
         content.addView(response);content.addView(status)
         body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
@@ -177,7 +196,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         controls.addView(entry,LinearLayout.LayoutParams(0,dp(32),1f))
         entry.addView(toggle,FrameLayout.LayoutParams(-2,-1,Gravity.START or Gravity.CENTER_VERTICAL))
         fun compact(resource: Int, description: String, action: () -> Unit) = iconButton(resource,description,action).apply {
-            iconSize=dp(14);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;setPadding(dp(9),0,dp(9),0)
+            iconSize=dp(17);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;setPadding(dp(7),0,dp(7),0)
         }.also { controls.addView(it,LinearLayout.LayoutParams(dp(32),dp(32))) }
         cancel=compact(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答",actions.cancel)
         retry=compact(android.R.drawable.ic_popup_sync,"重试原问题与证据",actions.retry)
@@ -188,8 +207,12 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         val composer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(9)) }
         val tools=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(4),0,0) }
         imageChoice=if(image)MaterialButton(this,null,com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text="沿用本次截图  ▾";isAllCaps=false;maxLines=1;ellipsize=TextUtils.TruncateAt.END;minWidth=0;minimumWidth=0
-            setPadding(dp(10),0,dp(10),0);setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge)
+            text="沿用本次截图";isAllCaps=false;maxLines=1;ellipsize=TextUtils.TruncateAt.END;minWidth=0;minimumWidth=0
+            setPadding(dp(12),0,dp(12),0);setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantAction)
+            icon=prototypeIcon(R.drawable.ic_line_chevron_down);iconSize=dp(14);iconPadding=dp(4)
+            iconGravity=MaterialButton.ICON_GRAVITY_END;iconTint=ColorStateList.valueOf(MUTED);gravity=Gravity.CENTER_VERTICAL or Gravity.START
+            setTextColor(INK);strokeColor=ColorStateList.valueOf(BORDER);strokeWidth=dp(1);cornerRadius=dp(18)
+            insetTop=dp(5);insetBottom=dp(5)
             accessible("图片上下文：沿用本次截图，点按选择");setOnClickListener(actions.imageChoice)
         }.also { tools.addView(it,LinearLayout.LayoutParams(0,dp(48),1f)) }
         else null.also { tools.addView(View(this),LinearLayout.LayoutParams(0,1,1f)) }
@@ -202,22 +225,35 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
 
     fun setComposer(expanded: Boolean, draft: Boolean = false) {
         composerSection.visibility=if(expanded)View.VISIBLE else View.GONE
-        toggle.icon=body.context.prototypeIcon(if(expanded)R.drawable.ic_line_chevron_down else R.drawable.ic_line_chevron_up)
-        toggle.text=if(expanded)"收起输入框" else if(draft)"继续编辑" else "继续提问"
-        toggle.accessible(if(expanded)"收起追问输入框" else "展开追问输入框")
+        toggle.setAssistantComposerState(expanded,draft)
     }
 }
 
+internal fun MaterialButton.applyAssistantSendShape() {
+    cornerRadius=context.dp(17)
+    insetLeft=context.dp(1);insetRight=context.dp(1);insetTop=context.dp(4);insetBottom=context.dp(4)
+}
+
+internal fun MaterialButton.setAssistantComposerState(expanded:Boolean,draft:Boolean=false) {
+    icon=context.prototypeIcon(if(expanded)R.drawable.ic_line_chevron_down else R.drawable.ic_line_chevron_up)
+    text=if(expanded)"收起输入框" else if(draft)"继续编辑" else "继续提问"
+    isActivated=draft;setTextColor(ACCENT);iconTint=ColorStateList.valueOf(ACCENT)
+    accessible(if(expanded)"收起追问输入框" else if(draft)"展开追问输入框，继续编辑草稿" else "展开追问输入框")
+}
+
+private fun Context.assistantCard(radiusDp:Int) = MaterialCardView(
+    ContextThemeWrapper(this,R.style.ThemeOverlay_AlwaySide_AssistantCard)
+).apply { setCardBackgroundColor(SURFACE);strokeWidth=0;cardElevation=0f;radius=dp(radiusDp).toFloat() }
+
 internal fun Context.assistantMessageRow(user: Boolean): ViewGroup {
     val message=label("",if(user)12f else 13f).apply {
-        setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
-        setTextIsSelectable(true);setLineSpacing(dp(3).toFloat(),1f)
+        setTextAppearance(if(user)R.style.TextAppearance_AlwaySide_AssistantQuestion else R.style.TextAppearance_AlwaySide_AssistantBody)
+        setTextColor(INK);includeFontPadding=false;setTextIsSelectable(true)
         movementMethod=android.text.method.LinkMovementMethod.getInstance()
         if(user) { setTextColor(ON_TONAL_SURFACE);setPadding(dp(12),dp(8),dp(12),dp(8)) }
     }
-    return (if(user)MaterialCardView(this).apply {
-        setCardBackgroundColor(TONAL_SURFACE);strokeWidth=0;cardElevation=0f;radius=dp(16).toFloat();addView(message)
-    } else LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;addView(message) }).apply {
+    return (if(user)assistantCard(15).apply { addView(message) }
+        else LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;addView(message) }).apply {
         tag=user;layoutParams=LinearLayout.LayoutParams(if(user)-2 else -1,-2).apply {
             gravity=if(user)Gravity.END else Gravity.START;if(user)marginStart=dp(24);bottomMargin=dp(12)
         }

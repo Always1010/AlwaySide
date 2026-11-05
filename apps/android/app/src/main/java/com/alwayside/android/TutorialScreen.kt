@@ -204,8 +204,9 @@ internal class TutorialScreen(
             }
             shared.send.isEnabled=flow.step==TutorialStep.SEND
             shared.send.applyOnboardingPrimaryStyle(iconOnly=true)
+            shared.send.applyAssistantSendShape()
             window=FrameLayout(this).apply { background=outlinedCard(BACKGROUND,15);clipToOutline=true;elevation=dp(8).toFloat();addView(shared.body,FrameLayout.LayoutParams(-1,-1)) }
-            scene.addView(window,FrameLayout.LayoutParams(dp(320),dp(340)))
+            scene.addView(window,FrameLayout.LayoutParams(dp(320),dp(assistantWindowHeightDp())))
             target=when(flow.step) {
                 TutorialStep.COMPOSER -> shared.toggle
                 TutorialStep.QUESTION -> shared.inputLayout
@@ -232,7 +233,7 @@ internal class TutorialScreen(
                     leftMargin=(width-this.width-dp(47)).coerceAtLeast(dp(8));topMargin=(ballY-dp(50)).coerceIn(dp(8),(height-this.height-dp(8)).coerceAtLeast(dp(8)))
                 }
             }
-            window?.layoutParams=FrameLayout.LayoutParams(minOf(dp(320),width-dp(24)),minOf(dp(340),height-dp(24))).apply {
+            window?.layoutParams=FrameLayout.LayoutParams(minOf(dp(320),width-dp(24)),minOf(dp(assistantWindowHeightDp()),height-dp(24))).apply {
                 leftMargin=(width-this.width)/2;topMargin=(height-this.height)/2
             }
             overlay?.invalidate()
