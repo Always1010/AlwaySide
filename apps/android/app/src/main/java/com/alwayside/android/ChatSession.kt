@@ -169,7 +169,11 @@ internal class ChatSession(
                 post {
                     if (epoch != token) return@post
                     busy = false; cancellation = null
-                    status = if (cancelled(e)) "已取消；可以手动重试" else safeError(e)
+                    val pending = retry ?: request
+                    val valid = !cancelled(e) || credentialsCurrent(pending.config,
+                        pending.audio == null || pending.config.audioOutput != "transcript", pending.audio != null && pending.transcript.isEmpty())
+                    if (!valid) retry = null
+                    status = if (!valid) "服务密钥已撤销或替换，请重新发送问题" else if (cancelled(e)) "已取消；可以手动重试" else safeError(e)
                     archive()
                     notifyChanged()
                 }

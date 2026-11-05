@@ -25,7 +25,7 @@ class ServiceCatalogTest {
         val legacy = ConnectionConfigCodec.migrateLegacy(AppConfig(baseUrl = "https://proxy.example/custom/v1",
             apiKey = "fixture-legacy-secret", model = "legacy-answer", transcriptionModel = "legacy-asr",
             maxOutputTokens = 2048, reasoning = "high", verbosity = "low", temperature = 0.4,
-            topP = 0.8, webSearch = true, transcriptionPrompt = "legacy prompt", credentialRevision = 5))
+            webSearch = true, transcriptionPrompt = "legacy prompt", credentialRevision = 5))
         val migrated = ServiceCatalog.migrate(legacy)
         val projected = migrated.attach(AppConfig())
         assertEquals(legacy.baseUrl, projected.baseUrl)
@@ -41,15 +41,16 @@ class ServiceCatalogTest {
     }
 
     @Test fun v2MigrationPreservesEachConnectionAndIndependentTranscriptionBinding() {
-        val first = ConnectionProfile("old-answer", "旧问答", ProviderKind.CUSTOM, ApiProtocol.RESPONSES,
+        val first = ConnectionProfile("old-answer", "问".repeat(80), ProviderKind.CUSTOM, ApiProtocol.RESPONSES,
             "https://old-answer.example/v1", "fixture-old-answer-key", "answer-model", "unused-asr",
-            1536, "high", "low", 0.3, 0.7, true, credentialRevision = 4)
+            1536, "high", "low", 0.3, null, true, credentialRevision = 4)
         val second = ConnectionProfile("old-asr", "旧转写", ProviderKind.QWEN, ApiProtocol.CHAT_COMPLETIONS,
             "https://old-asr.example/v1", "fixture-old-asr-key", "second-answer", "independent-asr",
-            512, "", "", 0.6, 0.9, false, credentialRevision = 9)
+            512, "", "", null, 0.9, false, credentialRevision = 9)
         val legacy = first.applyTo(AppConfig()).copy(connections = listOf(first, second),
             transcriptionConnectionId = second.id, transcriptionPrompt = "independent prompt")
         val migrated = ServiceCatalog.migrate(legacy)
+        migrated.validate()
         listOf(first, second).forEach { original ->
             val projected = migrated.project(AppConfig(), original.id)
             assertEquals(original.apiKey, projected.apiKey)
@@ -167,5 +168,25 @@ class ServiceCatalogTest {
         }
         assertFalse(ProviderConnections.credentialsCurrent(original,
             switched.removeEndpoint("shared").attach(AppConfig()), answer = true, audio = true))
+    }
+
+    @Test fun revokingOneKeyCancelsOnlyItsInFlightRequestsAndSwitchingDoesNotCancel() {
+        val active = catalog.activate(answer.id).activate(asr.id)
+        val qaToken = RequestCancellation()
+        val asrToken = RequestCancellation()
+        ActiveServiceRequests.revoke(active)
+        try {
+            ActiveServiceRequests.track(active.project(AppConfig(), answer.id), qaToken)
+            ActiveServiceRequests.track(active.project(AppConfig(), asr.id), asrToken)
+            ActiveServiceRequests.revoke(active.activate("other-answer").activate("other-asr"))
+            qaToken.throwIfCancelled()
+            asrToken.throwIfCancelled()
+            ActiveServiceRequests.revoke(active.removeCredential("asr-key"))
+            qaToken.throwIfCancelled()
+            assertThrows(java.util.concurrent.CancellationException::class.java) { asrToken.throwIfCancelled() }
+        } finally {
+            ActiveServiceRequests.release(qaToken)
+            ActiveServiceRequests.release(asrToken)
+        }
     }
 }

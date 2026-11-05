@@ -71,6 +71,7 @@ internal class TutorialScreen(
             val allDone=flow.completedLessons.size==TutorialLesson.entries.size
             done.addView(label(if(allDone)"新手引导已完成" else "本项引导已完成",20f))
             done.addView(label("已完成 ${flow.completedLessons.size}/4 项。刚才的画面和回答全部为本地示例，没有调用 AI 服务。",14f,true).apply { setPadding(0,dp(12),0,dp(12)) })
+            done.addView(label("实际使用前，先添加服务接入点与命名密钥，再建立并启用图文问答配置。录音另需音频转写配置；新增和保存都不会自动启用。",14f,true).apply { setPadding(0,0,0,dp(12)) })
             done.guideAction("查看其他引导",!allDone) { act(TutorialAction.LESSONS) }.apply { if(allDone)applySecondarySurfaceStyle() }
             done.guideAction("准备实际使用",allDone,onPrepare).apply { if(!allDone)applySecondarySurfaceStyle() }
             return@with

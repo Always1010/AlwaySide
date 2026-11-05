@@ -76,6 +76,7 @@ internal data class ServiceCatalog(
         if (credential.value.isBlank()) return "请先填写密钥"
         if (credential.providerId != endpoint.providerId || endpoint.id !in credential.endpointIds) return "密钥未授权用于此接入点"
         if (profile.model.isBlank()) return "请填写模型 ID"
+        if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}").matches(profile.model)) return "请填写有效的模型 ID"
         if (profile.purpose == ModelPurpose.TRANSCRIPTION && endpoint.transcriptionApi != FileTranscriptionApi.OPENAI_COMPATIBLE)
             return "此接入点未配置兼容文件转写接口"
         if (profile.purpose == ModelPurpose.ANSWER) {

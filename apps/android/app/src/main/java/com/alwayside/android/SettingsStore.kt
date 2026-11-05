@@ -99,11 +99,14 @@ internal class SettingsStore(context: Context) {
 
     fun save(config: AppConfig) = synchronized(lock) {
         validate(config)
-        val catalog = captureCompatibility(config)
+        val catalog = config.serviceCatalog ?: ServiceCatalog.migrate(config)
         saveState(config, catalog)
     }
 
-    fun saveCatalog(catalog: ServiceCatalog) = synchronized(lock) { saveState(load(), catalog) }
+    fun saveCatalog(catalog: ServiceCatalog) = synchronized(lock) {
+        val current = load()
+        if (current.serviceCatalog != catalog) saveState(current, catalog)
+    }
 
     /** Editors compare against the latest persisted snapshot; stale callbacks never overwrite newer changes. */
     fun updateCatalog(expected: ServiceCatalog, transform: (ServiceCatalog) -> ServiceCatalog) = synchronized(lock) {
@@ -118,28 +121,18 @@ internal class SettingsStore(context: Context) {
         return runCatching { decrypt(value) to false }.getOrElse { "" to true }
     }
 
-    private fun captureCompatibility(config: AppConfig): ServiceCatalog {
-        val catalog = config.serviceCatalog ?: return ServiceCatalog.migrate(config)
-        val active = catalog.profiles.firstOrNull { it.id == catalog.activeAnswerId } ?: return catalog
-        val endpoint = catalog.endpoints.firstOrNull { it.id == active.endpointId }
-        val key = catalog.credentials.firstOrNull { it.id == active.credentialId }
-        return catalog.copy(
-            profiles = catalog.profiles.map { if (it.id == active.id) it.copy(model = config.model,
-                options = GenerationOptions.capture(config)) else it },
-            endpoints = catalog.endpoints.map { if (it.id == endpoint?.id) it.copy(baseUrl = config.baseUrl,
-                answerProtocol = config.apiProtocol, apiVersion = config.apiVersion, workspaceId = config.workspaceId) else it },
-            credentials = catalog.credentials.map { if (it.id == key?.id && !key.unreadable)
-                it.copy(value = config.apiKey, revision = config.credentialRevision) else it })
-    }
-
     private fun saveState(config: AppConfig, catalog: ServiceCatalog) {
         catalog.validate()
         // Stage every ciphertext first. Preserve an unreadable slot until explicitly replaced/deleted.
+        val sourceSchema = JSONObject(prefs.getString("config", "{}") ?: "{}").optInt("schemaVersion", 1)
         val encrypted = catalog.credentials.associate { credential ->
-            val existingSlot = "credential.${credential.id}"
-            val previous = prefs.getString(existingSlot, null)
-                ?: if (credential.id.startsWith("key-")) prefs.getString("credential.${credential.id.removePrefix("key-")}", null)
-                    ?: if (credential.id == "key-legacy") prefs.getString("credential", null) else null else null
+            // Select by source schema rather than guessing: a v2 connection ID can itself start with key-.
+            val previousSlot = when (sourceSchema) {
+                3 -> "credential.${credential.id}"
+                2 -> if (credential.id.startsWith("key-")) "credential.${credential.id.removePrefix("key-")}" else null
+                else -> if (credential.id == "key-legacy") "credential" else null
+            }
+            val previous = previousSlot?.let { prefs.getString(it, null) }
             credential.id to if (credential.unreadable) previous.also { check(it != null) { "无法保留损坏的密钥，请先删除此密钥" } }
                 else credential.value.takeIf(String::isNotBlank)?.let(::encrypt)
         }
