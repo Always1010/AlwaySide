@@ -24,6 +24,20 @@
 
 macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。
 
+## 一键打包并上传网盘（Windows）
+
+在仓库根目录运行，只需传入版本号：
+
+```powershell
+.\package-apk.bat 1.1.2
+```
+
+脚本自动计算与 GitHub Release 相同的 `versionCode`，离线构建 Release APK，使用正式发布证书和原签名轮换链签名，然后上传到 `ALWAYSIDE_APK_SHARE\`。产物名称包含版本号和时间，运行成功后打印完整网盘路径；本地 APK 与签名、交付记录保存在被 Git 忽略的 `.local/android-build/`。
+
+当前入口复用本机 Python、`JAVA_HOME`、`.local/android-sdk/` 和 `.local/gradle-cache/`；正式签名文件使用 `.local/release-signing/` 下的 `alwayside-production.p12`、`production-credentials.json` 和 `alwayside.lineage`。这些工具、缓存和签名材料需要事先存在，脚本不安装依赖或修改系统环境配置，密钥与密码不进入版本控制或网盘。
+
+打包流程只额外检查正式证书和 V3 签名，避免误发测试签名包；不额外运行单元测试或完整 Lint，Release 构建本身保留 Gradle 默认的 `lintVitalRelease`。构建或签名失败即停止，不上传旧包。
+
 ## GitHub Release 自动发包
 
 [Android Release 工作流](../../.github/workflows/release.yml) 在向 GitHub 推送 `v` 开头的 tag 时运行，也可在 Actions 页面通过 **Run workflow** 填写已有的 `release_tag` 手动构建；普通分支推送不会发包。发布 tag 必须采用 `v主版本.次版本.修订号`，例如 `v0.6.1`；每段为 0–999 的整数，不允许前导零、预发布后缀或 `v0.0.0`。不符合格式时工作流会报错并停止。
