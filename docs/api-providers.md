@@ -21,11 +21,11 @@
 | Claude | Claude Messages | `https://api.anthropic.com/v1` | `POST /messages` |
 | 自定义兼容服务 | Responses | `https://api.openai.com/v1`，使用前修改 | 按明确选择的协议拼接 |
 
-Qwen是模型系列，本应用通过阿里云百炼（Model Studio / DashScope）接入。请使用阿里云百炼对应地域的 API 地址和 API Key。 `ProviderKind.QWEN` 的专有参数适配针对千问模型，不代表支持阿里云百炼平台所有模型的专有能力。
+服务商名称统一使用 Qwen。请使用所选 Qwen 接入点对应地域的 API 地址和 API Key。`ProviderKind.QWEN` 的专有参数适配仅针对 Qwen 模型，不代表接入点上其他模型的专有能力均受支持。
 
-基础地址包含版本或兼容路径，**不包含回答接口路径**。例如 Claude 填到 `/v1`，阿里云百炼填到 `/compatible-mode/v1`；DeepSeek 默认直接使用域名。自建代理可带路径前缀。只能使用 HTTPS，禁止用户名、密码、查询参数、片段、路径回退、编码路径混淆和无效端口。客户端不跟随重定向，也不把密钥放在查询字符串。
+基础地址包含版本或兼容路径，**不包含回答接口路径**。例如 Claude 填到 `/v1`，Qwen 填到 `/compatible-mode/v1`；DeepSeek 默认直接使用域名。自建代理可带路径前缀。只能使用 HTTPS，禁止用户名、密码、查询参数、片段、路径回退、编码路径混淆和无效端口。客户端不跟随重定向，也不把密钥放在查询字符串。
 
-当前 Chat Completions 适配器允许 OpenAI、千问、Gemini 和自定义兼容服务；DeepSeek、Claude 接入点使用表中默认协议。Gemini 默认仍为 GenerateContent，可在高级配置中明确选择 Chat 兼容模式并填写兼容基础地址。供应商具有其他兼容接口，并不代表本客户端已经实现其全部扩展。自定义服务的参数、视觉和搜索能力由服务实际实现决定，获取模型列表成功也不能证明这些能力。
+当前 Chat Completions 适配器允许 OpenAI、Qwen、Gemini 和自定义兼容服务；DeepSeek、Claude 接入点使用表中默认协议。Gemini 默认仍为 GenerateContent，可在高级配置中明确选择 Chat 兼容模式并填写兼容基础地址。供应商具有其他兼容接口，并不代表本客户端已经实现其全部扩展。自定义服务的参数、视觉和搜索能力由服务实际实现决定，获取模型列表成功也不能证明这些能力。
 
 ### 请求头、版本与工作区
 
@@ -35,9 +35,9 @@ Qwen是模型系列，本应用通过阿里云百炼（Model Studio / DashScope�
 | Gemini 原生 | `x-goog-api-key: YOUR_API_KEY` |
 | Claude Messages | `x-api-key: YOUR_API_KEY`；`anthropic-version: 2026-10-21`；填写工作区时加 `anthropic-workspace-id: YOUR_WORKSPACE_ID` |
 
-回答使用 `Content-Type: application/json`、`Accept: text/event-stream`。Claude API 版本默认 `2026-10-21`；版本字段按 `YYYY-MM-DD` 校验。工作区字段只用于 Claude 请求头，不能用它替代阿里云百炼域名中的工作区。
+回答使用 `Content-Type: application/json`、`Accept: text/event-stream`。Claude API 版本默认 `2026-10-21`；版本字段按 `YYYY-MM-DD` 校验。工作区字段只用于 Claude 请求头，不能用它替代Qwen域名中的工作区。
 
-阿里云百炼的 Key、模型列表和接入点具有地域边界。新接入建议按控制台选择工作区专属域名，例如北京 `https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`、新加坡 `https://YOUR_WORKSPACE_ID.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`；其他地域按官方表填写。仓库保留既有 DashScope 域名作为默认值，用户可直接编辑基础地址。跨地域复制 Key 或模型 ID 不能保证可用；更改域名后应重新填写该接入点的密钥。[阿里云百炼地域与接入点](https://www.alibabacloud.com/help/en/model-studio/regions)、[Chat 接口与工作区域名](https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions)
+Qwen 的 Key、模型列表和接入点具有地域边界。新接入建议按控制台选择工作区专属域名，例如北京 `https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`、新加坡 `https://YOUR_WORKSPACE_ID.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`；其他地域按官方表填写。仓库保留既有默认域名，用户可直接编辑基础地址。跨地域复制 Key 或模型 ID 不能保证可用；更改域名后应重新填写该接入点的密钥。[Qwen 地域与接入点](https://www.alibabacloud.com/help/en/model-studio/regions)、[Qwen Chat 接口与工作区域名](https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions)
 
 ## 2. 四种回答请求格式
 
@@ -63,7 +63,7 @@ Qwen是模型系列，本应用通过阿里云百炼（Model Studio / DashScope�
 
 显式设置时再加 `reasoning: {"effort":"low"}`、`text: {"verbosity":"low"}`、`temperature` 或 `top_p`；搜索为 `tools: [{"type":"web_search"}]`，仍需模型支持。DeepSeek 使用相同请求框架，但兼容能力与 OpenAI 不完全相同。[OpenAI 文字生成](https://developers.openai.com/api/docs/guides/text?api-mode=responses)、[DeepSeek Responses 指南](https://api-docs.deepseek.com/guides/responses_api/)
 
-### Chat Completions：千问、Gemini 高级兼容模式与兼容服务
+### Chat Completions：Qwen、Gemini 高级兼容模式与兼容服务
 
 `POST {baseUrl}/chat/completions`。纯文字当前消息的 `content` 直接是字符串；带图时使用内容数组。
 
@@ -82,7 +82,7 @@ Qwen是模型系列，本应用通过阿里云百炼（Model Studio / DashScope�
 }
 ```
 
-OpenAI／自定义连接显式参数使用 `max_completion_tokens`、`reasoning_effort`、`verbosity`，搜索为 `web_search_options: {}`。这些名称不能代表任意兼容服务都支持。千问有独立字段映射和本地限制，见参数章节。[OpenAI Chat API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[千问 Chat API](https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions)
+OpenAI／自定义连接显式参数使用 `max_completion_tokens`、`reasoning_effort`、`verbosity`，搜索为 `web_search_options: {}`。这些名称不能代表任意兼容服务都支持。Qwen有独立字段映射和本地限制，见参数章节。[OpenAI Chat API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[Qwen Chat API](https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions)
 
 Gemini 的 Chat 高级兼容模式使用 `https://generativelanguage.googleapis.com/v1beta/openai` 基础地址和 Bearer 鉴权；输出上限为 `max_tokens`，reasoning 为兼容接口的 `reasoning_effort`。此模式明确拒绝搜索和 verbosity，要求搜索时选择原生协议。兼容接口的 effort 映射由 Google 定义，与下文应用自定的原生 2.5 budget 表分别维护。[Gemini OpenAI 兼容接口](https://ai.google.dev/gemini-api/docs/openai)
 
@@ -198,9 +198,9 @@ data: {"type":"message_stop"}
 
 Responses 使用 URL citation annotations；Chat Completions 使用兼容的 `delta.annotations[].url_citation`；Gemini 使用候选 `groundingMetadata.groundingChunks[].web`，并兼容 `citationMetadata.citationSources`；Claude 使用 `web_search_result_location` 引用。
 
-客户端将可用来源追加成 Markdown 来源列表，最多 10 条、按 URL 去重，只允许无内嵌账号的 HTTP(S) URL，并清理标题中的 Markdown 控制字符。当前呈现不做按文字区间插入引用。千问 Chat 明确不提供结构化搜索来源，客户端不会假造来源列表或把普通模型正文中的链接当作结构化证明；联网开关只表示允许搜索，不证明每轮都触发搜索。[阿里云百炼搜索协议差异](https://help.aliyun.com/en/model-studio/web-search)
+客户端将可用来源追加成 Markdown 来源列表，最多 10 条、按 URL 去重，只允许无内嵌账号的 HTTP(S) URL，并清理标题中的 Markdown 控制字符。当前呈现不做按文字区间插入引用。Qwen Chat 明确不提供结构化搜索来源，客户端不会假造来源列表或把普通模型正文中的链接当作结构化证明；联网开关只表示允许搜索，不证明每轮都触发搜索。[Qwen搜索协议差异](https://help.aliyun.com/en/model-studio/web-search)
 
-`AnswerDecoder.searchUsed`／`AiProvider.lastSearchUsed` 是来源元数据驱动的诊断。以 Gemini 为例，只在存在非空 `groundingMetadata.webSearchQueries` 或有效 web grounding 来源时标记；正文声称“已搜索”不构成证据。千问 Chat 无法从当前返回格式确认实际执行搜索，false 不能解释成已证明“没有搜索”。诊断值在成功完成请求后读取，也不能代替供应商计费／使用量记录。
+`AnswerDecoder.searchUsed`／`AiProvider.lastSearchUsed` 是来源元数据驱动的诊断。以 Gemini 为例，只在存在非空 `groundingMetadata.webSearchQueries` 或有效 web grounding 来源时标记；正文声称“已搜索”不构成证据。Qwen Chat 无法从当前返回格式确认实际执行搜索，false 不能解释成已证明“没有搜索”。诊断值在成功完成请求后读取，也不能代替供应商计费／使用量记录。
 
 ### Gemini 搜索建议片段
 
@@ -214,7 +214,7 @@ Responses 使用 URL citation annotations；Chat Completions 使用兼容的 `de
 
 新建图文问答卡片默认可选生成参数为空；空值表示不发送，供应商自行选择默认。参数值按协议和模型适配，未知时留空；旧版服务参数不自动迁移。图文问答配置先校验：输出上限为空／0 或 16–131072；temperature 为有限数 0–2；top_p 为有限数 0–1；两种采样参数只能设置一种。供应商及模型还可能有更窄范围。
 
-| 应用字段 | Responses | 普通 Chat | 千问 Chat | Gemini | Claude |
+| 应用字段 | Responses | 普通 Chat | Qwen Chat | Gemini | Claude |
 | --- | --- | --- | --- | --- | --- |
 | maxOutputTokens | `max_output_tokens` | `max_completion_tokens` | 依模型选 `max_tokens` / `max_completion_tokens` | `generationConfig.maxOutputTokens` | `max_tokens`，空时 8192 |
 | reasoning | `reasoning.effort` | `reasoning_effort` | 支持模型的 `reasoning_effort`，部分模型仅支持 none 映射 | `thinkingBudget` / `thinkingLevel` | `output_config.effort` 与 `thinking` |
@@ -234,7 +234,7 @@ Responses 使用 URL citation annotations；Chat Completions 使用兼容的 `de
 
 Qwen3.8 的 Max、Flash、2.4t-a95b、27b、Omni-Flash 家族使用 `reasoning_effort`；其他已识别的混合思考家族仅在显式 none 时发送 `enable_thinking: false`。没有文档支持的其他推理程度直接报错，不把 low／high 擅自转换成开关。thinking／instruct／coder／character 等特殊模型不套用混合开关。
 
-搜索限定在适配器列出的 `qwen-max/plus/flash`、Qwen3.8、Qwen3.7、Qwen3.6、Qwen3.5 具体家族；未识别模型开启搜索会失败。Omni 家族中适配器识别的 Qwen3.8 Omni-Flash、Qwen3.5 Omni-Plus／Flash 会附带 `search_options: {"search_strategy":"agent"}`。当前不暴露所有阿里云百炼搜索策略，也不请求 DashScope 原生 `search_info`。具体模型名单以 `ChatCompletionsAdapter.qwenOptions` 为准。
+搜索限定在适配器列出的 `qwen-max/plus/flash`、Qwen3.8、Qwen3.7、Qwen3.6、Qwen3.5 具体家族；未识别模型开启搜索会失败。Omni 家族中适配器识别的 Qwen3.8 Omni-Flash、Qwen3.5 Omni-Plus／Flash 会附带 `search_options: {"search_strategy":"agent"}`。当前不暴露所有Qwen搜索策略，也不请求 Qwen 原生 `search_info`。具体模型名单以 `ChatCompletionsAdapter.qwenOptions` 为准。
 
 ### Gemini
 
