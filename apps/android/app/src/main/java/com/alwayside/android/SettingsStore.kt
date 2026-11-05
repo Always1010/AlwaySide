@@ -15,11 +15,13 @@ import javax.crypto.spec.GCMParameterSpec
 internal class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("assistant_settings", Context.MODE_PRIVATE)
 
-    /** Old service schemas intentionally require re-entry; history and unrelated preferences stay intact. */
+    /** Presence probing must not prevent startup when the saved JSON needs repair. */
     fun hasSavedConfiguration(): Boolean = synchronized(lock) {
-        val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
-        data.optInt("schemaVersion", 1) == 4 &&
-            (data.optJSONObject("services")?.optJSONArray("credentials")?.length() ?: 0) > 0
+        runCatching {
+            val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
+            data.optInt("schemaVersion", 1) == 4 &&
+                (data.optJSONObject("services")?.optJSONArray("credentials")?.length() ?: 0) > 0
+        }.getOrDefault(false)
     }
 
     fun requiresServiceSetup(): Boolean = synchronized(lock) {
