@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InteractionTest {
+    @Test fun audioArchivingIsOptionalAndIndependentOfImageArchiving() {
+        val defaults = InteractionConfig()
+        assertFalse(defaults.saveHistoryAudio)
+        assertTrue(defaults.saveHistoryImages)
+        val enabled = defaults.copy(saveHistoryAudio = true, saveHistoryImages = false)
+        assertTrue(enabled.saveHistoryAudio)
+        assertFalse(enabled.saveHistoryImages)
+        assertTrue(InteractionDefaults.upgrade(enabled).saveHistoryAudio)
+    }
+
     @Test fun multiTapBurstEmitsOnlyItsFinalGesture() {
         val taps = TapSequence()
         assertEquals(1, taps.tap(1000))

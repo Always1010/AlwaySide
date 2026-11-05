@@ -62,6 +62,7 @@ internal class ChatScreen(
     private var restoredStatus = ""
     private var handoff: HandedOffConversation? = null
     private var openedStoredRecord = false
+    private var playback: AudioPlaybackDialog? = null
     internal data class RetainedConversation(
         val session: ChatSession, val image: Bitmap?, val handoff: HandedOffConversation?,
         val title: String, val status: String, val openedStoredRecord: Boolean,
@@ -146,12 +147,13 @@ internal class ChatScreen(
                     defaultWebSearch = runCatching { SettingsStore(this@ChatScreen).load().webSearch }.getOrDefault(defaultWebSearch)
                     renderWebSearch()
                 }
-                override fun onViewDetachedFromWindow(view: View) = Unit
+                override fun onViewDetachedFromWindow(view: View) { playback?.dismiss(); playback = null }
             })
         }
         toolbar = materialToolbar("对话", onBack).apply {
             addIconAction(1, R.drawable.ic_copy, "复制整段会话") { copyConversation() }
             addIconAction(2, android.R.drawable.ic_menu_manage, "设置") { onSettings() }
+            addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.isVisible = false
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(64)))
         statusView = label("", 11f, true).apply { setPadding(dp(22), dp(8), dp(22), 0) }
@@ -229,6 +231,7 @@ internal class ChatScreen(
     private fun render() {
         conversationTitle = session.title
         toolbar.title = conversationTitle
+        toolbar.menu.findItem(3)?.isVisible = availableAudio() != null
         val hasPending = session.question.isNotBlank()
         statusView.text = if (restoredStatus.isNotBlank()) "上次状态：$restoredStatus" else session.status
         statusView.visibility = if (statusView.text.isNullOrBlank()) View.GONE else View.VISIBLE
@@ -318,6 +321,7 @@ internal class ChatScreen(
             session.transcript.isNotBlank() -> "追问复用原始转写文字，不重新上传音频"
             session.sourceText.isNotBlank() -> "追问复用本段选中文字"
             handoff?.audio != null -> if (session.busy) "正在处理已采集音频" else "本段音频尚未转写，发送问题后开始处理"
+            availableAudio() != null -> "原始音频已保存，可点击上方播放图标回听；发送问题后开始转写"
             session.kind == "audio" -> "原始音频未保留；当前只能使用已保存的文字消息"
             else -> "文字上下文"
         }
@@ -359,6 +363,7 @@ internal class ChatScreen(
             SettingsStore.validate(config)
             val attachment = image?.takeIf { reuse.isChecked }
             val pendingAudio = handoff?.audio?.takeIf { session.transcript.isBlank() }
+            val pendingAudioFile = if (session.transcript.isBlank()) availableAudio() else null
             if (pendingAudio != null) {
                 require(pendingAudio.error == null) { pendingAudio.error ?: "音频采集失败，请重新录制" }
                 require(pendingAudio.file.isFile && pendingAudio.file.length() > 44) { "原始音频已不可用，请重新录制" }
@@ -366,13 +371,14 @@ internal class ChatScreen(
             }
             val label = when {
                 pendingAudio != null -> "内部播放音频 · ${"%.1f".format(pendingAudio.seconds)} 秒"
+                pendingAudioFile != null -> "已保存的内部播放音频"
                 attachment != null -> if (image === originalImage) "沿用会话原图" else "沿用当前追问图片"
                 session.transcript.isNotBlank() -> "沿用音频转写文字"
                 session.sourceText.isNotBlank() -> "系统选中文字"
                 else -> "仅文字"
             }
             restoredStatus = ""
-            session.submit(config, text, attachment, label, pendingAudio?.file)
+            session.submit(config, text, attachment, label, pendingAudioFile)
             composer.text?.clear()
         } catch (error: Exception) {
             toast(error.message?.take(180) ?: "发送失败，请检查 API 设置")
@@ -385,6 +391,17 @@ internal class ChatScreen(
             .setView(ScrollView(this).apply {
                 addView(column().apply { addView(label(session.transcript).apply { setTextIsSelectable(true) }) })
             }).setPositiveButton("返回对话", null).show()
+    }
+
+    private fun availableAudio(): java.io.File? =
+        handoff?.audio?.file?.takeIf { it.isFile && it.length() > 44 }
+            ?: if (::session.isInitialized && session.kind == "audio")
+                runCatching { ConversationMediaStore(this).loadAudio(session.conversationId) }.getOrNull() else null
+
+    private fun playAudio() {
+        val file = availableAudio() ?: run { toast("原始音频未保留或已被删除"); return }
+        playback?.dismiss()
+        playback = AudioPlaybackDialog(this, file).also { it.show() }
     }
 
     private fun showSourceText() {
@@ -439,6 +456,7 @@ internal class ChatScreen(
     fun dispose(retaining: Boolean = false) {
         if (closing) return
         closing = true
+        playback?.dismiss(); playback = null
         if (!retaining || !ready) releaseConversation()
     }
 

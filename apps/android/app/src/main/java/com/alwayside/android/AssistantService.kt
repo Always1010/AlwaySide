@@ -694,6 +694,31 @@ class AssistantService : Service() {
     private fun archivePrepared(node:FloatingConversation){
         runCatching{HistoryStore(this).save(node.chat.snapshot().copy(title=when(node.kind){"photo"->"截图待提问";"audio"->"音频待提问";else->node.chat.sourceText.take(60)},evidence=when(node.kind){"photo"->imageDescription(node);"audio"->"内部录音，等待提问";else->"选中文字"},status="等待提问"))}.onFailure{toast("本机历史保存失败，请检查存储空间")}
         persistImage(node)
+        persistAudio(node)
+    }
+    private fun persistAudio(node:FloatingConversation){
+        val clip=node.clip?:return
+        if(!preferences.load().saveHistoryAudio)return
+        val id=node.chat.conversationId
+        // Open before queuing: closing/replacing the overlay may unlink its temporary WAV.
+        val input=runCatching{clip.file.inputStream()}.getOrElse{toast("音频未保存，请检查本机存储");return}
+        try{
+            val length=input.channel.size()
+            mediaWorker.execute{
+                input.use{
+                    runCatching{
+                        val history=HistoryStore(this);val media=ConversationMediaStore(this)
+                        if(history.find(id)!=null){
+                            media.saveAudio(id,it,length)
+                            // A deletion may have completed while the recording was being copied.
+                            if(history.find(id)==null)media.deleteAudio(id)
+                        }
+                    }.onFailure{error->main.post{if(alive)toast("音频未保存：${error.message?:"存储失败"}")}}
+                }
+            }
+        }catch(_:Exception){
+            runCatching{input.close()};toast("音频未保存，请检查本机存储")
+        }
     }
     private fun persistImage(node:FloatingConversation){
         val bitmap=node.frame?.bitmap?:return

@@ -8,9 +8,15 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 
-/** Optional screenshot archive, isolated from credentials, JSON and Android backup. */
+/** Optional media archive, isolated from credentials, JSON and Android backup. */
 internal class ConversationMediaStore(context: Context) {
     private val directory = File(context.noBackupFilesDir, "conversation_images")
+    private val audio = ConversationAudioArchive(File(context.noBackupFilesDir, "conversation_audio"))
+
+    fun saveAudio(id: String, input: java.io.InputStream, length: Long) = audio.save(id, input, length)
+    fun loadAudio(id: String): File? = audio.load(id)
+    fun deleteAudio(id: String) = audio.delete(id)
+    fun delete(id: String) { deleteImage(id); deleteAudio(id) }
 
     fun saveImages(id: String, original: Bitmap, current: Bitmap) = synchronized(lock) {
         val first = imageFile(id, original = true)
@@ -60,6 +66,7 @@ internal class ConversationMediaStore(context: Context) {
 
     fun clear() = synchronized(lock) {
         directory.listFiles()?.forEach { check(it.delete()) { "图片删除失败" } }
+        audio.clear()
     }
 
     private fun imageFile(id: String, original: Boolean = false): File {

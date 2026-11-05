@@ -95,12 +95,12 @@ internal class HistoryListScreen(
         val deletion = HistoryDeletion(selection.snapshot())
         if (deletion.ids.isEmpty()) return
         MaterialAlertDialogBuilder(activity).setTitle("删除选中的 ${deletion.ids.size} 段会话？")
-            .setMessage("将删除这些会话的文字和已保存图片，无法撤销。对应悬浮会话也会停止。")
+            .setMessage("将删除这些会话的文字、已保存图片和音频，无法撤销。对应悬浮会话也会停止。")
             .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
                 val failedIds = deletion.execute { id ->
                     ActiveConversationBridge.detach(id)
                     ActiveConversationBridge.takeSession(id)?.dispose?.invoke()
-                    store.delete(id); media.deleteImage(id)
+                    store.delete(id)
                 }
                 refresh()
                 if (failedIds.isNotEmpty()) failed()
@@ -109,7 +109,7 @@ internal class HistoryListScreen(
 
     private fun confirmCorruptCleanup() {
         MaterialAlertDialogBuilder(activity).setTitle("清空无法读取的本机记录？")
-            .setMessage("将删除全部本机会话文字和已保存图片，无法撤销。")
+            .setMessage("将删除全部本机会话文字、已保存图片和音频，无法撤销。")
             .setNegativeButton("取消", null).setPositiveButton("清空") { _, _ ->
                 runCatching { store.clear(); media.clear() }
                     .onSuccess { refresh() }.onFailure { failed() }

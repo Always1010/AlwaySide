@@ -22,10 +22,10 @@ internal class HistoryStore(context: Context) {
         val next = (old.filterNot { it.id == value.id } + bounded(value))
             .sortedByDescending { it.updatedAt }.take(MAX_CONVERSATIONS)
         write(next)
-        old.filter { previous -> next.none { it.id == previous.id } }.forEach { media.deleteImage(it.id) }
+        old.filter { previous -> next.none { it.id == previous.id } }.forEach { media.delete(it.id) }
     }
 
-    fun delete(id: String) = synchronized(lock) { write(read().filterNot { it.id == id }); media.deleteImage(id) }
+    fun delete(id: String) = synchronized(lock) { write(read().filterNot { it.id == id }); media.delete(id) }
     fun clear() = synchronized(lock) {
         file.delete()
         check(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()

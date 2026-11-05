@@ -41,7 +41,7 @@ internal class SettingsScreen(
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
         GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "追问输入区、位置、尺寸、固定与自动提问", android.R.drawable.ic_menu_crop),
-        MEDIA("历史与媒体", "录音时长、截图保留策略与证据说明", android.R.drawable.ic_menu_recent_history),
+        MEDIA("历史与媒体", "录音时长、截图与音频保留策略", android.R.drawable.ic_menu_recent_history),
         HELP("帮助与引导", "新手引导与使用准备", android.R.drawable.ic_menu_help),
     }
 
@@ -371,8 +371,12 @@ internal class SettingsScreen(
         check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
         note("默认开启。保留会话首张原图和当前追问图片，从历史打开后可查看并继续使用。图片仅保存在应用私有目录，删除会话时一并删除。")
         note("仅影响新写入的历史，不补存旧截图；旧记录能否显示原图，取决于当时是否保存。")
-        section("音频与对话记录")
-        note("不长期保存原始音频，只保存转写、问题和回答。追问复用转写文字，不重复上传音频。")
+        section("历史音频")
+        check("saveHistoryAudio", "随历史长期保留音频", config.saveHistoryAudio)
+        note("默认关闭。开启后，新完成的录音随会话保存在本机，可从历史对话中回听；不需要先完成转写。取消录音仍直接丢弃。")
+        note("仅影响之后完成的录音，不补存旧录音；关闭不会删除已保存音频。删除会话时一并删除音频。音频仅保存在应用私有目录，总容量上限 512 MiB。")
+        section("对话记录")
+        note("转写、问题和回答随会话保存。追问复用转写文字，不重复上传音频。")
         note("追问保存在原会话内。待发送、处理中、取消或失败的会话，也可从主页对话列表找到。")
     }
 
@@ -490,6 +494,7 @@ internal class SettingsScreen(
                         "autoAskAudio" -> it.copy(autoAskAudio = value)
                         "autoAskText" -> it.copy(autoAskText = value)
                         "saveHistoryImages" -> it.copy(saveHistoryImages = value)
+                        "saveHistoryAudio" -> it.copy(saveHistoryAudio = value)
                         else -> error("Unknown toggle")
                     } }
                 }
