@@ -10,7 +10,8 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:label="AlwaySide"
-        android:icon="@drawable/ic_assistant"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/AppTheme">
