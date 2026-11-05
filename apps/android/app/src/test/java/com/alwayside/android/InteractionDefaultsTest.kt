@@ -5,7 +5,8 @@ import org.junit.Test
 
 class InteractionDefaultsTest {
     @Test fun upgradesOldIdleDefaultWithoutChangingAppearanceOrRecordingControls() {
-        val old = InteractionConfig(singleAction=AssistantActions.SCREEN,longAction=AssistantActions.MENU,
+        val old = InteractionConfig(singleAction=AssistantActions.SCREEN,tripleAction=AssistantActions.NONE,
+            longAction=AssistantActions.MENU,
             ballSize=37,ballOpacity=80,saveHistoryImages=true,recordingLongAction=AssistantActions.CANCEL_AUDIO,
             collapseFollowUpByDefault=false)
         val updated = InteractionDefaults.upgrade(old)
@@ -26,6 +27,7 @@ class InteractionDefaultsTest {
         val defaults=InteractionConfig()
         assertEquals(defaults,InteractionDefaults.upgrade(defaults))
         assertEquals(AssistantActions.MENU,defaults.action(1,false))
+        assertEquals(AssistantActions.CROP,defaults.action(3,false))
         assertEquals(AssistantActions.SCREEN,defaults.action(4,false))
         assertEquals(AssistantActions.MENU,defaults.action(1,true))
         assertEquals(AssistantActions.SCREEN,defaults.action(4,true))

@@ -24,7 +24,7 @@ internal data class InteractionConfig(
     val ballColor: Int = 0xFFCC5C74.toInt(),
     val singleAction: String = AssistantActions.MENU,
     val doubleAction: String = AssistantActions.AUDIO,
-    val tripleAction: String = AssistantActions.NONE,
+    val tripleAction: String = AssistantActions.CROP,
     val longAction: String = AssistantActions.SCREEN,
     val recordingSingleAction: String = AssistantActions.MENU,
     val recordingDoubleAction: String = AssistantActions.AUDIO,
@@ -61,7 +61,8 @@ internal class InteractionPreferences(private val context: Context) {
         val version = prefs.getInt("gestureDefaultsVersion", 0)
         val hasStoredGestures = listOf("singleAction", "doubleAction", "tripleAction", "longAction").any(prefs::contains)
         val d = if (version < InteractionDefaults.VERSION && hasStoredGestures)
-            InteractionConfig(singleAction=AssistantActions.SCREEN,longAction=AssistantActions.MENU) else InteractionConfig()
+            InteractionConfig(singleAction=AssistantActions.SCREEN,tripleAction=AssistantActions.NONE,
+                longAction=AssistantActions.MENU) else InteractionConfig()
         fun action(key: String, fallback: String) = prefs.getString(key, fallback)?.takeIf { it in AssistantActions.choices } ?: fallback
         val loaded = InteractionConfig(
             prefs.getInt("ballSize", d.ballSize).coerceIn(18, 48),
