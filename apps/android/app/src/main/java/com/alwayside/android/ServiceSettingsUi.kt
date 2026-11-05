@@ -52,6 +52,12 @@ internal class ServiceSettingsUi(
     private var purpose = ModelPurpose.ANSWER
     private var card: ModelProfile? = null
     private var cardInitial: ModelProfile? = null
+    private var modelDefaultPending = false
+    private val modelPresets by lazy {
+        runCatching {
+            assets.open(ModelPresets.ASSET).bufferedReader(Charsets.UTF_8).use { ModelPresets.decode(WireJson.decode(it.readText())) }
+        }.getOrDefault(ModelPresets.EMPTY)
+    }
     private var key: KeyForm? = null
     private var keyInitial: KeyForm? = null
     private var expected: ServiceCatalog? = null
@@ -236,12 +242,13 @@ internal class ServiceSettingsUi(
             val provider = providers[index]
             val draft = ModelProfile(id(), provider.name, purpose, providerId = provider.id,
                 transcriptionPrompt = if (purpose == ModelPurpose.TRANSCRIPTION) store.load().transcriptionPrompt else "")
-            openCard(c, draft)
+            openCard(c, draft, initializeModel = true)
         }
     }
 
-    private fun openCard(c: ServiceCatalog, profile: ModelProfile) {
+    private fun openCard(c: ServiceCatalog, profile: ModelProfile, initializeModel: Boolean = false) {
         card = profile; cardInitial = profile; expected = c; optionsExpanded = false
+        modelDefaultPending = initializeModel
         navigate(Page.CARD)
     }
 
@@ -254,11 +261,19 @@ internal class ServiceSettingsUi(
                 e.id in k.endpointIds && (purpose == ModelPurpose.ANSWER || e.transcriptionApi == FileTranscriptionApi.OPENAI_COMPATIBLE)
             }
         }
-        val p = if (draft.credentialId == null && usable.size == 1) {
+        var p = if (draft.credentialId == null && usable.size == 1) {
             val chosen = usable.single()
             draft.copy(credentialId = chosen.id, endpointId = chosen.endpointIds.single()).also { card = it }
         } else draft
-        section("服务配置", help = "本页只引用这家服务商已有的密钥。首项保存后自动选中，后续新增不切换；在用途列表点击服务行可选用，不修改另一种用途。\n\n模型可手动填写，也可主动读取列表。列表会联网，服务的能力声明不等于实际验证。")
+        if (modelDefaultPending && usable.any { it.id == p.credentialId }) {
+            val provider = c.providers.find { it.id == providerId }
+            val endpoint = c.endpoints.find { it.id == p.endpointId }
+            if (provider != null && endpoint != null) {
+                modelDefaultPending = false
+                p = modelPresets.initializeNewProfile(p, provider.kind, endpoint).also { card = it }
+            }
+        }
+        section("服务配置", help = "本页只引用这家服务商已有的密钥。首项保存后自动选中，后续新增不切换；在用途列表点击服务行可选用，不修改另一种用途。\n\n新建配置首次选定可用密钥时填入内置默认模型；编辑、换密钥或升级不覆盖已有选择。点击模型可离线选择推荐项、手动填写，或主动从服务获取。暂无推荐不代表服务不支持；转写仅 OpenAI 提供内置推荐。推荐和服务声明不等于账号可用或实际验证，Qwen 的地址、密钥和模型地域须匹配。")
         row("API 密钥", c.credentials.find { it.id == p.credentialId }?.name ?: "请选择") {
             if (usable.isEmpty()) apiHelpDialog(if (keys.isEmpty()) "此服务商还没有 Key。" else "此服务商没有可用于${purpose.title}的 Key，请在 API 服务中检查转写支持或替换不可用 Key。")
             else choose("选择 API 密钥", usable.map { it.name }, checkedIndex = usable.indexOfFirst { it.id == p.credentialId }) { index ->
@@ -272,8 +287,7 @@ internal class ServiceSettingsUi(
             if (usable.isNotEmpty()) note("请先选择密钥")
             return
         }
-        input("模型", p.model, "可手动填写；模型能力未知时不会视为已验证。") { card = requireNotNull(card).copy(model = it.trim()) }
-        row("从列表选择模型") { fetchDraftModels(c) }
+        row("模型", p.model.ifBlank { "请选择" }) { chooseModel(c) }
         section("用途参数", help = if (purpose == ModelPurpose.ANSWER)
             "未设置的参数使用服务默认，支持范围随服务、接口和模型变化。\n\n输出上限：留空或 16–131072。Temperature：0–2，旧版 Claude 为 0–1；Top P：0–1，两种采样参数只设置一项。推理、详细程度及搜索需模型支持。"
             else "转写提示用于专有名词和背景。语言留空时自动识别，也可填写 zh、en 等服务支持的语言代码。这些设置仅属于当前转写服务。")
@@ -498,6 +512,32 @@ internal class ServiceSettingsUi(
         } catch (ex: Exception) { toast(ex.message ?: "Key 配置无效") }
     }
 
+    private fun chooseModel(c: ServiceCatalog) {
+        val draft = card ?: return
+        val provider = c.providers.find { it.id == c.providerIdOf(draft) }
+        val endpoint = c.endpoints.find { it.id == draft.endpointId }
+        val recommendations = if (provider != null && endpoint != null)
+            modelPresets.recommendations(provider.kind, draft.purpose, endpoint) else ModelRecommendations()
+        val models = recommendations.models.toMutableList()
+        if (draft.model.isNotBlank() && models.none { it.id == draft.model })
+            models += ModelPreset(draft.model, draft.model, "当前")
+        val labels = models.map { model -> buildString {
+            append(model.name)
+            if (model.id == recommendations.defaultModelId) append(" · 默认")
+            if (model.tag.isNotBlank()) append(" · ${model.tag}")
+            if (model.name != model.id) append("\n${model.id}")
+        } } + listOf("手动填写", "从服务获取")
+        choose("选择模型", labels, checkedIndex = models.indexOfFirst { it.id == draft.model }) { index ->
+            when {
+                index < models.size -> { card = requireNotNull(card).copy(model = models[index].id); redraw() }
+                index == models.size -> editInput("模型", requireNotNull(card).model) {
+                    card = requireNotNull(card).copy(model = it.trim())
+                }
+                else -> fetchDraftModels(c)
+            }
+        }
+    }
+
     private fun fetchDraftModels(c: ServiceCatalog) {
         val draft = card ?: return
         val credential = c.credentials.find { it.id == draft.credentialId }
@@ -532,18 +572,24 @@ internal class ServiceSettingsUi(
             if (value.isNotBlank()) "已输入" else if (expected?.credentials?.find { it.id == key?.id }?.unreadable == true) "需更新" else if (key?.id != null) "已保存" else "未设置"
         } else value.ifBlank { "未设置" }
         row(title, displayed) {
-            fieldInitial = value; fieldDraft = value
-            fieldEditor = SettingsEditPanel(this, title, "", value, multiline, secret, numeric, decimal,
-                onDraft = { fieldDraft = it }, onRequestClose = { finishFieldEditing {} },
-                onSave = { text, error ->
-                    val trimmed = text.trim()
-                    when {
-                        numeric && trimmed.isNotEmpty() && trimmed.toIntOrNull() == null -> error("请填写整数或留空")
-                        decimal && trimmed.isNotEmpty() && trimmed.toDoubleOrNull()?.isFinite() != true -> error("请填写有效数值或留空")
-                        else -> { changed(text); closeField(); redraw() }
-                    }
-                }, confirmLabel = "确定").also { it.show() }
+            editInput(title, value, secret, multiline, numeric, decimal, changed)
         }
+    }
+
+    private fun editInput(title: String, value: String, secret: Boolean = false,
+                          multiline: Boolean = false, numeric: Boolean = false, decimal: Boolean = false,
+                          changed: (String) -> Unit) {
+        fieldInitial = value; fieldDraft = value
+        fieldEditor = SettingsEditPanel(this, title, "", value, multiline, secret, numeric, decimal,
+            onDraft = { fieldDraft = it }, onRequestClose = { finishFieldEditing {} },
+            onSave = { text, error ->
+                val trimmed = text.trim()
+                when {
+                    numeric && trimmed.isNotEmpty() && trimmed.toIntOrNull() == null -> error("请填写整数或留空")
+                    decimal && trimmed.isNotEmpty() && trimmed.toDoubleOrNull()?.isFinite() != true -> error("请填写有效数值或留空")
+                    else -> { changed(text); closeField(); redraw() }
+                }
+            }, confirmLabel = "确定").also { it.show() }
     }
 
     private fun finishFieldEditing(next: () -> Unit) {

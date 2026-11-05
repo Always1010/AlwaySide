@@ -1,8 +1,8 @@
 # AI 供应商、协议与数据格式
 
-资料核对日期：**2026-11-05**。本文描述 Android 客户端当前实现以及接入边界。官方文档核对和本地离线测试不等于真实账号联调；本文没有声称已用付费 API 验证模型可用性、权限、地域或计费。
+资料核对日期：**2026-11-06**。本文描述 Android 客户端当前实现以及接入边界。官方文档核对和本地离线测试不等于真实账号联调；本文没有声称已用付费 API 验证模型可用性、权限、地域或计费。
 
-示例中的 `YOUR_MODEL_ID`、`YOUR_TRANSCRIPTION_MODEL_ID`、`YOUR_API_KEY`、`YOUR_WORKSPACE_ID` 和 `BASE64_IMAGE_BYTES` 均为占位符，必须替换。模型名称仅在能力限制章节用于说明当前代码规则，不保证账号一定能访问。请求示例中的图像字节省略，不能直接发送。
+示例中的 `YOUR_MODEL_ID`、`YOUR_TRANSCRIPTION_MODEL_ID`、`YOUR_API_KEY`、`YOUR_WORKSPACE_ID` 和 `BASE64_IMAGE_BYTES` 均为占位符，必须替换。内置推荐和能力限制中出现的型号不保证当前账号一定能访问。请求示例中的图像字节省略，不能直接发送。
 
 ## 1. 服务、密钥与用途配置分别保存
 
@@ -35,7 +35,7 @@
 | Gemini 原生 | `x-goog-api-key: YOUR_API_KEY` |
 | Claude Messages | `x-api-key: YOUR_API_KEY`；`anthropic-version: 2026-10-21`；填写工作区时加 `anthropic-workspace-id: YOUR_WORKSPACE_ID` |
 
-回答使用 `Content-Type: application/json`、`Accept: text/event-stream`。Claude API 版本默认 `2026-10-21`；版本字段按 `YYYY-MM-DD` 校验。工作区字段只用于 Claude 请求头，不能用它替代Qwen域名中的工作区。
+回答使用 `Content-Type: application/json`、`Accept: text/event-stream`。Claude API 版本默认 `2026-10-21`；版本字段按 `YYYY-MM-DD` 校验。工作区字段只用于 Claude 请求头，不能用它替代 Qwen 域名中的工作区。
 
 Qwen 的 Key、模型列表和接入点具有地域边界。新接入建议按控制台选择工作区专属域名，例如北京 `https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`、新加坡 `https://YOUR_WORKSPACE_ID.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`；其他地域按官方表填写。仓库保留既有默认域名，用户可直接编辑基础地址。跨地域复制 Key 或模型 ID 不能保证可用；更改域名后应重新填写该接入点的密钥。[Qwen 地域与接入点](https://www.alibabacloud.com/help/en/model-studio/regions)、[Qwen Chat 接口与工作区域名](https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions)
 
@@ -262,7 +262,19 @@ Google Search 也按适配器已知家族校验，未知模型不自动猜测支
 
 显式 none 通常发送 disabled；Sonnet 5.5 使用 between_tools；Opus 5.5、Fable 5、Mythos 5／Preview 禁止关闭思考。未知模型最好留空 reasoning，由服务选择默认。Opus／Sonnet／Haiku 4.5 的客户端输出上限为 64000。旧 API 的采样约束还依思考模式及新旧模型而变，具体条件见 `ClaudeMessagesAdapter`，不能为绕过失败而自动清空参数。
 
-## 5. 获取模型列表
+## 5. 内置推荐与获取模型列表
+
+### 内置推荐配置
+
+[`apps/android/app/src/main/assets/model-presets.json`](../apps/android/app/src/main/assets/model-presets.json) 是随应用打包的离线推荐表，由 `ModelPresets` 读取。按 `ProviderKind` 和 `ModelPurpose` 分组，每组维护一个 `defaultModelId`、精简 `models` 列表及适用的回答协议或文件转写接口。列表顺序就是显示顺序；每个型号只维护实际 ID、显示名称和简短标签。`checkedAt`、`sourceUrls` 和必要的 `regionNote` 供维护时核对；这些来源链接不会在配置时自动请求。
+
+图文问答只收录支持文字、图片输入和文字回答的型号；**音频转写仅 OpenAI 收录 `gpt-transcribe`，其他服务商的转写默认值和列表全部留空。** 自定义兼容服务的两种用途均无内置推荐。模型支持音频、实时语音或语音合成，不代表兼容当前的文件转写接口。初始型号依据 [OpenAI 模型目录](https://developers.openai.com/api/docs/models)、[OpenAI 文件转写](https://developers.openai.com/api/docs/guides/speech-to-text)、[DeepSeek 模型能力](https://api-docs.deepseek.com/quick_start/pricing/)、[Qwen 模型目录](https://www.alibabacloud.com/help/en/model-studio/models)、[Gemini Flash](https://deepmind.google/models/gemini/flash/) 和 [Claude 模型目录](https://platform.claude.com/docs/en/models/overview) 选择。
+
+只有新建用途配置首次选定可用 Key 时，才根据该 Key 的实际接口填入默认型号；接口不匹配或没有推荐时保持空白。已有配置加载、后续换 Key、页面重绘和应用升级都不应用推荐默认值，用户主动清空后也不重新填入。推荐不是可访问型号白名单，手填及已有型号即使未收录也保留；默认型号必须属于推荐列表，空列表的默认 ID 必须为空。
+
+用户点击「模型」打开现有选择弹窗，内置推荐带默认标记与简短标签；未收录的当前型号仍可见。弹窗同时提供「手动填写」和「从服务获取」，只有后者联网。推荐不代表账户权限、地域可用性或实际联调通过，也不修改生成参数。更新推荐只影响新建配置，不迁移旧型号、不自动切换模型或发送测试请求。JSON 缺失或格式无效时仅停用内置推荐，手填及远端获取仍可用。
+
+### 主动获取远端列表
 
 用户在用途卡片编辑中主动操作触发 `GET {baseUrl}/models`，使用所选 Key 的 API 地址、协议及密钥鉴权。目录按接入点和凭证版本隔离，换 Key 后不能沿用另一账号的可访问模型结论。结果用于选择模型，不发回答请求；服务返回的能力信息和客户端适配器支持范围分别处理，不能替代实际用途测试。没有列表权限或服务不提供列表时可手工填写。
 

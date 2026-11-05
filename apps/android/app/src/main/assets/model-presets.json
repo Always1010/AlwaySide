@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-11-06",
+  "providers": {
+    "OPENAI": {
+      "ANSWER": {
+        "defaultModelId": "gpt-6-luna",
+        "protocols": ["RESPONSES", "CHAT_COMPLETIONS"],
+        "sourceUrls": ["https://developers.openai.com/api/docs/models"],
+        "models": [
+          {"id": "gpt-6-luna", "name": "GPT-6 Luna", "tag": "经济"},
+          {"id": "gpt-6.1-terra", "name": "GPT-6.1 Terra", "tag": "视觉推理"},
+          {"id": "gpt-6.1-sol", "name": "GPT-6.1 Sol", "tag": "更强能力"}
+        ]
+      },
+      "TRANSCRIPTION": {
+        "defaultModelId": "gpt-transcribe",
+        "transcriptionApi": "OPENAI_COMPATIBLE",
+        "sourceUrls": ["https://developers.openai.com/api/docs/guides/speech-to-text"],
+        "models": [
+          {"id": "gpt-transcribe", "name": "GPT-Transcribe", "tag": "文件转写"}
+        ]
+      }
+    },
+    "DEEPSEEK": {
+      "ANSWER": {
+        "defaultModelId": "deepseek-flash",
+        "protocols": ["RESPONSES"],
+        "sourceUrls": ["https://api-docs.deepseek.com/quick_start/pricing/"],
+        "models": [
+          {"id": "deepseek-flash", "name": "DeepSeek Flash", "tag": "图文"}
+        ]
+      },
+      "TRANSCRIPTION": {"defaultModelId": "", "models": []}
+    },
+    "QWEN": {
+      "ANSWER": {
+        "defaultModelId": "qwen3.7-plus",
+        "protocols": ["CHAT_COMPLETIONS"],
+        "regionNote": "API 地址、密钥与模型的可用地域须匹配。",
+        "sourceUrls": [
+          "https://www.alibabacloud.com/help/en/model-studio/models",
+          "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        ],
+        "models": [
+          {"id": "qwen3.7-plus", "name": "Qwen3.7 Plus", "tag": "均衡"},
+          {"id": "qwen3.8-max", "name": "Qwen3.8 Max", "tag": "更强能力"}
+        ]
+      },
+      "TRANSCRIPTION": {"defaultModelId": "", "models": []}
+    },
+    "GEMINI": {
+      "ANSWER": {
+        "defaultModelId": "gemini-3.8-flash",
+        "protocols": ["GEMINI", "CHAT_COMPLETIONS"],
+        "sourceUrls": ["https://deepmind.google/models/gemini/flash/"],
+        "models": [
+          {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "tag": "图文"}
+        ]
+      },
+      "TRANSCRIPTION": {"defaultModelId": "", "models": []}
+    },
+    "CLAUDE": {
+      "ANSWER": {
+        "defaultModelId": "claude-haiku-5-5",
+        "protocols": ["CLAUDE"],
+        "sourceUrls": ["https://platform.claude.com/docs/en/models/overview"],
+        "models": [
+          {"id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "tag": "经济"},
+          {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "tag": "更强能力"}
+        ]
+      },
+      "TRANSCRIPTION": {"defaultModelId": "", "models": []}
+    },
+    "CUSTOM": {
+      "ANSWER": {"defaultModelId": "", "models": []},
+      "TRANSCRIPTION": {"defaultModelId": "", "models": []}
+    }
+  }
+}
