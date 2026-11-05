@@ -674,11 +674,12 @@ internal class SettingsScreen(
             val presets = store.presets()
             if (presets.isEmpty()) { toast("尚未保存模板"); return }
             val names = presets.keys.toTypedArray()
-            MaterialAlertDialogBuilder(this).setTitle("选择提示词模板").setItems(names) { _, index ->
+            MaterialAlertDialogBuilder(this).setTitle("选择提示词模板").setSingleChoiceItems(names, -1) { dialog, index ->
+                dialog.dismiss()
                 val preset = presets.getValue(names[index])
                 val preview = try { preset.mergeInto(store.load()) } catch (_: Exception) {
                     toast("无法读取当前配置，请先在 API 管理中检查密钥")
-                    return@setItems
+                    return@setSingleChoiceItems
                 }
                 val summary = listOf("助手回答方式" to preview.instructions, "截图默认问题" to preview.defaultQuestion,
                     "选中文字默认问题" to preview.textQuestion, "音频默认问题" to preview.audioQuestion,

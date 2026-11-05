@@ -49,7 +49,7 @@ internal class PreparationScreen(
             },LinearLayout.LayoutParams(dp(20),dp(20)).apply { marginStart=dp(8) })
             body.addView(item,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
         }
-        row("1","管理 API 服务",if(!connection.readable)"配置需修复" else if(resourcesReady)"已有命名 Key 与 API 地址，尚未验证" else "选择服务商，添加 Key 与名称",!resourcesReady) { onSettings("API") }
+        row("1","管理 API 服务",if(!connection.readable)"配置需修复" else if(resourcesReady)"已有 API 密钥与 API 地址，尚未验证" else "选择服务商，添加 Key 与名称",!resourcesReady) { onSettings("API") }
         row("2","图文问答",if(connected && model)"已选用卡片，尚未验证图片能力" else "选择服务商、已有 Key 和模型，首项自动选中，之后点击服务行切换",resourcesReady && !(connected && model)) { onSettings("ANSWER") }
         row("3","音频转写（可选）",if(connection.readable && connection.transcriptionConfigured)"已选用卡片，仍需按实际用途验证" else "可共用或另选服务与 Key，首项自动选中，之后点击服务行切换",false) { onSettings("TRANSCRIPTION") }
         val running=ProbeState.serviceRunning
@@ -59,7 +59,7 @@ internal class PreparationScreen(
 
     private fun showHelp() {
         MaterialAlertDialogBuilder(activity).setTitle("连接 AI 服务")
-            .setMessage("先在「AI 服务 → 管理 API 服务」选择服务商，填写 Key 与名称；API 地址和接口信息随该 Key 一起管理。同一服务商可以保存多个命名 Key，Key 只在此处编辑。请只连接你信任的服务。\n\n再在「AI 服务 → 图文问答」添加卡片，选择服务商、该服务商已有的 Key、支持图片的模型及默认参数。每个服务商在每个用途中只保留一张卡片；首项保存后自动选中，后续新增不切换；点击服务行选用，右上角菜单编辑。未知参数可留空使用服务默认。\n\n录音时可在「音频转写」独立添加并选用卡片。两种用途可共用服务与 Key，也可分开。仅转写不需要问答 Key；未设置转写不影响截图与文字。转写需要目标服务实际提供本客户端支持的文件转写接口。\n\n保存不代表验证成功；主动读取模型列表会联网，实际测试与提问可能收费。悬浮、截图和录音权限在需要时申请。新手引导始终使用本地示例，不消耗 Token。")
+            .setMessage("先在「AI 服务 → 管理 API 服务」选择服务商，填写 Key 与名称；API 地址和接口信息随该 Key 一起管理。同一服务商可以保存多个 API 密钥，Key 只在此处编辑。请只连接你信任的服务。\n\n再在「AI 服务 → 图文问答」添加卡片，选择服务商、该服务商已有的 Key、支持图片的模型及默认参数。每个服务商在每个用途中只保留一张卡片；首项保存后自动选中，后续新增不切换；点击服务行选用，行尾图标编辑或删除。未知参数可留空使用服务默认。\n\n录音时可在「音频转写」独立添加并选用卡片。两种用途可共用服务与 Key，也可分开。仅转写不需要问答 Key；未设置转写不影响截图与文字。转写需要目标服务实际提供本客户端支持的文件转写接口。\n\n保存不代表验证成功；主动读取模型列表会联网，实际测试与提问可能收费。悬浮、截图和录音权限在需要时申请。新手引导始终使用本地示例，不消耗 Token。")
             .setPositiveButton("知道了",null).show()
     }
 }

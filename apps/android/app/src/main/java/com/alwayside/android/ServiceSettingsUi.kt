@@ -2,6 +2,7 @@ package com.alwayside.android
 
 import android.app.Activity
 import android.content.ContextWrapper
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -9,6 +10,8 @@ import android.graphics.Paint
 import android.util.Base64
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -135,9 +138,7 @@ internal class ServiceSettingsUi(
                 Page.CARD -> if (cardInitial?.let { initial -> c.profiles.any { it.id == initial.id } } == true) "编辑${purpose.title}卡片" else "添加${purpose.title}卡片"
                 Page.KEY -> if (key?.id == null) "添加 Key" else "编辑 Key"
             }, if (page == Page.CARD) card?.let { providerName(c, it.providerId) } else null)
-            onEditMenu(if (page == Page.PURPOSE && c.profiles.any { it.purpose == purpose }) {
-                { editService(c) }
-            } else null)
+            onEditMenu(null)
             when (page) {
                 Page.ROOT -> {
                     row("图文问答") { purpose = ModelPurpose.ANSWER; navigate(Page.PURPOSE) }
@@ -193,7 +194,7 @@ internal class ServiceSettingsUi(
 
     private fun renderPurpose(c: ServiceCatalog) {
         val cards = c.profiles.filter { it.purpose == purpose }
-        section("服务配置", "添加${purpose.title}服务", help = "点击服务行即可选用，左侧圆框表示唯一选中项。首个服务保存后自动选中，后续新增不改变当前选择。右上角菜单可编辑已有服务；密钥在 API 管理中维护。") { addCard(c) }
+        section("服务配置", "添加${purpose.title}服务", help = "点击服务名称即可选用，左侧圆框表示唯一选中项。首个服务保存后自动选中，后续新增不改变当前选择。行尾可编辑或删除；密钥在 API 管理中维护。") { addCard(c) }
         cards.forEach { profile ->
             val name = providerName(c, c.providerIdOf(profile))
             val selected = activeId(c, purpose) == profile.id
@@ -203,7 +204,7 @@ internal class ServiceSettingsUi(
                 isClickable = false; isFocusable = false; isSaveEnabled = false
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            addRow(settingsListRow(name, if (reason == null) "" else "需完善", leading = radio, showArrow = false) {
+            val serviceRow = settingsListRow(name, if (reason == null) "" else "需完善", leading = radio, showArrow = false) {
                 if (activeId(catalog(), purpose) != profile.id) {
                     if (reason != null) toast(reason.replace("接入点", "API 连接"))
                     else save(c, "已选用$name") { it.activate(profile.id) }
@@ -215,15 +216,12 @@ internal class ServiceSettingsUi(
                         info.className = "android.widget.RadioButton"; info.isCheckable = true; info.isChecked = selected
                     }
                 }
-            })
+            }
+            addRow(managementRow(serviceRow, "${purpose.title}服务“$name”",
+                edit = { openCard(c, profile) }, remove = { deleteCard(c, profile) }))
         }
         if (cards.isEmpty() && c.credentials.isNotEmpty()) note("尚未添加服务")
         if (c.credentials.isEmpty()) apiHelp(if (store.requiresServiceSetup()) "请重新添加 API 密钥" else "请先添加 API 密钥")
-    }
-
-    private fun editService(c: ServiceCatalog) {
-        val cards = c.profiles.filter { it.purpose == purpose }
-        choose("编辑服务", cards.map { providerName(c, c.providerIdOf(it)) }) { index -> openCard(c, cards[index]) }
     }
 
     private fun addCard(c: ServiceCatalog) {
@@ -233,16 +231,9 @@ internal class ServiceSettingsUi(
             return
         }
         val existing = c.profiles.filter { it.purpose == purpose }.map(c::providerIdOf).toSet()
-        val available = providers.filter { it.id !in existing }
-        if (available.isEmpty()) {
-            MaterialAlertDialogBuilder(this).setTitle("现有服务商均已添加卡片")
-                .setMessage("每家服务商只能添加一项。已有服务可通过右上角菜单编辑；其他服务商请先在 API 管理中添加密钥。")
-                .setNegativeButton("返回列表", null)
-                .setPositiveButton("管理 API 服务") { _, _ -> navigate(Page.API) }.showTracked()
-            return
-        }
-        choose("选择服务商（已添加的服务商不可重复添加）", available.map { it.name }) { index ->
-            val provider = available[index]
+        val disabled = providers.indices.filter { providers[it].id in existing }.toSet()
+        choose("选择服务商", providers.map { it.name }, disabledIndices = disabled) { index ->
+            val provider = providers[index]
             val draft = ModelProfile(id(), provider.name, purpose, providerId = provider.id,
                 transcriptionPrompt = if (purpose == ModelPurpose.TRANSCRIPTION) store.load().transcriptionPrompt else "")
             openCard(c, draft)
@@ -266,7 +257,7 @@ internal class ServiceSettingsUi(
         section("服务配置", help = "本页只引用这家服务商已有的密钥。首项保存后自动选中，后续新增不切换；在用途列表点击服务行可选用，不修改另一种用途。\n\n模型可手动填写，也可主动读取列表。列表会联网，服务的能力声明不等于实际验证。")
         row("API 密钥", c.credentials.find { it.id == p.credentialId }?.name ?: "请选择") {
             if (usable.isEmpty()) apiHelpDialog(if (keys.isEmpty()) "此服务商还没有 Key。" else "此服务商没有可用于${purpose.title}的 Key，请在 API 服务中检查转写支持或替换不可用 Key。")
-            else choose("选择命名 Key", usable.map { it.name }) { index ->
+            else choose("选择 API 密钥", usable.map { it.name }, checkedIndex = usable.indexOfFirst { it.id == p.credentialId }) { index ->
                 val chosen = usable[index]
                 card = requireNotNull(card).copy(credentialId = chosen.id, endpointId = chosen.endpointIds.single())
                 redraw()
@@ -275,7 +266,6 @@ internal class ServiceSettingsUi(
         if (usable.isEmpty()) apiHelp(if (keys.isEmpty()) "此服务商尚无 Key。" else "暂无支持${purpose.title}的可用 Key。")
         if (usable.none { it.id == p.credentialId }) {
             if (usable.isNotEmpty()) note("请先选择密钥")
-            if (c.profiles.any { it.id == p.id }) deleteCardAction(c, p)
             return
         }
         input("模型", p.model, "可手动填写；模型能力未知时不会视为已验证。") { card = requireNotNull(card).copy(model = it.trim()) }
@@ -303,16 +293,14 @@ internal class ServiceSettingsUi(
                 if (card != persisted) toast("请先保存卡片，再测试此配置") else chooseDiagnostic(c, persisted)
             }
             verification[p.id]?.takeIf { it.first == c }?.second?.let(::note)
-            deleteCardAction(c, p)
         }
     }
 
-    private fun deleteCardAction(c: ServiceCatalog, p: ModelProfile) {
-        body?.addView(iconButton(R.drawable.ic_line_trash, "删除此卡片") {
-            confirmDelete("删除此服务商卡片？", "将移除${p.purpose.title}卡片${if (activeId(c, p.purpose) == p.id) "并停用此用途" else ""}。不会自动选用其他卡片；命名 Key 保留。") {
-                if (save(c) { it.removeProfile(p.id) }) { card = cardInitial; leavePage() }
-            }
-        })
+    private fun deleteCard(c: ServiceCatalog, p: ModelProfile) {
+        val name = providerName(c, c.providerIdOf(p))
+        confirmDelete("删除“$name”的${p.purpose.title}卡片？", "将移除${p.purpose.title}卡片${if (activeId(c, p.purpose) == p.id) "并停用此用途" else ""}。不会自动选用其他卡片；API 密钥保留。") {
+            if (save(c, "已删除卡片") { it.removeProfile(p.id) }) verification.remove(p.id)
+        }
     }
 
     private fun renderOptions(p: ModelProfile) {
@@ -334,11 +322,11 @@ internal class ServiceSettingsUi(
                     ModelOptionCompatibility.validate(GenerationOptions(reasoning = effort).applyTo(requireNotNull(target)))
                 }.isSuccess
             }
-            choose("推理程度", values.map { it.ifBlank { "服务默认" } }) { index -> setOptions { it.copy(reasoning = values[index]) } }
+            choose("推理程度", values.map { it.ifBlank { "服务默认" } }, checkedIndex = values.indexOf(latest.options.reasoning)) { index -> setOptions { it.copy(reasoning = values[index]) } }
         }
         if (verbosity || o.verbosity.isNotBlank()) row("回答详细程度", o.verbosity.ifBlank { "服务默认" }) {
             val values = if (verbosity) listOf("", "low", "medium", "high") else listOf("")
-            choose("回答详细程度", values.map { it.ifBlank { "服务默认" } }) { index -> setOptions { it.copy(verbosity = values[index]) } }
+            choose("回答详细程度", values.map { it.ifBlank { "服务默认" } }, checkedIndex = values.indexOf(o.verbosity)) { index -> setOptions { it.copy(verbosity = values[index]) } }
         }
         if (sampling || o.temperature != null) input("temperature", o.temperature?.toString().orEmpty(), "留空使用服务默认；0–2，与 top_p 只设置一项。", decimal = true) { value ->
             card = requireNotNull(card).copy(options = requireNotNull(card).options.copy(temperature = if (value.isBlank()) null else value.toDoubleOrNull() ?: Double.NaN))
@@ -346,8 +334,9 @@ internal class ServiceSettingsUi(
         if (sampling || o.topP != null) input("top_p", o.topP?.toString().orEmpty(), "留空使用服务默认；0–1，与 temperature 只设置一项。", decimal = true) { value ->
             card = requireNotNull(card).copy(options = requireNotNull(card).options.copy(topP = if (value.isBlank()) null else value.toDoubleOrNull() ?: Double.NaN))
         }
-        if (search || o.webSearch) row("联网搜索", if (o.webSearch) "开启" else "服务默认") {
-            choose("联网搜索", if (search) listOf("服务默认", "开启") else listOf("关闭")) { index -> setOptions { it.copy(webSearch = index == 1) } }
+        row("联网搜索", if (o.webSearch) "开启" else "关闭") {
+            choose("联网搜索", listOf("关闭", "开启"), checkedIndex = if (o.webSearch) 1 else 0,
+                disabledIndices = if (search) emptySet() else setOf(1)) { index -> setOptions { it.copy(webSearch = index == 1) } }
         }
     }
 
@@ -360,7 +349,7 @@ internal class ServiceSettingsUi(
         val p = card ?: return
         try {
             require(catalog() == c) { "服务配置已改变，请返回列表后重新编辑" }
-            require(p.credentialId != null && p.endpointId != null) { "请选择可用于此用途的命名 Key" }
+            require(p.credentialId != null && p.endpointId != null) { "请选择可用于此用途的 API 密钥" }
             require(p.model.isNotBlank()) { "请填写模型 ID" }
             compatibleProfile(c, cardInitial ?: p, p, done = {
                 cardInitial = card; leavePage()
@@ -369,11 +358,15 @@ internal class ServiceSettingsUi(
     }
 
     private fun renderApi(c: ServiceCatalog) {
-        section("API 密钥", "添加 API 密钥", help = "先选择服务商，再添加密钥并命名。同一家服务商可以保存多个密钥，每个密钥保存对应地址和接口信息；名称不能重复。") { openKey(c) }
+        section("API 密钥", "添加 API 密钥", help = "先选择服务商，再添加密钥并命名。同一家服务商可以保存多个密钥，每个密钥保存对应地址和接口信息；名称不能重复。列表行尾可编辑或删除 Key。") { openKey(c) }
         c.providers.filter { provider -> c.credentials.any { it.providerId == provider.id } }.forEach { provider ->
             section(provider.name)
             c.credentials.filter { it.providerId == provider.id }.forEach { credential ->
-                row(credential.name, if (credential.unreadable) "需更新密钥" else "") { openKey(c, credential) }
+                val keyRow = settingsListRow(credential.name, if (credential.unreadable) "需更新密钥" else "", showArrow = false) {
+                    openKey(c, credential)
+                }
+                addRow(managementRow(keyRow, "Key“${credential.name}”",
+                    edit = { openKey(c, credential) }, remove = { deleteKey(c, credential) }))
             }
         }
         if (c.credentials.isEmpty()) {
@@ -417,7 +410,7 @@ internal class ServiceSettingsUi(
                     ProviderKind.CUSTOM -> ApiProtocol.entries.toList()
                     else -> listOf(ApiProtocol.RESPONSES, ApiProtocol.CHAT_COMPLETIONS)
                 }
-                choose("回答协议", protocols.map { it.title }) { index ->
+                choose("回答协议", protocols.map { it.title }, checkedIndex = protocols.indexOf(draft.protocol)) { index ->
                     val selected = protocols[index]
                     val current = requireNotNull(key)
                     val officialGemini = runCatching { java.net.URI(current.baseUrl).host == "generativelanguage.googleapis.com" }.getOrDefault(false)
@@ -427,7 +420,7 @@ internal class ServiceSettingsUi(
                 }
             }
             row("转写支持", if (draft.transcription == FileTranscriptionApi.NONE) "不支持文件转写" else "OpenAI 兼容文件转写") {
-                choose("文件转写支持", listOf("不支持文件转写", "OpenAI 兼容文件转写")) { index ->
+                choose("文件转写支持", listOf("不支持文件转写", "OpenAI 兼容文件转写"), checkedIndex = if (draft.transcription == FileTranscriptionApi.NONE) 0 else 1) { index ->
                     key = requireNotNull(key).copy(transcription = if (index == 1) FileTranscriptionApi.OPENAI_COMPATIBLE else FileTranscriptionApi.NONE); redraw()
                 }
             }
@@ -437,23 +430,25 @@ internal class ServiceSettingsUi(
             }
         }
         action(if (guidedApiParent() != null) "保存并返回${purpose.title}" else "保存", true) { saveKey() }
-        if (draft.id != null) body?.addView(iconButton(R.drawable.ic_line_trash, "删除此 Key") {
-            val refs = c.profiles.filter { it.credentialId == draft.id }
-            val impact = if (refs.isEmpty()) "没有用途卡片引用此 Key。" else "受影响用途：\n" + refs.joinToString("\n") {
-                "${it.purpose.title} / ${providerName(c, c.providerIdOf(it))}${if (activeId(c, it.purpose) == it.id) "（当前选中，将停用）" else ""}"
-            }
-            confirmDelete("删除“${draft.name}”？", "$impact\n引用卡片将保留供修复，不会自动切换其他 Key 或卡片。") {
-                if (save(c) { it.removeCredential(draft.id) }) { key = keyInitial; leavePage() }
-            }
-        })
+    }
+
+    private fun deleteKey(c: ServiceCatalog, credential: ServiceCredential) {
+        val refs = c.profiles.filter { it.credentialId == credential.id }
+        val impact = if (refs.isEmpty()) "没有用途卡片引用此 Key。" else "受影响用途：\n" + refs.joinToString("\n") {
+            "${it.purpose.title} / ${providerName(c, c.providerIdOf(it))}${if (activeId(c, it.purpose) == it.id) "（当前选中，将停用）" else ""}"
+        }
+        confirmDelete("删除 Key“${credential.name}”？", "$impact\n引用卡片将保留供修复，不会自动切换其他 Key 或卡片。") {
+            save(c, "已删除 Key") { it.removeCredential(credential.id) }
+        }
     }
 
     private fun chooseKeyProvider(c: ServiceCatalog, newKey: Boolean = false) {
         val builtins = ProviderKind.entries.filter { it != ProviderKind.CUSTOM }.map { kind ->
             ServiceProvider(kind.name.lowercase(Locale.ROOT), kind.title, kind)
         }
-        val providers = builtins + c.providers.filter { it.kind == ProviderKind.CUSTOM } + ServiceProvider(id(), "新建自定义服务", ProviderKind.CUSTOM)
-        choose("选择服务商", providers.map { it.name }) { index ->
+        val providers = builtins + c.providers.filter { it.kind == ProviderKind.CUSTOM } + ServiceProvider(id(), "自定义服务", ProviderKind.CUSTOM)
+        val checkedIndex = if (newKey) -1 else providers.indexOfFirst { it.id == key?.providerId }
+        choose("选择服务商", providers.map { it.name }, checkedIndex) { index ->
             val provider = providers[index]
             val current = if (newKey) KeyForm() else requireNotNull(key)
             if (current.providerId == provider.id) return@choose
@@ -506,13 +501,13 @@ internal class ServiceSettingsUi(
         val credential = c.credentials.find { it.id == draft.credentialId }
         val endpoint = c.endpoints.find { it.id == draft.endpointId }
         if (credential == null || endpoint == null || credential.unreadable || credential.value.isBlank()) {
-            apiHelpDialog("请先选择可用的命名 Key。"); return
+            apiHelpDialog("请先选择可用的 API 密钥。"); return
         }
         val snapshot = c.copy(profiles = c.profiles.filterNot { it.id == draft.id } + draft)
         val config = snapshot.project(store.load(), draft.id)
-        runRequest(c, "获取模型列表", "只请求所选命名 Key 可见的模型与能力声明。", { token -> AiProvider().listModelCatalog(config, token) }) { models ->
+        runRequest(c, "获取模型列表", "正在读取所选 API 密钥可用的模型列表…", { token -> AiProvider().listModelCatalog(config, token) }) { models ->
             if (models.isEmpty()) toast("服务未返回模型，可手动填写模型 ID") else
-                choose("选择模型（服务声明，尚未验证）", models.map(::modelCatalogLabel)) { index ->
+                choose("选择模型", models.map(::modelCatalogLabel), checkedIndex = models.indexOfFirst { it.id == card?.model }) { index ->
                     card = requireNotNull(card).copy(model = models[index].id); redraw()
                 }
         }
@@ -589,6 +584,15 @@ internal class ServiceSettingsUi(
     }
 
     private fun row(title: String, detail: String = "", click: () -> Unit) = addRow(settingsListRow(title, detail, onClick = click))
+    private fun managementRow(content: View, name: String, edit: () -> Unit, remove: () -> Unit) = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        content.setPadding(content.paddingLeft, content.paddingTop, 0, content.paddingBottom)
+        addView(content, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(iconButton(R.drawable.ic_line_edit, "编辑$name", edit))
+        addView(iconButton(R.drawable.ic_line_trash, "删除$name", remove).apply {
+            iconTint = ColorStateList.valueOf(MUTED)
+        }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })
+    }
     private fun valueRow(title: String, value: String) = addRow(settingsListRow(title, value))
     private fun note(value: String) {
         group = null
@@ -607,10 +611,27 @@ internal class ServiceSettingsUi(
         MaterialAlertDialogBuilder(this).setTitle("需要配置 API 服务").setMessage(message)
             .setNegativeButton("继续编辑", null).setPositiveButton("管理 API 服务") { _, _ -> navigate(Page.API) }.showTracked()
     }
-    private fun choose(title: String, values: List<String>, selected: (Int) -> Unit) {
+    private fun choose(
+        title: String, values: List<String>, checkedIndex: Int = -1,
+        disabledIndices: Set<Int> = emptySet(), selected: (Int) -> Unit,
+    ) {
         if (values.isEmpty()) { toast("暂无可选项"); return }
-        MaterialAlertDialogBuilder(this).setTitle(title).setItems(values.toTypedArray()) { _, index -> selected(index) }
-            .setNegativeButton("取消", null).showTracked()
+        val builder = MaterialAlertDialogBuilder(this).setTitle(title)
+        val listener = android.content.DialogInterface.OnClickListener { dialog, index ->
+            if (index !in disabledIndices) { dialog.dismiss(); selected(index) }
+        }
+        if (disabledIndices.isEmpty()) builder.setSingleChoiceItems(values.toTypedArray(), checkedIndex, listener)
+        else builder.setSingleChoiceItems(object : ArrayAdapter<String>(builder.context,
+            com.google.android.material.R.layout.mtrl_alert_select_dialog_singlechoice, values) {
+            override fun areAllItemsEnabled() = false
+            override fun isEnabled(position: Int) = position !in disabledIndices
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
+                super.getView(position, convertView, parent).apply {
+                    isEnabled = position !in disabledIndices
+                    alpha = if (isEnabled) 1f else 0.38f
+                }
+        }, checkedIndex, listener)
+        builder.setNegativeButton("取消", null).showTracked()
     }
     private fun confirmDelete(title: String, message: String, remove: () -> Unit) {
         MaterialAlertDialogBuilder(this).setTitle(title).setMessage(message).setNegativeButton("取消", null)
@@ -628,7 +649,8 @@ internal class ServiceSettingsUi(
     }
     private fun id() = UUID.randomUUID().toString()
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
-    private fun MaterialAlertDialogBuilder.showTracked(): AlertDialog = create().also { dialog ->
+    private fun MaterialAlertDialogBuilder.showTracked(): AlertDialog = create().showTracked()
+    private fun AlertDialog.showTracked(): AlertDialog = also { dialog ->
         if (!disposed) { dialogs += dialog; dialog.setOnDismissListener { dialogs.remove(dialog) }; dialog.show() }
     }
     private fun dismissDialogs() { dialogs.toList().forEach { it.dismiss() }; dialogs.clear(); closeGuard = null }
@@ -714,7 +736,7 @@ internal class ServiceSettingsUi(
         // Model listing is allowed before a model ID has been supplied.
         val endpoint = c.endpoints.find { it.id == p.endpointId }
         val key = c.credentials.find { it.id == p.credentialId }
-        require(endpoint != null && key != null && !key.unreadable && key.value.isNotBlank() && endpoint.id in key.endpointIds) { "请先选择已保存的命名 Key" }
+        require(endpoint != null && key != null && !key.unreadable && key.value.isNotBlank() && endpoint.id in key.endpointIds) { "请先选择已保存的 API 密钥" }
         c.project(store.load(), p.id)
     } catch (ex: Exception) { toast(ex.message ?: "配置不可用"); null }
 
