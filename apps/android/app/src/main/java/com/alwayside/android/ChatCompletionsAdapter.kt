@@ -1,10 +1,10 @@
 package com.alwayside.android
 
-/** OpenAI Chat wire format, with DashScope extensions isolated to the Qwen connection. */
+/** OpenAI Chat wire format, with each provider's compatibility controls kept separate. */
 internal object ChatCompletionsAdapter : ChatAdapter {
     override fun request(config: AppConfig, history: List<ChatMessage>, question: String, imageDataUrl: String?): WireRequest {
         ProviderProtocol.validateOptions(config)
-        if (config.providerKind !in setOf(ProviderKind.QWEN, ProviderKind.OPENAI, ProviderKind.CUSTOM))
+        if (config.providerKind !in setOf(ProviderKind.QWEN, ProviderKind.OPENAI, ProviderKind.CUSTOM, ProviderKind.GEMINI))
             throw ProviderException("该供应商不支持此 Chat Completions 适配器，请选择其原生协议")
         if (config.continuationMessages.isNotEmpty()) throw ProviderException("Chat Completions 不支持此继续生成状态，请重新提问")
         val messages = buildList<Map<String, Any?>> {
@@ -19,13 +19,44 @@ internal object ChatCompletionsAdapter : ChatAdapter {
             "stream_options" to mapOf("include_usage" to true))
         config.temperature?.let { body["temperature"] = it }
         config.topP?.let { body["top_p"] = it }
-        if (config.providerKind == ProviderKind.QWEN) qwenOptions(config, body) else {
-            if (config.maxOutputTokens != 0) body["max_completion_tokens"] = config.maxOutputTokens
-            if (config.reasoning.isNotBlank()) body["reasoning_effort"] = config.reasoning
-            if (config.verbosity.isNotBlank()) body["verbosity"] = config.verbosity
-            if (config.webSearch) body["web_search_options"] = emptyMap<String, Any?>()
+        when (config.providerKind) {
+            ProviderKind.QWEN -> qwenOptions(config, body)
+            ProviderKind.GEMINI -> geminiOptions(config, body)
+            else -> {
+                if (config.maxOutputTokens != 0) body["max_completion_tokens"] = config.maxOutputTokens
+                if (config.reasoning.isNotBlank()) body["reasoning_effort"] = config.reasoning
+                if (config.verbosity.isNotBlank()) body["verbosity"] = config.verbosity
+                if (config.webSearch) body["web_search_options"] = emptyMap<String, Any?>()
+            }
         }
         return WireRequest("chat/completions", body)
+    }
+
+    private fun geminiOptions(config: AppConfig, body: MutableMap<String, Any?>) {
+        if (config.webSearch) throw ProviderException("Gemini Chat 兼容模式暂不支持联网搜索，请切换 Gemini 原生协议")
+        if (config.verbosity.isNotBlank()) throw ProviderException("Gemini Chat 兼容模式不支持 verbosity，请将回答详细程度设为不设置")
+        val model = config.model.trim().removePrefix("models/")
+        if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}").matches(model)) throw ProviderException("Gemini 模型名称无效")
+        body["model"] = model
+        // Developer API compatibility accepts max_tokens; do not assume Cloud-only aliases or native field names.
+        if (config.maxOutputTokens != 0) body["max_tokens"] = config.maxOutputTokens
+        if (config.reasoning.isBlank()) return
+        fun family(name: String) = model == name || model.startsWith("$name-")
+        val standard = setOf("minimal", "low", "medium", "high")
+        val levels = when {
+            model.contains("image") || model.contains("audio") -> emptySet()
+            family("gemini-2.5-pro") -> standard
+            family("gemini-2.5-flash") -> standard + "none"
+            family("gemini-3-pro") -> setOf("low", "high")
+            family("gemini-3.1-pro") || family("gemini-3.7-flash") || family("gemini-3.8-flash") -> setOf("low", "medium", "high")
+            family("gemini-3-flash") || family("gemini-3.1-flash-lite") || family("gemini-3.5-flash-lite") ||
+                family("gemini-3.6-flash") || family("gemini-4-argon") -> standard
+            else -> emptySet()
+        }
+        if (config.reasoning !in levels) throw ProviderException("此 Gemini 模型不支持 Chat 兼容推理程度 ${config.reasoning}，请设为不设置或选择模型支持的档位（none 不等于 minimal）")
+        // Keep Google's compatibility mapping: 2.5 minimal/low=1024, medium=8192, high=24576;
+        // Gemini 4 maps minimal to low. Native Gemini uses a separate contract and must not be reused here.
+        body["reasoning_effort"] = config.reasoning
     }
 
     private fun qwenOptions(config: AppConfig, body: MutableMap<String, Any?>) {

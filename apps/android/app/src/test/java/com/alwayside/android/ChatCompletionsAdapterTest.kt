@@ -10,6 +10,8 @@ class ChatCompletionsAdapterTest {
     private val qwen = AppConfig(providerKind = ProviderKind.QWEN, apiProtocol = ApiProtocol.CHAT_COMPLETIONS,
         model = "qwen-plus", reasoning = "", maxOutputTokens = 0)
     private val custom = qwen.copy(providerKind = ProviderKind.CUSTOM, model = "custom-model")
+    private val gemini = qwen.copy(providerKind = ProviderKind.GEMINI, model = "gemini-3.8-flash",
+        baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai")
 
     @Test fun requestUsesChatMessagesAndOpenAiImageBlocks() {
         val image = "data:image/jpeg;base64,AAAA"
@@ -97,10 +99,59 @@ class ChatCompletionsAdapterTest {
     }
 
     @Test fun continuationAndOtherProvidersAreRejectedInsteadOfSilentlyDiscarded() {
-        listOf(qwen.copy(continuationMessages = listOf(mapOf("role" to "assistant"))), qwen.copy(providerKind = ProviderKind.GEMINI),
+        listOf(qwen.copy(continuationMessages = listOf(mapOf("role" to "assistant"))),
             qwen.copy(providerKind = ProviderKind.CLAUDE), qwen.copy(providerKind = ProviderKind.DEEPSEEK)).forEach { config ->
             assertThrows(ProviderException::class.java) { ChatCompletionsAdapter.request(config, emptyList(), "q", null) }
         }
+    }
+
+    @Test fun geminiAdvancedChatUsesCompatibleImageAndGenerationFields() {
+        val request = ChatCompletionsAdapter.request(gemini.copy(model = "models/gemini-3.8-flash", maxOutputTokens = 4096,
+            reasoning = "medium", temperature = 0.7), listOf(ChatMessage("assistant", "previous")), "question", "data:image/png;base64,AAAA")
+        assertEquals("chat/completions", request.route)
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            ProviderProtocol.endpoint(gemini.baseUrl, request.route).toString())
+        assertEquals("gemini-3.8-flash", request.body["model"])
+        assertEquals(4096, request.body["max_tokens"])
+        assertEquals("medium", request.body["reasoning_effort"])
+        assertEquals(0.7, request.body["temperature"])
+        val parts = request.body.items("messages").last().wireObject().items("content")
+        assertEquals(mapOf("url" to "data:image/png;base64,AAAA"), parts.last().wireObject()["image_url"])
+        listOf("max_completion_tokens", "generationConfig", "thinkingConfig", "extra_body", "enable_thinking", "enable_search", "web_search_options", "verbosity")
+            .forEach { assertFalse("Unexpected Gemini field $it", request.body.containsKey(it)) }
+    }
+
+    @Test fun geminiChatKeepsCompatibilityEffortMappingSeparateFromNativeBudgets() {
+        listOf("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash", "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-4-argon").forEach { model ->
+            listOf("minimal", "low", "medium", "high").forEach { effort ->
+                val body = ChatCompletionsAdapter.request(gemini.copy(model = model, reasoning = effort), emptyList(), "q", null).body
+                assertEquals("$model/$effort", effort, body["reasoning_effort"])
+                assertFalse(body.containsKey("thinking_budget"))
+                assertFalse(body.containsKey("extra_body"))
+            }
+        }
+        assertEquals("none", ChatCompletionsAdapter.request(gemini.copy(model = "gemini-2.5-flash", reasoning = "none"), emptyList(), "q", null).body["reasoning_effort"])
+        val defaults = ChatCompletionsAdapter.request(gemini, emptyList(), "q", null).body
+        assertFalse(defaults.containsKey("reasoning_effort"))
+        assertFalse(defaults.containsKey("max_tokens"))
+    }
+
+    @Test fun geminiChatRejectsUnavailableControlsAndUnknownThinkingModels() {
+        listOf(gemini.copy(webSearch = true), gemini.copy(verbosity = "low"), gemini.copy(reasoning = "none"),
+            gemini.copy(reasoning = "xhigh"), gemini.copy(reasoning = "max"),
+            gemini.copy(model = "gemini-2.5-pro", reasoning = "none"), gemini.copy(model = "gemini-3-pro-preview", reasoning = "medium"),
+            gemini.copy(model = "gemini-2.0-flash", reasoning = "low"), gemini.copy(model = "unknown-future-model", reasoning = "low"),
+            gemini.copy(model = "gemini-2.5-flash-image", reasoning = "low"), gemini.copy(model = "gemini-3.8-flash", reasoning = "minimal")).forEach { config ->
+            assertThrows(ProviderException::class.java) { ChatCompletionsAdapter.request(config, emptyList(), "q", null) }
+        }
+    }
+
+    @Test fun geminiCompatibilityStreamUsesNormalChatCompletionRules() {
+        val decoder = ChatCompletionsAdapter.decoder(gemini)
+        decoder.accept("message", chunk("compatible answer", "stop")) {}
+        decoder.accept("__DONE__", emptyMap()) {}
+        assertEquals("compatible answer", decoder.finish {})
     }
 
     @Test fun normalStreamIgnoresReasoningAndRequiresStopBeforeDone() {
