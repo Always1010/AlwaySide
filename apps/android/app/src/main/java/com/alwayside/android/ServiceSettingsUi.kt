@@ -141,8 +141,8 @@ internal class ServiceSettingsUi(
             onEditMenu(null)
             when (page) {
                 Page.ROOT -> {
-                    row(ModelPurpose.ANSWER.settingsTitle) { purpose = ModelPurpose.ANSWER; navigate(Page.PURPOSE) }
-                    row(ModelPurpose.TRANSCRIPTION.settingsTitle) { purpose = ModelPurpose.TRANSCRIPTION; navigate(Page.PURPOSE) }
+                    row(ModelPurpose.ANSWER.settingsTitle, selectedServiceSummary(c, ModelPurpose.ANSWER)) { purpose = ModelPurpose.ANSWER; navigate(Page.PURPOSE) }
+                    row(ModelPurpose.TRANSCRIPTION.settingsTitle, selectedServiceSummary(c, ModelPurpose.TRANSCRIPTION)) { purpose = ModelPurpose.TRANSCRIPTION; navigate(Page.PURPOSE) }
                     row("管理 API 服务") { navigate(Page.API) }
                 }
                 Page.PURPOSE -> renderPurpose(c)
@@ -640,6 +640,11 @@ internal class ServiceSettingsUi(
             .setPositiveButton("删除") { _, _ -> remove() }.showTracked()
     }
     private fun activeId(c: ServiceCatalog, p: ModelPurpose) = if (p == ModelPurpose.ANSWER) c.activeAnswerId else c.activeTranscriptionId
+    private fun selectedServiceSummary(c: ServiceCatalog, p: ModelPurpose): String {
+        val profile = c.profiles.find { it.id == activeId(c, p) && it.purpose == p } ?: return "未配置"
+        val credential = c.credentials.find { it.id == profile.credentialId } ?: return "未配置"
+        return "${providerName(c, c.providerIdOf(profile))} · ${credential.name}"
+    }
     private fun providerName(c: ServiceCatalog, id: String) = c.providers.find { it.id == id }?.name
         ?: ProviderKind.entries.find { it.name.lowercase(Locale.ROOT) == id }?.title ?: "服务商已移除"
     private fun hideKeyboard() {
