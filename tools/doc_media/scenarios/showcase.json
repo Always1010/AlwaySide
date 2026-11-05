@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "reading": {
+    "title": "Weekend plans",
+    "original": "After a long week, nobody wanted a complicated plan. “How about grabbing something to eat and walking by the river?” Alex asked. “I'm down,” Sam said. “As long as we don't have to book anything.”",
+    "translation": "忙了一周，大家都不想安排得太复杂。\n\n“要不随便吃点东西，再去河边散散步？”亚历克斯提议。\n\n“我可以，”山姆说，“只要不用提前预订就行。”",
+    "question": "I'm down为什么这里是我可以，而不是心情低落？",
+    "answer": "这里的 I'm down 表示“我愿意参加”。前一句是邀请，后一句又补充了参加条件。\n\n它相当于 I'm down for that，所以这里译成“我可以”，而非心情低落。"
+  },
+  "audio": {
+    "original": "Before we finish today's meeting, I'd like to go over the plan for the next two weeks. The first priority is to complete the onboarding flow and make sure a new user can reach the main feature without asking for help. Please keep the instructions short, but do not remove information that people need to make a decision.\n\nBy Wednesday, the design team will share the updated screens. Engineering can then review the navigation and identify any states that are still missing, especially loading, permission requests, and connection failures. We should also test what happens when someone leaves the app and returns later.\n\nFor the demo, let's use a short reading example and a longer audio clip. The goal is to show how the assistant handles realistic content, including an answer that needs scrolling and a transcript that is longer than one paragraph. Please send your feedback before Friday, and include a screenshot whenever a layout issue is difficult to describe.",
+    "translation": "在结束今天的会议之前，我想回顾一下未来两周的计划。首要任务是完成新手引导流程，确保新用户无需求助，就能进入主要功能。说明文字应当简短，但不能删掉用户做决定时需要的信息。\n\n设计团队将在周三之前分享更新后的界面。随后，工程团队可以检查导航流程，并找出仍然缺少的状态，尤其是加载中、权限请求和连接失败。我们还应该测试用户离开应用、稍后返回时会发生什么。\n\n演示时，我们使用一段阅读材料，以及一段更长的音频。目的是展示助手如何处理接近实际使用的内容，包括需要滚动查看的回答，以及超过一个段落的转录原文。请在周五之前提交反馈；如果布局问题很难用文字描述，请附上截图。"
+  },
+  "scenes": {
+    "S06-floating-menu": {
+      "kind": "reading",
+      "duration": 1400,
+      "still": true,
+      "events": [
+        {
+          "at": 0,
+          "action": "menu",
+          "caption": "单击悬浮球，展开快捷菜单。"
+        }
+      ]
+    },
+    "A01-long-press-followup": {
+      "kind": "reading",
+      "requiresAnswer": true,
+      "duration": 12400,
+      "still": false,
+      "events": [
+        {
+          "at": 0,
+          "action": "hold",
+          "caption": "长按悬浮球，直接截图问答。",
+          "cue": {
+            "target": "bubble",
+            "kind": "long-press"
+          }
+        },
+        {
+          "at": 1000,
+          "action": "screenshot",
+          "caption": "先查看这段对话的中文翻译。"
+        },
+        {
+          "at": 2600,
+          "action": "hold",
+          "caption": "点“继续提问”，补充对俚语的疑问。",
+          "cue": {
+            "target": "toggle",
+            "kind": "tap"
+          }
+        },
+        {
+          "at": 3000,
+          "action": "compose",
+          "caption": "展开原生追问输入框。"
+        },
+        {
+          "at": 3400,
+          "action": "type",
+          "caption": "输入：I'm down为什么这里是我可以，而不是心情低落？"
+        },
+        {
+          "at": 4800,
+          "action": "hold",
+          "caption": "发送追问，沿用本次截图上下文。",
+          "cue": {
+            "target": "send",
+            "kind": "tap"
+          }
+        },
+        {
+          "at": 5200,
+          "action": "send",
+          "caption": "根据同一段对话继续解释。"
+        },
+        {
+          "at": 5500,
+          "action": "answer",
+          "caption": "这里的回答结合了前一句邀请和后一句参加条件。"
+        },
+        {
+          "at": 6900,
+          "action": "scroll-bottom",
+          "caption": "I'm down = 我愿意参加；完整回答见小窗。"
+        }
+      ]
+    },
+    "A02-double-tap-audio": {
+      "kind": "audio",
+      "duration": 15000,
+      "still": false,
+      "events": [
+        {
+          "at": 0,
+          "action": "hold",
+          "caption": "双击悬浮球，开始录音。",
+          "cue": {
+            "target": "bubble",
+            "kind": "double-tap"
+          }
+        },
+        {
+          "at": 900,
+          "action": "record",
+          "caption": "录音中：悬浮球显示原生波形。"
+        },
+        {
+          "at": 2300,
+          "action": "hold",
+          "caption": "再次双击，结束录音并处理。",
+          "cue": {
+            "target": "bubble",
+            "kind": "double-tap"
+          }
+        },
+        {
+          "at": 3100,
+          "action": "audio",
+          "caption": "先查看转录原文；较长内容可上下滚动。"
+        },
+        {
+          "at": 5000,
+          "action": "scroll-middle",
+          "caption": "向上滑动，继续阅读转录原文。",
+          "cue": {
+            "target": "scroll",
+            "kind": "swipe-up"
+          }
+        },
+        {
+          "at": 7500,
+          "action": "scroll-bottom",
+          "caption": "滑到回答部分，查看中文翻译。",
+          "cue": {
+            "target": "scroll",
+            "kind": "swipe-up"
+          }
+        },
+        {
+          "at": 9700,
+          "action": "hold",
+          "caption": "中文译文保留原意与段落。"
+        },
+        {
+          "at": 11900,
+          "action": "scroll-top",
+          "caption": "向下滑动，可返回核对转录原文。",
+          "cue": {
+            "target": "scroll",
+            "kind": "swipe-down"
+          }
+        },
+        {
+          "at": 13400,
+          "action": "scroll-bottom",
+          "caption": "原文与中文翻译在同一个原生小窗内。"
+        }
+      ]
+    },
+    "A04-triple-tap-cancel": {
+      "kind": "audio",
+      "duration": 4600,
+      "still": false,
+      "events": [
+        {
+          "at": 0,
+          "action": "record",
+          "caption": "录音中。"
+        },
+        {
+          "at": 1100,
+          "action": "hold",
+          "caption": "三击悬浮球，取消并丢弃本次录音。",
+          "cue": {
+            "target": "bubble",
+            "kind": "triple-tap"
+          }
+        },
+        {
+          "at": 2000,
+          "action": "cancel",
+          "caption": "录音已取消，悬浮球恢复空闲状态。"
+        }
+      ]
+    }
+  }
+}

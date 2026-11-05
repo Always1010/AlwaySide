@@ -90,6 +90,8 @@ git push origin v0.6.1
 
 ## 代码与参考
 
+文档图片需要更新时，可手动运行[原生文档素材工具](../../tools/doc_media/README.md)。它是单向复用展示组件的独立工程，不参与本 App 的构建或运行；预览先输出到 `.local/`，人工确认后再导出。
+
 源码位于 [app/src/main/java/com/alwayside/android/](app/src/main/java/com/alwayside/android/)，测试位于 [app/src/test/](app/src/test/)。
 
 | 范围 | 主要入口 |
