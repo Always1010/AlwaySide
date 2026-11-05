@@ -909,8 +909,13 @@ class AssistantService : Service() {
         try{next.start(source, recordingConfig.recordingMaxMinutes){result->
             if(!alive||recorder!==next||!recordingGate.complete(token)){result?.file?.delete();return@start}
             recorder=null;finishingAudio=false;ProbeState.recording=false
-            if(result==null){toast("未保存有效录音，请检查权限和音源");return@start}
-            val disposition=recordingDisposition(result.reachedLimit,recordingConfig.recordingLimitAction,config.autoAskAudio,audioManual,config.useDefaultQuestion)
+            if(result==null){ProbeState.lastEvent="录音采集失败，请检查权限和音源后重录";toast(ProbeState.lastEvent);return@start}
+            val disposition=recordingDisposition(result.reachedLimit,recordingConfig.recordingLimitAction,config.autoAskAudio,audioManual,config.useDefaultQuestion,captureFailed=result.error!=null)
+            if(disposition==RecordingDisposition.FAILED){
+                val deleted=result.file.delete()
+                ProbeState.lastEvent=if(deleted)"录音采集中断，请重录" else "录音采集中断，请重录；临时音频清理失败"
+                toast(ProbeState.lastEvent);showBubble();return@start
+            }
             if(disposition==RecordingDisposition.DISCARD){
                 val deleted=result.file.delete()
                 ProbeState.lastEvent=if(deleted)"已达录音上限，本段录音已丢弃，未发起转写" else "已达录音上限，未发起转写；录音文件清理失败"
