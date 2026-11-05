@@ -28,6 +28,7 @@ internal class SettingsScreen(
     private val onContent: (View) -> Unit,
     private val onBack: () -> Unit,
     initialPage: String? = null,
+    private val onTutorial: () -> Unit = {},
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
@@ -39,6 +40,7 @@ internal class SettingsScreen(
         GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "追问输入区、位置、尺寸、固定与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "录音时长、截图保留策略与证据说明", android.R.drawable.ic_menu_recent_history),
+        HELP("帮助与引导", "不消耗 Token 的截图提问练习", android.R.drawable.ic_menu_help),
     }
 
     private lateinit var store: SettingsStore
@@ -149,6 +151,10 @@ internal class SettingsScreen(
             Page.GESTURES -> gesturePage(interaction)
             Page.WINDOW -> windowPage(config, interaction)
             Page.MEDIA -> mediaPage(interaction)
+            Page.HELP -> {
+                note("使用内置示例练习悬浮球、截图问答和追问。全程模拟，不联网，不调用 API，也不需要系统权限。")
+                action("开始模拟体验") { finishEditing(onTutorial) }
+            }
         }
         root.addView(ScrollView(this).apply {
             isFillViewport = true; isSaveEnabled = false; clipToPadding = false; addView(body)

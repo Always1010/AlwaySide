@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppNavigationTest {
+    @Test fun tutorialRestoresItsParentAndBackReturnsToSettings() {
+        val nav = AppNavigation().apply { openSettings(); openTutorial(); openTutorial() }
+        val restored = AppNavigation(nav.snapshot())
+        assertEquals(listOf("HISTORY", "SETTINGS", "TUTORIAL"), restored.snapshot())
+        assertEquals(AppBack.PAGE, restored.back())
+        assertEquals(AppPage.SETTINGS, restored.current)
+        assertEquals(AppPage.HISTORY, AppNavigation(listOf("TUTORIAL")).current)
+    }
     @Test fun settingsDetailBackKeepsSettingsBeforeReturningToHistory() {
         val nav = AppNavigation()
         nav.openSettings()

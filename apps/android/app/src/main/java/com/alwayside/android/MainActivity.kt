@@ -27,6 +27,8 @@ class MainActivity : ThemedActivity() {
     private lateinit var container: FrameLayout
     private var settingsScreen: SettingsScreen? = null
     private var chatScreen: ChatScreen? = null
+    private var tutorialScreen: TutorialScreen? = null
+    private var tutorialFlow = TutorialFlow()
     private var historyScroll: ScrollView? = null
     private var historyY = 0
     private var historyScreen: HistoryListScreen? = null
@@ -48,6 +50,7 @@ class MainActivity : ThemedActivity() {
         val retained = lastNonConfigurationInstance as? RetainedApp
         val entry = AppEntry.take(intent)
         navigation = AppNavigation(savedInstanceState?.getStringArrayList("pages") ?: retained?.pages.orEmpty())
+        tutorialFlow = TutorialFlow(TutorialStep.restore(savedInstanceState?.getString("tutorial_step")))
         assistantStartAttempted = savedInstanceState?.getBoolean("assistant_start_attempted", false) ?: false
         overlayWasGranted = savedInstanceState?.getBoolean("overlay_was_granted", false) ?: false
         allowOnboarding = savedInstanceState?.getBoolean("allow_onboarding") ?: (entry == null)
@@ -100,6 +103,7 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun navigateBack() {
+        if(navigation.current == AppPage.TUTORIAL && tutorialScreen?.back() == true)return
         if(navigation.current == AppPage.HISTORY && historyScreen?.back() == true)return
         hideKeyboard()
         when(navigation.back(settingsAtRoot=settingsScreen?.isHome ?: true)) {
@@ -133,7 +137,22 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun createSettings(page: String? = null) {
-        settingsScreen=SettingsScreen(this,::present,::navigateBack,page)
+        settingsScreen=SettingsScreen(this,::present,::navigateBack,page,::openTutorial)
+    }
+
+    private fun openTutorial() {
+        hideKeyboard(); tutorialFlow=TutorialFlow(); tutorialScreen=null
+        navigation.openTutorial(); showCurrent()
+    }
+
+    private fun showTutorial() {
+        val screen=tutorialScreen ?: TutorialScreen(this,tutorialFlow,::navigateBack,::exitTutorial).also { tutorialScreen=it }
+        present(screen.view)
+    }
+
+    private fun exitTutorial() {
+        tutorialScreen=null
+        navigation.openHistory(); showCurrent()
     }
 
     private fun createChat(id: String? = null,savedState: Bundle? = null,
@@ -154,6 +173,7 @@ class MainActivity : ThemedActivity() {
             AppPage.HISTORY -> openHistory()
             AppPage.SETTINGS -> openSettings()
             AppPage.CHAT -> openChat(entry.conversationId,entry.autoAskText)
+            AppPage.TUTORIAL -> openTutorial()
         }
     }
 
@@ -162,6 +182,7 @@ class MainActivity : ThemedActivity() {
             AppPage.HISTORY -> showHistory()
             AppPage.CHAT -> chatScreen?.let { present(it.view) } ?: openHistory()
             AppPage.SETTINGS -> settingsScreen?.show() ?: createSettings()
+            AppPage.TUTORIAL -> showTutorial()
         }
     }
 
@@ -237,6 +258,7 @@ class MainActivity : ThemedActivity() {
 
     override fun onResume() {
         super.onResume()
+        if(navigation.current == AppPage.TUTORIAL)return
         if(navigation.current == AppPage.HISTORY)showHistory()
         if(!allowOnboarding)return
         val allowed=Settings.canDrawOverlays(this)
@@ -250,6 +272,7 @@ class MainActivity : ThemedActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putStringArrayList("pages",ArrayList(navigation.snapshot()))
+        outState.putString("tutorial_step",tutorialFlow.step.name)
         outState.putString("settings_page",settingsScreen?.pageName())
         outState.putInt("history_y",historyScroll?.scrollY ?: historyY)
         outState.putStringArrayList("history_selection", ArrayList(historyScreen?.selectedIds() ?: restoredHistorySelection))
