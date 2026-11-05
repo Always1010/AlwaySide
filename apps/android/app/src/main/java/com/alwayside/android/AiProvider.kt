@@ -1,6 +1,5 @@
 package com.alwayside.android
 
-import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
@@ -9,7 +8,6 @@ import java.io.InputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
-import java.net.URI
 import java.util.UUID
 import java.util.concurrent.CancellationException
 
@@ -21,6 +19,7 @@ internal interface AiGateway {
 
 /** Blocking transport: callers must use a worker thread and a fresh cancellation token. */
 internal class AiProvider : AiGateway {
+    var lastSearchUsed: Boolean = false; private set
     override fun respond(
         config: AppConfig,
         history: List<ChatMessage>,
@@ -29,48 +28,44 @@ internal class AiProvider : AiGateway {
         cancellation: RequestCancellation,
         onDelta: (String) -> Unit,
     ): String = sanitized(cancellation) {
-        validateConfig(config)
-        if (question.isBlank() || question.length > 32_768 || config.instructions.length > 32_768) {
+        lastSearchUsed = false
+        validateConnection(config)
+        validateModel(config.model)
+        ProviderProtocol.validateOptions(config)
+        ProviderCapabilities.validate(config, imageDataUrl != null)
+        if (question.isBlank() || question.length > 32_768 || config.instructions.length > 32_768)
             throw ProviderException("问题或 Instructions 为空或过长，请缩短后重试")
+        imageDataUrl?.let(::validateImage)
+        val adapter: ChatAdapter = when (config.apiProtocol) {
+            ApiProtocol.RESPONSES -> ResponsesAdapter
+            ApiProtocol.CHAT_COMPLETIONS -> ChatCompletionsAdapter
+            ApiProtocol.GEMINI -> GeminiAdapter
+            ApiProtocol.CLAUDE -> ClaudeMessagesAdapter()
         }
-        val input = JSONArray()
-        // Keep the newest complete text turns within a fixed local context budget.
-        val selected = ArrayList<ChatMessage>()
-        var budget = 65_536
-        for (message in history.asReversed()) {
-            if (message.role !in setOf("user", "assistant") || message.text.isBlank()) continue
-            if (selected.size >= 24 || message.text.length > budget) break
-            selected.add(message)
-            budget -= message.text.length
-        }
-        selected.asReversed().forEach { input.put(JSONObject().put("role", it.role).put("content", it.text)) }
-        val current = JSONArray().put(JSONObject().put("type", "input_text").put("text", question))
-        if (imageDataUrl != null) {
-            validateImage(imageDataUrl)
-            current.put(JSONObject().put("type", "input_image").put("image_url", imageDataUrl))
-        }
-        input.put(JSONObject().put("role", "user").put("content", current))
-        val body = JSONObject()
-            .put("model", config.model)
-            .put("instructions", config.instructions)
-            .put("input", input)
-            .put("store", false)
-            .put("stream", true)
-        ProviderProtocol.responseOptions(config).forEach { (name, value) -> body.put(name, JSONObject.wrap(value)) }
-        val bytes = body.toString().toByteArray(Charsets.UTF_8)
-        request(config, "responses", "application/json", bytes.size.toLong(), cancellation, {
-            it.write(bytes)
-        }) { connection, deadline ->
-            val contentType = connection.contentType.orEmpty().substringBefore(';').trim()
-            if (!contentType.equals("text/event-stream", ignoreCase = true)) {
-                throw ProviderException("服务未返回流式回答，请检查 API 地址与模型兼容性")
+        val wire = adapter.request(config, history, question, imageDataUrl)
+        val decoder = adapter.decoder(config)
+        val bytes = WireJson.encode(wire.body).toByteArray(Charsets.UTF_8)
+        HttpTransport().request(config, wire.route, "application/json", bytes.size.toLong(), cancellation,
+            { it.write(bytes) }, streaming = true, query = wire.query) { connection, deadline ->
+            if (!connection.contentType.orEmpty().substringBefore(';').trim().equals("text/event-stream", true))
+                throw ProviderException("服务未返回流式回答，请检查 API 协议、地址与模型")
+            val emit: (String) -> Unit = { cancellation.throwIfCancelled(); onDelta(it) }
+            connection.inputStream.use { input ->
+                val stream = EventStream(input, cancellation, deadline)
+                while (!decoder.complete) {
+                    val event = stream.next() ?: break
+                    if (event.data == "[DONE]") decoder.accept("__DONE__", emptyMap(), emit)
+                    else decoder.accept(event.name, WireJson.decode(event.data), emit)
+                }
+                cancellation.throwIfCancelled()
+                decoder.finish(emit).also { lastSearchUsed = decoder.searchUsed }
             }
-            connection.inputStream.use { readResponse(it, cancellation, deadline, onDelta) }
         }
     }
 
     override fun transcribe(config: AppConfig, file: File, cancellation: RequestCancellation): String = sanitized(cancellation) {
-        validateConfig(config)
+        validateConnection(config)
+        validateModel(config.transcriptionModel)
         WavTranscription.transcribe(file, cancellation, MAX_OUTPUT_CHARS) { source, bytes ->
             transcribePart(config, source, bytes, cancellation)
         }
@@ -104,101 +99,45 @@ internal class AiProvider : AiGateway {
                 output.write(suffix)
             }) { connection, deadline ->
             val json = connection.inputStream.use { readBounded(it, 1024 * 1024, cancellation, deadline) }
-            val text = JSONObject(json).optString("text").trim()
+            val value = JSONObject(json).opt("text")
+            if (value !is String) throw ProviderException("转写接口未返回文字，请检查接口协议与模型")
+            val text = value.trim()
             if (text.length > MAX_OUTPUT_CHARS) throw ProviderException("转写文字过长，请缩短录制")
             text
         }
     }
 
-    /** Explicit metadata request only: no question, screenshot or recording is uploaded. */
+    /** Explicit metadata only. Model-list success does not establish image/search compatibility. */
     fun listModels(config: AppConfig, cancellation: RequestCancellation = RequestCancellation()): List<String> = sanitized(cancellation) {
-        validateConfig(config)
-        request(config, "models", "application/json", 0, cancellation, {}, "GET") { connection, deadline ->
-            val json = JSONObject(connection.inputStream.use { readBounded(it, 2 * 1024 * 1024, cancellation, deadline) })
-            val data = json.optJSONArray("data") ?: throw ProviderException("模型列表格式无效")
-            if (data.length() > 10000) throw ProviderException("模型列表过大")
-            (0 until data.length()).mapNotNull { data.optJSONObject(it)?.optString("id") }
-                .filter { it.isNotBlank() && it.length <= 200 && it.none(Char::isISOControl) }.distinct().sorted()
-        }
-    }
-
-    private fun readResponse(
-        input: InputStream,
-        cancellation: RequestCancellation,
-        deadline: Long,
-        onDelta: (String) -> Unit,
-    ): String {
-        val stream = EventStream(input, cancellation, deadline)
-        val answer = StringBuilder()
-        val citations = linkedMapOf<String, String>()
-        fun append(delta: String) {
-            if (answer.length + delta.length > MAX_OUTPUT_CHARS) throw ProviderException("回答过长，请缩小问题范围")
-            cancellation.throwIfCancelled()
-            answer.append(delta)
-            if (delta.isNotEmpty()) onDelta(delta)
-        }
-        while (true) {
-            val event = stream.next() ?: throw ProviderException("回答连接提前中断，结果不完整，请手动重试")
-            if (event.data == "[DONE]") throw ProviderException("服务未确认回答完成，请手动重试")
-            val json = JSONObject(event.data)
-            when (json.optString("type", event.name)) {
-                "response.output_text.delta" -> append(json.optString("delta"))
-                "response.refusal.delta" -> {
-                    val delta = json.optString("delta")
-                    append(delta)
-                }
-                "response.output_text.annotation.added" -> collectCitation(json.optJSONObject("annotation"), citations)
-                "response.failed", "error" -> throw ProviderException("服务生成回答失败，请检查模型配置或稍后手动重试")
-                "response.incomplete" -> throw ProviderException("回答未完成，可能达到输出限制，请调整后手动重试")
-                "response.completed" -> {
-                    val response = json.optJSONObject("response") ?: throw ProviderException("服务完成事件无效")
-                    if (response.optString("status") != "completed" || !response.isNull("error") ||
-                        !response.isNull("incomplete_details")) throw ProviderException("服务未成功完成回答，请手动重试")
-                    val finalText = StringBuilder()
-                    val output = response.optJSONArray("output") ?: JSONArray()
-                    for (i in 0 until output.length()) {
-                        val item = output.optJSONObject(i) ?: continue
-                        if (item.optString("type") != "message") continue
-                        val content = item.optJSONArray("content") ?: continue
-                        for (j in 0 until content.length()) {
-                            val part = content.optJSONObject(j) ?: continue
-                            when (part.optString("type")) {
-                                "output_text" -> {
-                                    finalText.append(part.optString("text"))
-                                    val annotations = part.optJSONArray("annotations") ?: JSONArray()
-                                    for (k in 0 until annotations.length()) collectCitation(annotations.optJSONObject(k), citations)
-                                }
-                                "refusal" -> finalText.append(part.optString("refusal"))
-                            }
-                            if (finalText.length > MAX_OUTPUT_CHARS) throw ProviderException("回答过长，请缩小问题范围")
-                        }
-                    }
-                    if (answer.isEmpty()) append(finalText.toString())
-                    else if (finalText.isNotEmpty() && answer.toString() != finalText.toString()) {
-                        throw ProviderException("回答片段与最终结果不一致，请手动重试")
-                    }
-                    if (answer.isBlank()) throw ProviderException("服务没有返回文字回答")
-                    // Citation URLs come from structured annotations, never from model-generated titles.
-                    if (citations.isNotEmpty()) {
-                        append("\n\n来源：\n" + citations.entries.joinToString("\n") { (url, title) -> "- [$title]($url)" })
-                    }
-                    cancellation.throwIfCancelled()
-                    return answer.toString()
-                }
+        validateConnection(config)
+        val result = linkedSetOf<String>(); var cursor = ""
+        repeat(20) {
+            val query = when (config.apiProtocol) {
+                ApiProtocol.GEMINI -> buildMap { put("pageSize", "100"); if (cursor.isNotEmpty()) put("pageToken", cursor) }
+                ApiProtocol.CLAUDE -> buildMap { put("limit", "100"); if (cursor.isNotEmpty()) put("after_id", cursor) }
+                else -> emptyMap()
             }
+            val json = HttpTransport().request(config, "models", "application/json", 0, cancellation, {},
+                method = "GET", query = query) { connection, deadline ->
+                connection.inputStream.use { WireJson.decode(readBounded(it, 2 * 1024 * 1024, cancellation, deadline)) }
+            }
+            val key = if (config.apiProtocol == ApiProtocol.GEMINI) "models" else "data"
+            if (json[key] !is List<*>) throw ProviderException("模型列表格式无效，可手动填写模型 ID")
+            json.items(key).forEach { raw ->
+                val model = raw.wireObject().text(if (config.apiProtocol == ApiProtocol.GEMINI) "name" else "id")
+                if (model.isNotBlank() && model.length <= 200 && model.none(Char::isISOControl)) result.add(model.removePrefix("models/"))
+            }
+            if (result.size > 10000) throw ProviderException("模型列表过大")
+            val next = when (config.apiProtocol) {
+                ApiProtocol.GEMINI -> json.text("nextPageToken")
+                ApiProtocol.CLAUDE -> if (json["has_more"] == true) json.text("last_id").ifBlank { throw ProviderException("模型列表分页格式无效") } else ""
+                else -> ""
+            }
+            if (next.isEmpty()) return@sanitized result.sorted()
+            if (next == cursor) throw ProviderException("模型列表分页未推进")
+            cursor = next
         }
-    }
-
-    private fun collectCitation(annotation: JSONObject?, citations: MutableMap<String, String>) {
-        if (annotation?.optString("type") != "url_citation" || citations.size >= 10) return
-        val raw = annotation.optString("url")
-        if (raw.length > 2048) return
-        val uri = try { URI(raw) } catch (_: Exception) { return }
-        if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank() || uri.rawUserInfo != null) return
-        val url = uri.toASCIIString().replace("(", "%28").replace(")", "%29")
-        val title = annotation.optString("title").ifBlank { uri.host }.take(160)
-            .replace(Regex("[\\[\\]\\r\\n\\\\]"), " ")
-        citations[url] = title
+        throw ProviderException("模型列表分页过多，请手动填写模型 ID")
     }
 
     private fun <T> request(
@@ -218,15 +157,16 @@ internal class AiProvider : AiGateway {
     private fun readBounded(input: InputStream, maxBytes: Int, cancellation: RequestCancellation, deadline: Long) =
         HttpTransport.readBounded(input, maxBytes, cancellation, deadline)
 
-    private fun validateConfig(config: AppConfig) {
-        if (config.apiKey.isBlank() || config.apiKey.length > 4096 || config.apiKey.any { it.code < 33 || it.code > 126 }) {
-            throw ProviderException("请先设置有效的 API Key")
-        }
-        val modelPattern = Regex("[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}")
-        if (!modelPattern.matches(config.model) || !modelPattern.matches(config.transcriptionModel)) throw ProviderException("模型名称无效")
-        try { ProviderProtocol.validateOptions(config) }
-        catch (error: IllegalArgumentException) { throw ProviderException(error.message ?: "生成参数无效") }
-        if (config.transcriptionPrompt.length > 32000) throw ProviderException("转写提示过长")
+    private fun validateConnection(config: AppConfig) {
+        if (config.apiKey.isBlank() || config.apiKey.length > 4096 || config.apiKey.any { it.code < 33 || it.code > 126 })
+            throw ProviderException("请先为当前连接设置有效的 API Key")
+        ProviderProtocol.endpoint(config.baseUrl, "models")
+        require(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(config.apiVersion)) { "API 版本格式无效" }
+        require(config.workspaceId.length <= 200 && config.workspaceId.none { it.code < 33 || it.code > 126 }) { "Workspace ID 无效" }
+    }
+
+    private fun validateModel(model: String) {
+        if (!Regex("[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}").matches(model)) throw ProviderException("请先为此用途填写有效的模型 ID")
     }
 
     private fun validateImage(data: String) {

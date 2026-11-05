@@ -12,6 +12,7 @@ internal interface ChatAdapter {
 /** Pure map-based codec boundary: tests need no Android JSON runtime or paid API. */
 internal interface AnswerDecoder {
     val complete: Boolean
+    val searchUsed: Boolean get() = false
     fun accept(eventName: String, data: Map<String, Any?>, onDelta: (String) -> Unit)
     fun finish(onDelta: (String) -> Unit): String
 }
