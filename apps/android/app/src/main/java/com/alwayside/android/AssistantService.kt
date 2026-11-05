@@ -125,7 +125,7 @@ class AssistantService : Service() {
         var imageMode = 0
         var searchDefault = false
         var apiSnapshot: AppConfig? = null
-        val suggestionViews = mutableMapOf<String, android.webkit.WebView>()
+        val suggestionViews = mutableMapOf<String, SearchSuggestionsView>()
         var webSearchOverride: Boolean? = null
         var draft = ""
         var composerExpanded = false
@@ -732,7 +732,7 @@ class AssistantService : Service() {
             if(!user && suggestions.isNotBlank() && suggestions.length<=32768) {
                 val widgetKey="$index:$suggestions"
                 visibleSuggestionKeys.add(widgetKey)
-                val widget=node.suggestionViews.getOrPut(widgetKey) { uiContext.searchSuggestionsView(suggestions) as android.webkit.WebView }
+                val widget=node.suggestionViews.getOrPut(widgetKey) { uiContext.searchSuggestionsView(suggestions) }
                 if(widget.parent!==row) {
                     (widget.parent as? ViewGroup)?.removeView(widget)
                     while(row.childCount>1)row.removeViewAt(1)

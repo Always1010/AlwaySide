@@ -53,7 +53,7 @@ internal class ChatScreen(
     private lateinit var contextTools: LinearLayout
     private var webSearchOverride: Boolean? = retained?.webSearchOverride
         ?: savedState?.takeIf { it.containsKey("webSearchOverride") }?.getBoolean("webSearchOverride")
-    private val suggestionViews = mutableMapOf<String, android.webkit.WebView>()
+    private val suggestionViews = mutableMapOf<String, SearchSuggestionsView>()
     private val visibleSuggestionKeys = mutableSetOf<String>()
     private var activeConnection = runCatching { SettingsStore(this).load() }.getOrDefault(AppConfig())
     private var defaultWebSearch = activeConnection.webSearch
@@ -363,7 +363,7 @@ internal class ChatScreen(
             if (!isUser && suggestions.isNotBlank() && suggestions.length <= 32768) {
                 val widgetKey = "$messageIndex:$suggestions"
                 visibleSuggestionKeys.add(widgetKey)
-                val widget = suggestionViews.getOrPut(widgetKey) { this@ChatScreen.searchSuggestionsView(suggestions) as android.webkit.WebView }
+                val widget = suggestionViews.getOrPut(widgetKey) { this@ChatScreen.searchSuggestionsView(suggestions) }
                 (widget.parent as? android.view.ViewGroup)?.removeView(widget)
                 addView(widget)
             }
