@@ -65,8 +65,8 @@ class AssistantService : Service() {
     private var recorder: PlaybackRecorder? = null
     private var finishingAudio = false
     private var audioManual = false
-    private var requestingConsent = false
-    private var captureContinuation: (() -> Unit)? = null
+    private val capturePermissionGate = CapturePermissionGate()
+    private val requestingConsent: Boolean get() = capturePermissionGate.isPending
     private var player: MediaPlayer? = null
     private var lastKind = "photo"
     private val taps = TapSequence()
@@ -190,8 +190,16 @@ class AssistantService : Service() {
         }
         if (!Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
         try {
+            val permissionResponse = intent?.action == SHARE ||
+                (intent?.action == START && intent.hasExtra(CapturePermissionGate.EXTRA_REQUEST_ID))
+            if (permissionResponse && !AssistantControl.isEnabled(this)) { stopSelf(); return START_NOT_STICKY }
+            val permissionRequest = if (permissionResponse)
+                capturePermissionGate.consume(intent?.getStringExtra(CapturePermissionGate.EXTRA_REQUEST_ID)) else null
+            if (permissionResponse && permissionRequest == null) {
+                // Delayed replies must not reuse consent belonging to a previous request or service.
+                foreground(projection != null);showBubble();return START_NOT_STICKY
+            }
             if (intent?.action == START || intent?.action == TEXT) AssistantControl.setEnabled(this, true)
-            if(intent?.action == START || intent?.action == SHARE) requestingConsent=false
             foreground(intent?.action == SHARE || projection != null)
             if (intent?.action == SHARE && projection == null) {
                 @Suppress("DEPRECATION")
@@ -208,9 +216,8 @@ class AssistantService : Service() {
                 }
             }
             showBubble()
-            val requestedAction=intent?.getStringExtra("requestedAction")
-            val continuation=captureContinuation
-            captureContinuation=null
+            val requestedAction=if(permissionRequest!=null)intent?.getStringExtra("requestedAction") else null
+            val continuation=permissionRequest?.continuation
             if(requestedAction in setOf(AssistantActions.SCREEN,AssistantActions.CROP,AssistantActions.AUDIO)) {
                 // The permission bridge delivers only as it leaves, with its close animation disabled.
                 // A screenshot additionally waits for two compositor frames before sampling a fresh frame.
@@ -400,16 +407,18 @@ class AssistantService : Service() {
     }
     private fun requestCaptureConsent(action: String, continuation: (() -> Unit)? = null) {
         if(!alive || requestingConsent)return
-        requestingConsent=true;captureContinuation=continuation;removeMenu();hideUnpinned()
+        val requestId=capturePermissionGate.begin(continuation)
+        removeMenu();hideUnpinned()
         try {
             // Keep the visible overlay until startActivity: Android permits this user-initiated
             // launch through SYSTEM_ALERT_WINDOW only while an overlay is actually visible.
             startActivity(Intent(this,CapturePermissionActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra("requestedAction",action).putExtra("needsCapture",projection==null))
+                .putExtra("requestedAction",action).putExtra("needsCapture",projection==null)
+                .putExtra(CapturePermissionGate.EXTRA_REQUEST_ID,requestId))
             removeBubble()
         } catch(_:RuntimeException) {
-            requestingConsent=false;captureContinuation=null;showBubble();toast("无法打开系统授权，请返回应用后重试")
+            capturePermissionGate.cancel();showBubble();toast("无法打开系统授权，请返回应用后重试")
         }
     }
     private fun showMenu(preserveWindows: Boolean = false) {
@@ -984,7 +993,7 @@ class AssistantService : Service() {
         requestAppearanceRefresh()
     }
     override fun onDestroy(){
-        alive=false;captureContinuation=null;main.removeCallbacksAndMessages(null);ActiveConversationBridge.detachHandler=null
+        alive=false;capturePermissionGate.cancel();main.removeCallbacksAndMessages(null);ActiveConversationBridge.detachHandler=null
         AppAppearance.removeListener(this, appearanceListener)
         preferences.removeListener(preferencesListener);cancelRecording(false);stopPlayback()
         apiPreferences.unregisterOnSharedPreferenceChangeListener(apiPreferencesListener)

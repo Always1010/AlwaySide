@@ -88,11 +88,13 @@ class CapturePermissionActivity : ThemedActivity() {
     private fun complete(serviceIntent: Intent) {
         if (stage == "done") return
         stage = "done"
-        pendingDelivery = serviceIntent
+        pendingDelivery = serviceIntent.putExtra(CapturePermissionGate.EXTRA_REQUEST_ID,
+            intent.getStringExtra(CapturePermissionGate.EXTRA_REQUEST_ID))
         finishPermissionFlow()
     }
 
     private fun restoreIntent() = Intent(this, AssistantService::class.java).setAction(AssistantService.START)
+        .putExtra(CapturePermissionGate.EXTRA_REQUEST_ID, intent.getStringExtra(CapturePermissionGate.EXTRA_REQUEST_ID))
 
     @Suppress("DEPRECATION")
     private fun finishPermissionFlow() {
