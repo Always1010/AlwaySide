@@ -66,7 +66,8 @@ internal class ChatScreen(
     private var restoredStatus = ""
     private var handoff: HandedOffConversation? = null
     private var openedStoredRecord = false
-    private var playback: AudioPlaybackDialog? = null
+    private val playbackIcon = AudioPlaybackIcon(this)
+    private val playback = ChatAudioPlayback(this) { updatePlayback(it) }
     internal data class RetainedConversation(
         val session: ChatSession, val image: Bitmap?, val handoff: HandedOffConversation?,
         val title: String, val status: String, val openedStoredRecord: Boolean,
@@ -154,13 +155,15 @@ internal class ChatScreen(
                     }
                     if (ready) render() else renderWebSearch()
                 }
-                override fun onViewDetachedFromWindow(view: View) { playback?.dismiss(); playback = null }
+                override fun onViewDetachedFromWindow(view: View) { playback.stop() }
             })
         }
         toolbar = materialToolbar("对话", onBack).apply {
             addIconAction(1, R.drawable.ic_copy, "复制整段会话") { copyConversation() }
             addIconAction(2, android.R.drawable.ic_menu_manage, "设置") { onSettings() }
-            addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.isVisible = false
+            addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
+                icon = playbackIcon; isVisible = false
+            }
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(64)))
         statusView = label("", 11f, true).apply { setPadding(dp(22), dp(8), dp(22), 0) }
@@ -432,9 +435,26 @@ internal class ChatScreen(
                 runCatching { ConversationMediaStore(this).loadAudio(session.conversationId) }.getOrNull() else null
 
     private fun playAudio() {
+        if (playback.isActive) { playback.toggle(); return }
         val file = availableAudio() ?: run { toast("原始音频未保留或已被删除"); return }
-        playback?.dismiss()
-        playback = AudioPlaybackDialog(this, file).also { it.show() }
+        playback.play(file)
+    }
+
+    private fun updatePlayback(state: ChatAudioPlayback.State) {
+        playbackIcon.update(state)
+        toolbar.menu.findItem(3)?.apply {
+            val enabled = !state.preparing
+            if (isEnabled != enabled) isEnabled = enabled
+            val label = when {
+                state.preparing -> "正在读取音频"
+                state.playing -> "暂停回听"
+                state.remaining != null -> "继续回听"
+                else -> "回听原始音频"
+            }
+            if (title != label) {
+                title = label; contentDescription = label; tooltipText = label
+            }
+        }
     }
 
     private fun showSourceText() {
@@ -492,7 +512,7 @@ internal class ChatScreen(
         suggestionViews.clear()
         if (closing) return
         closing = true
-        playback?.dismiss(); playback = null
+        playback.stop()
         if (!retaining || !ready) releaseConversation()
     }
 
