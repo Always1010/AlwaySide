@@ -16,6 +16,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import kotlin.math.abs
@@ -58,6 +59,8 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
 internal enum class AssistantMenuAction { SCREEN, AUDIO, CANCEL_AUDIO, CROP, LAST, PLAY, HISTORY, SETTINGS, STOP }
 
 internal class AssistantMenuViews(context: Context, recording: Boolean = false, hasClip: Boolean = false,
+    webSearch: Boolean = false, useDefaultQuestion: Boolean = true,
+    onWebSearchChanged: (Boolean) -> Unit = {}, onDefaultQuestionChanged: (Boolean) -> Unit = {},
     onAction: (AssistantMenuAction) -> Unit) {
     val view = LinearLayout(context).apply {
         orientation=LinearLayout.VERTICAL;setPadding(context.dp(4),context.dp(4),context.dp(4),context.dp(4))
@@ -84,8 +87,24 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
         item(AssistantMenuAction.AUDIO,R.drawable.ic_line_audio,if(recording)"结束录音并处理" else "听一段")
         if(recording)item(AssistantMenuAction.CANCEL_AUDIO,R.drawable.ic_line_close,"取消并丢弃录音")
         item(AssistantMenuAction.CROP,R.drawable.ic_line_crop,"框选问答")
-        item(AssistantMenuAction.LAST,R.drawable.ic_line_text,"最近悬浮对话")
         if(hasClip)item(AssistantMenuAction.PLAY,R.drawable.ic_line_play,"回听上一段")
+        item(AssistantMenuAction.LAST,R.drawable.ic_line_text,"最近悬浮对话")
+        view.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)).apply {
+            setMargins(dp(8),dp(4),dp(8),dp(4))
+        })
+        fun option(title:String,checked:Boolean,description:String,changed:(Boolean)->Unit) {
+            val check=MaterialCheckBox(this).apply {
+                text=title;isChecked=checked;textSize=13f;setTextColor(INK)
+                minHeight=dp(38);minimumHeight=dp(38);minWidth=0;minimumWidth=0
+                setPadding(dp(8),0,dp(8),0);compoundDrawablePadding=dp(4)
+                buttonTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(ACCENT,MUTED))
+                accessible(title);tooltipText=description
+                setOnCheckedChangeListener { _,selected -> changed(selected) }
+            }
+            view.addView(check,LinearLayout.LayoutParams(-1,-2))
+        }
+        option("联网搜索",webSearch,"允许新悬浮会话搜索网页；关闭后仍需联网调用模型",onWebSearchChanged)
+        option("使用默认提问方式",useDefaultQuestion,"关闭后展开输入框，补充问题再发送",onDefaultQuestionChanged)
         view.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)).apply {
             setMargins(dp(8),dp(4),dp(8),dp(4))
         })

@@ -35,9 +35,10 @@ internal enum class RecordingLimitAction(val value: String, val title: String) {
 internal enum class RecordingDisposition { DISCARD, PROMPT, PROCESS, READY }
 
 internal fun recordingDisposition(reachedLimit: Boolean, action: RecordingLimitAction,
-                                  autoAskAudio: Boolean, manualQuestion: Boolean): RecordingDisposition =
+                                  autoAskAudio: Boolean, manualQuestion: Boolean,
+                                  useDefaultQuestion: Boolean = true): RecordingDisposition =
     if (reachedLimit) when (action) {
         RecordingLimitAction.DISCARD -> RecordingDisposition.DISCARD
         RecordingLimitAction.PROMPT -> RecordingDisposition.PROMPT
-        RecordingLimitAction.PROCESS -> RecordingDisposition.PROCESS
-    } else if (autoAskAudio && !manualQuestion) RecordingDisposition.PROCESS else RecordingDisposition.READY
+        RecordingLimitAction.PROCESS -> if (useDefaultQuestion) RecordingDisposition.PROCESS else RecordingDisposition.READY
+    } else if (useDefaultQuestion && autoAskAudio && !manualQuestion) RecordingDisposition.PROCESS else RecordingDisposition.READY

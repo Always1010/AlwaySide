@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InteractionTest {
+    @Test fun menuManualModeStopsEveryAutomaticFirstQuestionWithoutOverwritingPerTypeDefaults() {
+        val configured = InteractionConfig(autoAskImage = true, autoAskAudio = false, autoAskText = true)
+        val manual = configured.copy(useDefaultQuestion = false)
+        listOf("photo", "audio", "text").forEach { assertFalse(manual.autoAsk(it)) }
+        assertEquals(configured, manual.copy(useDefaultQuestion = true))
+        assertTrue(configured.autoAsk("photo"))
+        assertFalse(configured.autoAsk("audio"))
+        assertTrue(configured.autoAsk("text"))
+    }
+
     @Test fun audioArchivingDefaultsOnAndCanBeDisabledIndependentlyOfImages() {
         val defaults = InteractionConfig()
         assertTrue(defaults.saveHistoryAudio)

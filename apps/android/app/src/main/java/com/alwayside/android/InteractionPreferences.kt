@@ -41,7 +41,15 @@ internal data class InteractionConfig(
     val collapseFollowUpByDefault: Boolean = true,
     val saveHistoryAudio: Boolean = true,
     val recordingLimitAction: RecordingLimitAction = RecordingLimitAction.DISCARD,
+    val useDefaultQuestion: Boolean = true,
+    val menuWebSearch: Boolean? = null,
 ) {
+    fun autoAsk(kind: String): Boolean = useDefaultQuestion && when (kind) {
+        "photo" -> autoAskImage
+        "audio" -> autoAskAudio
+        else -> autoAskText
+    }
+
     fun action(taps: Int, recording: Boolean): String = when {
         recording && taps == 1 -> recordingSingleAction
         recording && taps == 2 -> recordingDoubleAction
@@ -82,6 +90,8 @@ internal class InteractionPreferences(private val context: Context) {
             prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
             prefs.getBoolean("saveHistoryAudio", d.saveHistoryAudio),
             RecordingLimitAction.from(prefs.getString("recordingLimitAction", null)),
+            prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
+            if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
         )
         if (version >= InteractionDefaults.VERSION) return loaded
         val upgraded = InteractionDefaults.upgrade(loaded)
@@ -97,7 +107,7 @@ internal class InteractionPreferences(private val context: Context) {
         require((listOf(value.singleAction, value.doubleAction, value.tripleAction, value.longAction,
             value.recordingSingleAction, value.recordingDoubleAction, value.recordingTripleAction,
             value.recordingLongAction)).all { it in AssistantActions.choices })
-        check(prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
+        val edit=prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
             .putInt("ballSize", value.ballSize).putInt("ballOpacity", value.ballOpacity)
             .putInt("ballColor", value.ballColor).putString("singleAction", value.singleAction)
             .putString("doubleAction", value.doubleAction).putString("tripleAction", value.tripleAction)
@@ -110,7 +120,10 @@ internal class InteractionPreferences(private val context: Context) {
             .putInt("recordingMaxMinutes", value.recordingMaxMinutes)
             .putString("recordingLimitAction", value.recordingLimitAction.value)
             .putBoolean("collapseFollowUpByDefault", value.collapseFollowUpByDefault)
-            .putBoolean("saveHistoryAudio", value.saveHistoryAudio).commit()) { "无法保存交互设置" }
+            .putBoolean("saveHistoryAudio", value.saveHistoryAudio)
+            .putBoolean("useDefaultQuestion", value.useDefaultQuestion)
+        if (value.menuWebSearch == null) edit.remove("menuWebSearch") else edit.putBoolean("menuWebSearch", value.menuWebSearch)
+        check(edit.commit()) { "无法保存交互设置" }
     }
     fun window(kind: String): SavedWindow? = if (!prefs.contains("${kind}_width")) null else SavedWindow(
         prefs.getFloat("${kind}_x", .5f).coerceIn(0f, 1f), prefs.getFloat("${kind}_y", .5f).coerceIn(0f, 1f),

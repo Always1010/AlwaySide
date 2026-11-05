@@ -157,6 +157,7 @@ class AssistantService : Service() {
             chat.newConversation(kind = kind)
             pinned = config.defaultPinned
             searchDefault = runCatching { SettingsStore(this@AssistantService).load().webSearch }.getOrDefault(false)
+            webSearchOverride = config.menuWebSearch
             imageMode = if (kind == "photo" && runCatching { SettingsStore(this@AssistantService).load().autoUpdateImage }.getOrDefault(false)) 1 else if (kind == "audio") 2 else 0
         }
     }
@@ -215,8 +216,7 @@ class AssistantService : Service() {
             if (intent?.action == TEXT) {
                 val selected = intent.getStringExtra("selectedText").orEmpty().trim().take(12000)
                 if(selected.isNotBlank()) {
-                    val node=fresh("text");node.chat.setSourceText(selected);archivePrepared(node);showWindow(node)
-                    if(config.autoAskText)submitDefault(node)
+                    val node=fresh("text");node.chat.setSourceText(selected);showPrepared(node,config.autoAsk("text"))
                 } else toast("没有取得选中的文字")
             }
             if (intent?.action == "resume_history") {
@@ -417,7 +417,11 @@ class AssistantService : Service() {
             setOnClickListener { removeMenu() }
         }
         installOverlayBack(body,::removeMenu)
-        val presentation = AssistantMenuViews(uiContext,recorder != null,nodes["audio"]?.clip != null) { action ->
+        val defaultSearch=runCatching { SettingsStore(this).load().webSearch }.getOrDefault(false)
+        val presentation = AssistantMenuViews(uiContext,recorder != null,nodes["audio"]?.clip != null,
+            webSearch=config.menuWebSearch ?: defaultSearch,useDefaultQuestion=config.useDefaultQuestion,
+            onWebSearchChanged={saveMenuConfig(config.copy(menuWebSearch=it))},
+            onDefaultQuestionChanged={saveMenuConfig(config.copy(useDefaultQuestion=it))}) { action ->
             removeMenu()
             when(action) {
                 AssistantMenuAction.SCREEN -> captureNew(false)
@@ -465,6 +469,13 @@ class AssistantService : Service() {
             }
         } catch (_: RuntimeException) { removeMenu();toast("无法打开菜单") }
     }
+    private fun saveMenuConfig(updated:InteractionConfig) {
+        // Publish first so the preferences listener leaves this still-open menu in place.
+        config=updated
+        runCatching { preferences.save(updated) }.onFailure {
+            config=preferences.load();toast("无法保存菜单选项，请重试");showMenu(preserveWindows=true)
+        }
+    }
     private fun fresh(kind: String): FloatingConversation {
         nodes.remove(kind)?.let { old ->
             hideWindow(old)
@@ -484,12 +495,12 @@ class AssistantService : Service() {
         if (stopAudio) stopPlayback()
     }
     private fun icon(resource: Int, description: String, run: () -> Unit) = uiContext.iconButton(resource,description,run)
-    private fun showWindow(node: FloatingConversation, restoredLayout: WindowManager.LayoutParams? = null) {
+    private fun showWindow(node: FloatingConversation, restoredLayout: WindowManager.LayoutParams? = null, focusQuestion: Boolean = false) {
         if (!alive || node.detached || gathering) return
         removeMenu();removeSelector();if(restoredLayout==null)hideUnpinned(node);hideWindow(node,stopAudio=restoredLayout==null);lastKind=node.kind
         config=preferences.load()
         // Theme/configuration rebuilds retain the current state; a fresh invocation uses the preference.
-        if(restoredLayout==null)node.composerExpanded=!config.collapseFollowUpByDefault
+        if(restoredLayout==null)node.composerExpanded=focusQuestion||!config.collapseFollowUpByDefault
         val size=screenSize();val saved=preferences.window(node.kind)
         val width=minOf(dp(if(config.rememberWindowSize)saved?.widthDp ?: 320 else 320),size.first-dp(24)).coerceAtLeast(dp(180))
         val height=minOf(dp(if(config.rememberWindowSize)saved?.heightDp ?: 340 else 340),size.second-dp(100)).coerceAtLeast(dp(220))
@@ -521,7 +532,9 @@ class AssistantService : Service() {
         if(node.awaitingAudioApproval) {
             node.audioApproval=LinearLayout(uiContext).apply {
                 gravity=Gravity.CENTER_VERTICAL
-                action("转写",true) { approvePendingAudio(node) }.apply { accessible("确认转写本段录音，按音频默认输出处理") }
+                action(if(config.useDefaultQuestion)"转写" else "补充问题",true) { approvePendingAudio(node) }.apply {
+                    accessible(if(config.useDefaultQuestion)"确认转写本段录音，按音频默认输出处理" else "保留本段录音，补充问题后发送")
+                }
                 action("丢弃") { discardPendingAudio(node) }.apply { accessible("丢弃本段录音，不发起转写") }
             }.also { sourceContent.addView(it) }
         }
@@ -572,8 +585,8 @@ class AssistantService : Service() {
             if(ime>0&&node.root===root){val bottom=screenSize().second-ime-dp(12);val y=layout.y.coerceAtMost((bottom-layout.height).coerceAtLeast(dp(8)));if(y!=layout.y){layout.y=y;runCatching{windows.updateViewLayout(root,layout)}}}
             insets
         }
-        layout.softInputMode=WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        try{windows.addView(root,layout);node.root=root;node.layout=layout;if(!node.composerExpanded)root.requestFocus();updatePin(node);refresh(node)}catch(_:RuntimeException){toast("无法打开结果窗口，请检查悬浮权限")}
+        layout.softInputMode=(if(focusQuestion)WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE else WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN) or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        try{windows.addView(root,layout);node.root=root;node.layout=layout;if(!node.composerExpanded)root.requestFocus();updatePin(node);refresh(node);if(focusQuestion)focusQuestionInput(node)}catch(_:RuntimeException){toast("无法打开结果窗口，请检查悬浮权限")}
         removeBubble();showBubble()
     }
     private fun setComposerExpanded(node:FloatingConversation,expanded:Boolean,fromUser:Boolean=false) {
@@ -587,12 +600,26 @@ class AssistantService : Service() {
         }
         node.composer?.visibility=if(expanded)View.VISIBLE else View.GONE
         updateComposerToggle(node)
-        if(expanded&&fromUser)node.input?.let { input ->
-            input.requestFocus()
+        if(expanded&&fromUser)focusQuestionInput(node)
+    }
+    private fun focusQuestionInput(node:FloatingConversation) {
+        val input=node.input ?: return
+        input.requestFocus();input.setSelection(input.text?.length ?: 0)
+        fun showKeyboard() {
             input.post {
-                if(node.input===input&&node.root?.isAttachedToWindow==true&&node.composerExpanded&&input.hasFocus())
+                if(node.input===input&&node.root?.isAttachedToWindow==true&&node.composerExpanded&&input.hasFocus()&&input.hasWindowFocus())
                     getSystemService(InputMethodManager::class.java).showSoftInput(input,InputMethodManager.SHOW_IMPLICIT)
             }
+        }
+        if(input.hasWindowFocus())showKeyboard() else {
+            input.viewTreeObserver.addOnWindowFocusChangeListener(object:ViewTreeObserver.OnWindowFocusChangeListener {
+                override fun onWindowFocusChanged(hasFocus:Boolean) {
+                    if(hasFocus) {
+                        if(input.viewTreeObserver.isAlive)input.viewTreeObserver.removeOnWindowFocusChangeListener(this)
+                        showKeyboard()
+                    }
+                }
+            })
         }
     }
     private fun updateComposerToggle(node:FloatingConversation) {
@@ -679,7 +706,7 @@ class AssistantService : Service() {
         node.imageChoice?.isEnabled=!node.chat.busy&&!gathering
         node.imageChoice?.alpha=if(node.imageChoice?.isEnabled==false).55f else 1f
         updateSearch(node)
-        if(nearBottom)scroll?.post{if(node.scroll===scroll)scroll.fullScroll(View.FOCUS_DOWN)}
+        if(nearBottom)scroll?.post{if(node.scroll===scroll&&node.input?.hasFocus()!=true)scroll.fullScroll(View.FOCUS_DOWN)}
         if(node.awaitingAudioApproval)ProbeState.lastEvent="已达录音上限，等待确认；尚未上传"
         else if(!node.chat.busy&&node.chat.status!=lastFinished){lastFinished=node.chat.status;ProbeState.lastEvent=node.chat.status}
     }
@@ -752,9 +779,13 @@ class AssistantService : Service() {
             }.onFailure{error->main.post{if(alive)toast("回答可继续，但图片未保存：${error.message?:"存储失败"}")}}
         }
     }
-    private fun submitDefault(node:FloatingConversation){val c=readApiConfig()?:return;node.automaticFirstQuestion=true;sendQuestion(node,when(node.kind){"photo"->c.defaultQuestion;"audio"->c.audioQuestion;else->c.textQuestion},c)}
+    private fun showPrepared(node:FloatingConversation,autoAsk:Boolean) {
+        archivePrepared(node);showWindow(node,focusQuestion=!autoAsk)
+        if(autoAsk)submitDefault(node)
+    }
+    private fun submitDefault(node:FloatingConversation){val c=readApiConfig()?:return;node.automaticFirstQuestion=true;sendQuestion(node,when(node.kind){"photo"->c.defaultQuestion;"audio"->c.audioQuestion;else->c.textQuestion},c,useDefaultAudioOutput=true)}
     private fun readApiConfig():AppConfig?=try{SettingsStore(this).load()}catch(_:Exception){toast("无法读取 API 配置，请在设置中重新保存密钥");null}
-    private fun sendQuestion(node:FloatingConversation,text:String,frozen:AppConfig?=null){
+    private fun sendQuestion(node:FloatingConversation,text:String,frozen:AppConfig?=null,useDefaultAudioOutput:Boolean=false){
         if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
         if(node.chat.busy||gathering||recorder!=null){toast("请先结束当前采集或请求");return}
         if(text.isBlank()){toast("请输入问题");return}
@@ -767,7 +798,7 @@ class AssistantService : Service() {
             if(node.detached||nodes[node.kind]!==node)return@submit
             val image=if(node.kind=="photo"&&node.imageMode!=2)node.frame?.bitmap else null
             val evidence=when(node.kind){"photo"->if(image!=null)imageDescription(node) else "仅文字上下文";"audio"->"内部录音 ${String.format(Locale.getDefault(),"%.1f",node.clip?.seconds ?: 0f)} 秒 · 不附图";else->"选中文字与本段上下文"}
-            try{node.chat.submit(c,text,image,evidence,if(node.kind=="audio"&&node.chat.transcript.isBlank())node.clip?.file else null);node.draft="";node.input?.setText("");persistImage(node);refresh(node)}catch(e:Exception){toast(e.message?:"无法发送")}
+            try{node.chat.submit(c,text,image,evidence,if(node.kind=="audio"&&node.chat.transcript.isBlank())node.clip?.file else null,useDefaultAudioOutput=useDefaultAudioOutput);node.draft="";node.input?.setText("");persistImage(node);refresh(node)}catch(e:Exception){toast(e.message?:"无法发送")}
         }
         if(node.kind=="photo"&&node.imageMode==1)capture(node,false,true){submit()} else submit()
     }
@@ -775,7 +806,7 @@ class AssistantService : Service() {
         if(recorder!=null){toast("请先完成或取消录音");return}
         if(gathering){toast("正在取得画面，请稍候");return}
         if(frames==null){requestCaptureConsent(if(crop)AssistantActions.CROP else AssistantActions.SCREEN);return}
-        val node=fresh("photo");capture(node,crop,false){archivePrepared(node);showWindow(node);if(config.autoAskImage)submitDefault(node)}
+        val node=fresh("photo");capture(node,crop,false){showPrepared(node,config.autoAsk("photo"))}
     }
     private fun capture(node:FloatingConversation,crop:Boolean,reuse:Boolean,after:()->Unit){
         if(!alive || gathering || node.detached || nodes[node.kind]!==node)return
@@ -840,7 +871,7 @@ class AssistantService : Service() {
             if(selector===body) { removeSelector();node.frame=null;showBubble();applyPendingAppearance() }
         }
         body=uiContext.column().apply{background=card(BACKGROUND);addView(uiContext.label("拖动选择画面",18f));addView(crop,LinearLayout.LayoutParams(-1,0,1f))
-            action("使用选区",true){val bounds=crop.selectedBounds();val bitmap=crop.selected();if(bounds==null||bitmap==null){toast("请先拖动选择足够大的区域");return@action};node.bounds=bounds;node.sourceSize=frame.bitmap.width to frame.bitmap.height;node.rotation=rotation;node.frame=CapturedFrame(bitmap,frame.capturedAt);node.imageMode=0;removeSelector();archivePrepared(node);showWindow(node);if(config.autoAskImage)submitDefault(node)}
+            action("使用选区",true){val bounds=crop.selectedBounds();val bitmap=crop.selected();if(bounds==null||bitmap==null){toast("请先拖动选择足够大的区域");return@action};node.bounds=bounds;node.sourceSize=frame.bitmap.width to frame.bitmap.height;node.rotation=rotation;node.frame=CapturedFrame(bitmap,frame.capturedAt);node.imageMode=0;removeSelector();showPrepared(node,config.autoAsk("photo"))}
             action("取消",run=cancel)
         }
         installOverlayBack(body,cancel)
@@ -865,7 +896,7 @@ class AssistantService : Service() {
             if(!alive||recorder!==next||!recordingGate.complete(token)){result?.file?.delete();return@start}
             recorder=null;finishingAudio=false;ProbeState.recording=false
             if(result==null){toast("未保存有效录音，请检查权限和音源");return@start}
-            val disposition=recordingDisposition(result.reachedLimit,recordingConfig.recordingLimitAction,config.autoAskAudio,audioManual)
+            val disposition=recordingDisposition(result.reachedLimit,recordingConfig.recordingLimitAction,config.autoAskAudio,audioManual,config.useDefaultQuestion)
             if(disposition==RecordingDisposition.DISCARD){
                 val deleted=result.file.delete()
                 ProbeState.lastEvent=if(deleted)"已达录音上限，本段录音已丢弃，未发起转写" else "已达录音上限，未发起转写；录音文件清理失败"
@@ -874,7 +905,7 @@ class AssistantService : Service() {
             val node=fresh("audio");node.clip=result;node.imageMode=2
             node.awaitingAudioApproval=disposition==RecordingDisposition.PROMPT
             if(!node.awaitingAudioApproval)archivePrepared(node)
-            showWindow(node)
+            showWindow(node,focusQuestion=disposition==RecordingDisposition.READY)
             if(node.awaitingAudioApproval){toast("已达录音上限，录音已停止，等待确认转写");return@start}
             if(result.peak<.0001)toast("未检测到有效声音，音源可能不允许采集")
             else if(disposition==RecordingDisposition.PROCESS)submitDefault(node)
@@ -884,7 +915,7 @@ class AssistantService : Service() {
     private fun approvePendingAudio(node:FloatingConversation){
         if(!node.awaitingAudioApproval||nodes[node.kind]!==node)return
         node.awaitingAudioApproval=false
-        archivePrepared(node);showWindow(node);submitDefault(node)
+        showPrepared(node,config.useDefaultQuestion)
     }
     private fun discardPendingAudio(node:FloatingConversation){
         if(!node.awaitingAudioApproval||nodes[node.kind]!==node)return

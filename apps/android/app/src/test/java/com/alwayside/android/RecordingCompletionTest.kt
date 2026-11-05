@@ -4,6 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RecordingCompletionTest {
+    @Test fun menuManualModeRequiresAQuestionEvenWhenTheLimitPolicyWouldProcessAutomatically() {
+        assertEquals(RecordingDisposition.READY, recordingDisposition(false, RecordingLimitAction.PROCESS, true, false, false))
+        assertEquals(RecordingDisposition.READY, recordingDisposition(true, RecordingLimitAction.PROCESS, true, false, false))
+        assertEquals(RecordingDisposition.DISCARD, recordingDisposition(true, RecordingLimitAction.DISCARD, true, false, false))
+        assertEquals(RecordingDisposition.PROMPT, recordingDisposition(true, RecordingLimitAction.PROMPT, true, false, false))
+    }
+
     @Test fun limitsStopOnEitherClockOrAudioSizeAndLatchBeforeLateManualStop() {
         listOf(96000 to 500L, 48000 to 1000L).forEach { (bytes, elapsed) ->
             val completion = RecordingCompletion()

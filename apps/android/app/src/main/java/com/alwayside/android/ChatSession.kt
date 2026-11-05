@@ -59,18 +59,21 @@ internal class ChatSession(
     private data class Request(val config: AppConfig, val history: List<ChatMessage>, val question: String,
         val image: Bitmap?, val evidence: String, val audio: File?, val transcript: String, val sourceText: String)
 
-    fun submit(config: AppConfig, text: String, image: Bitmap?, label: String, audio: File? = null) {
+    fun submit(config: AppConfig, text: String, image: Bitmap?, label: String, audio: File? = null,
+               useDefaultAudioOutput: Boolean = true) {
         if (busy) return
-        val effectiveQuestion = if (audio != null && config.audioOutput == "translate") AUDIO_TRANSLATION_QUESTION else text
+        // A question entered by the user must also reach the response model for transcript/translation presets.
+        val requestConfig = if (audio != null && !useDefaultAudioOutput) config.copy(audioOutput = "interpret") else config
+        val effectiveQuestion = if (audio != null && requestConfig.audioOutput == "translate") AUDIO_TRANSLATION_QUESTION else text
         require(effectiveQuestion.isNotBlank()) { "请输入问题" }
         require(effectiveQuestion.length <= 12000) { "问题过长，请控制在 12000 字以内" }
         require(config.apiKey.isNotBlank()) { "请先到设置填写 API Key" }
-        val audioKey = audio?.let { audioKey(it, config) }
+        val audioKey = audio?.let { audioKey(it, requestConfig) }
         val known = if (audioKey != null) {
             if (cachedAudio?.first == audioKey) cachedAudio!!.second else ""
         } else transcript
         if (audio != null) kind = "audio" else if (image != null) kind = "photo"
-        start(Request(config.copy(), messages.takeLast(24).toList(), effectiveQuestion, image, label, audio, known, sourceText))
+        start(Request(requestConfig.copy(), messages.takeLast(24).toList(), effectiveQuestion, image, label, audio, known, sourceText))
     }
     fun retry() { if (!busy) retry?.let { start(it) } }
     private fun start(request: Request) {

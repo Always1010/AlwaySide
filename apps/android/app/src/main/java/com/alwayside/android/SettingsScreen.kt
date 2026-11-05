@@ -357,7 +357,7 @@ internal class SettingsScreen(
         check("autoAskImage", "截图后自动使用默认问题提问", interaction.autoAskImage)
         check("autoAskAudio", "手动结束录音后自动按默认设置处理", interaction.autoAskAudio)
         check("autoAskText", "选中文字后自动提问", interaction.autoAskText)
-        note("关闭后先打开会话，等你点发送。取消录音始终直接丢弃片段。")
+        note("悬浮球菜单中的「使用默认提问方式」是总开关。关闭总开关或对应选项后，先展开并聚焦问题输入框，等你补充问题再发送。取消录音始终直接丢弃片段。")
         check("autoUpdateImage", "截图追问默认更新当前画面", config.autoUpdateImage)
         note("发送时才采集新画面，需开启屏幕共享。会话中仍可逐次选择沿用原图或仅发文字。")
     }

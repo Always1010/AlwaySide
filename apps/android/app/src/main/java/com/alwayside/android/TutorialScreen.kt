@@ -150,7 +150,9 @@ internal class TutorialScreen(
         var window: FrameLayout?=null
         if(flow.step in setOf(TutorialStep.BUBBLE,TutorialStep.LONG_PRESS,TutorialStep.AUDIO_START,TutorialStep.AUDIO_RECORDING,TutorialStep.CANCEL_START,TutorialStep.CANCEL_RECORDING))target=bubble
         else if(flow.step==TutorialStep.MENU) {
-            val shared=AssistantMenuViews(this) { action ->
+            val shared=AssistantMenuViews(this,
+                onWebSearchChanged={explain("这里可选择新悬浮会话是否联网搜索；本次引导始终不联网。")},
+                onDefaultQuestionChanged={explain("关闭默认提问后，采集完成会展开输入框，等你补充问题再发送。")}) { action ->
                 if(action==AssistantMenuAction.SCREEN)act(TutorialAction.CAPTURE)
                 else explain("本项先介绍「截图问答」，其他功能可在实际使用时操作。")
             }

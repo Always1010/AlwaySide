@@ -378,7 +378,7 @@ internal class ChatScreen(
                 else -> "仅文字"
             }
             restoredStatus = ""
-            session.submit(config, text, attachment, label, pendingAudioFile)
+            session.submit(config, text, attachment, label, pendingAudioFile, useDefaultAudioOutput = false)
             composer.text?.clear()
         } catch (error: Exception) {
             toast(error.message?.take(180) ?: "发送失败，请检查 API 设置")

@@ -11,6 +11,31 @@ import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.TimeUnit
 
 class ChatSessionTest {
+    @Test fun manualAudioQuestionOverridesDefaultOutputAndRetryKeepsTheQuestion() {
+        listOf("transcript", "translate", "interpret").forEach { output ->
+            val h = Harness()
+            val config = h.config.copy(audioOutput = output)
+            val question = "只提取音频中的行动项，不要翻译。"
+            h.gateway.response = {
+                if (h.gateway.calls.size == 1) throw ProviderException("failed")
+                "行动项"
+            }
+            h.session.submit(config, question, null, "audio", File("old.wav"), useDefaultAudioOutput = false)
+            h.worker.runNext(); h.drainMain()
+            h.session.retry()
+            h.worker.runNext(); h.drainMain()
+            assertEquals(1, h.gateway.transcribeCount)
+            assertEquals(2, h.gateway.calls.size)
+            h.gateway.calls.forEach {
+                assertTrue(it.question.startsWith(question + "\n\n"))
+                assertEquals("interpret", it.config.audioOutput)
+            }
+            assertEquals(question, h.session.messages.first().text)
+            assertEquals("行动项", h.session.messages.last().text)
+            assertEquals(output, config.audioOutput)
+        }
+    }
+
     @Test fun titleComesFromTheFirstCompleteAnswerAndSurvivesHistoryTrimmingAndRestore() {
         val h = Harness()
         h.gateway.response = { "## **翻译如下：**\n\n**您的订阅将在下个月自动续费**\n具体说明" }
