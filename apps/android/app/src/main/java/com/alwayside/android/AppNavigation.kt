@@ -1,6 +1,6 @@
 package com.alwayside.android
 
-internal enum class AppPage { HISTORY, CHAT, SETTINGS, TUTORIAL }
+internal enum class AppPage { HISTORY, CHAT, SETTINGS, TUTORIAL, PREPARATION }
 internal enum class AppBack { SETTINGS_CATEGORY, PAGE, EXIT }
 
 /** Application destinations share one Android window; only these routes form its back stack. */
@@ -12,6 +12,8 @@ internal class AppNavigation(savedPages: List<String> = emptyList()) {
         val parent = if (restored.lastOrNull() == AppPage.TUTORIAL) restored.dropLast(1) else restored
         if (parent in listOf(listOf(AppPage.HISTORY), listOf(AppPage.HISTORY, AppPage.CHAT),
                 listOf(AppPage.HISTORY, AppPage.SETTINGS),
+                listOf(AppPage.HISTORY, AppPage.PREPARATION),
+                listOf(AppPage.HISTORY, AppPage.PREPARATION, AppPage.SETTINGS),
                 listOf(AppPage.HISTORY, AppPage.CHAT, AppPage.SETTINGS))) {
             pages.clear(); pages.addAll(restored)
         }
@@ -22,6 +24,7 @@ internal class AppNavigation(savedPages: List<String> = emptyList()) {
     fun snapshot(): List<String> = pages.map { it.name }
     fun openSettings() { if (current != AppPage.SETTINGS) pages.add(AppPage.SETTINGS) }
     fun openTutorial() { if (current != AppPage.TUTORIAL) pages.add(AppPage.TUTORIAL) }
+    fun openPreparation() { pages.clear(); pages.addAll(listOf(AppPage.HISTORY, AppPage.PREPARATION)) }
     fun openChat() { pages.clear(); pages.addAll(listOf(AppPage.HISTORY, AppPage.CHAT)) }
     fun openHistory() { pages.clear(); pages.add(AppPage.HISTORY) }
     fun back(settingsAtRoot: Boolean = true): AppBack {

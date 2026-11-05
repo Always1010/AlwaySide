@@ -29,6 +29,7 @@ internal class SettingsScreen(
     private val onBack: () -> Unit,
     initialPage: String? = null,
     private val onTutorial: () -> Unit = {},
+    private val onPreparation: () -> Unit = {},
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
@@ -138,7 +139,8 @@ internal class SettingsScreen(
             })
         }
         body.addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-        val config = try { store.load().also { readable = true } } catch (_: Exception) { readable = false; AppConfig() }
+        val config = if(next == Page.HELP) AppConfig().also { readable = true }
+            else try { store.load().also { readable = true } } catch (_: Exception) { readable = false; AppConfig() }
         val interaction = interactionStore.load()
         if (!readable) status.text = "无法读取配置或解密密钥。请到 API 连接移除密钥；仍失败时可重置连接与模型配置。不会使用明文备用密钥。"
         when (next) {
@@ -154,6 +156,7 @@ internal class SettingsScreen(
             Page.HELP -> {
                 note("使用内置示例练习悬浮球、截图问答和追问。全程模拟，不联网，不调用 API，也不需要系统权限。")
                 action("开始模拟体验") { finishEditing(onTutorial) }
+                action("准备实际使用") { finishEditing(onPreparation) }
             }
         }
         root.addView(ScrollView(this).apply {

@@ -1,5 +1,6 @@
 package com.alwayside.android
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.res.ColorStateList
@@ -21,6 +22,7 @@ internal class TutorialScreen(
     private val onBack: () -> Unit,
     private val onExit: () -> Unit,
     private val onChanged: (TutorialStep) -> Unit = {},
+    private val onPrepare: () -> Unit,
 ) {
     val view = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND) }
 
@@ -49,7 +51,8 @@ internal class TutorialScreen(
             body.addView(label("你已经学会截图提问了", 20f))
             body.addView(label("点小球 → 截图问答 → 查看回答 → 继续提问").apply { setPadding(0, dp(16), 0, dp(16)) })
             body.addView(label("刚才使用的是内置模拟，没有调用 AI 服务，也没有截取你的屏幕。实际使用需要配置自己的 AI 服务，并按需授予权限。", 14f, true))
-            body.action("回到首页", true, onExit)
+            body.action("准备实际使用", true, onPrepare)
+            body.action("回到首页", false, onExit)
             return@with
         }
         val instruction = when (flow.step) {
@@ -116,7 +119,8 @@ internal class TutorialScreen(
                         background = outlinedCard(); setPadding(dp(12), dp(16), dp(12), dp(16))
                     })
                     if (flow.step == TutorialStep.QUESTION) {
-                        target = window.action(TutorialFlow.FOLLOWUP_QUESTION, true) { act(TutorialAction.FILL) }
+                        window.addView(label(TutorialFlow.FOLLOWUP_QUESTION,14f).apply { setPadding(0,dp(12),0,0) })
+                        target = window.action("填入练习问题", true) { act(TutorialAction.FILL) }
                         window.addView(label("练习仅使用这个预设问题，不会调用 AI。", 12f, true))
                     } else {
                         val sendRow = LinearLayout(this).apply { gravity = Gravity.END }
@@ -148,19 +152,23 @@ internal class TutorialScreen(
 }
 
 /** Non-interactive scrim: the real target remains clickable, with bounds measured in this scene. */
+@SuppressLint("ViewConstructor") // Programmatic decoration only; requires a live scene and target, never inflated from XML.
 private class TutorialSpotlight(context: Context, private val stage: FrameLayout, private val target: View) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x55000000 }
+    private val bounds = Rect()
+    private val cutout = RectF()
+    private val path = Path().apply { fillType = Path.FillType.EVEN_ODD }
+    private val gap = context.dp(4).toFloat()
+    private val radius = context.dp(16).toFloat()
     init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO; isClickable = false; isFocusable = false }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!target.isAttachedToWindow) return
-        val bounds = Rect(); target.getDrawingRect(bounds); stage.offsetDescendantRectToMyCoords(target, bounds)
-        val cutout = RectF(bounds).apply { inset(-context.dp(4).toFloat(), -context.dp(4).toFloat()) }
-        val path = Path().apply {
-            fillType = Path.FillType.EVEN_ODD
-            addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
-            addRoundRect(cutout, context.dp(16).toFloat(), context.dp(16).toFloat(), Path.Direction.CW)
-        }
+        target.getDrawingRect(bounds); stage.offsetDescendantRectToMyCoords(target, bounds)
+        cutout.set(bounds); cutout.inset(-gap,-gap)
+        path.rewind()
+        path.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
+        path.addRoundRect(cutout, radius, radius, Path.Direction.CW)
         canvas.drawPath(path, paint)
     }
 }

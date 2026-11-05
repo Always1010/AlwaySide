@@ -18,6 +18,12 @@ internal class SettingsStore(context: Context) {
     /** Install migration checks presence only; no credential is read or decrypted. */
     fun hasSavedConfiguration(): Boolean = prefs.contains("config") || prefs.contains("credential")
 
+    /** Preparation reads presence and public fields only, never decrypts a credential or connects. */
+    fun connectionPreparation(): ConnectionPreparation = synchronized(lock) {
+        val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
+        ConnectionPreparation(data.optString("baseUrl").isNotBlank(), prefs.contains("credential"), data.optString("model").isNotBlank())
+    }
+
     fun load(): AppConfig = synchronized(lock) {
         val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
         val defaults = AppConfig()

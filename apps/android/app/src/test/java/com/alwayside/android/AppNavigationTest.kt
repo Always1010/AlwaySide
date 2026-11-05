@@ -4,6 +4,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppNavigationTest {
+    @Test fun preparationSettingsReturnToPreparationAndRestoreAfterRecreation() {
+        val nav = AppNavigation().apply { openTutorial(); openPreparation(); openSettings() }
+        val restored = AppNavigation(nav.snapshot())
+        assertEquals(listOf("HISTORY", "PREPARATION", "SETTINGS"), restored.snapshot())
+        assertEquals(AppBack.SETTINGS_CATEGORY, restored.back(false))
+        assertEquals(AppBack.PAGE, restored.back())
+        assertEquals(AppPage.PREPARATION, restored.current)
+        assertEquals(AppBack.PAGE, restored.back())
+        assertEquals(AppPage.HISTORY, restored.current)
+    }
+
+    @Test fun tutorialFromPreparationHelpKeepsThePreparationParent() {
+        val nav = AppNavigation().apply { openPreparation(); openSettings(); openTutorial() }
+        val restored = AppNavigation(nav.snapshot())
+        assertEquals(AppPage.TUTORIAL, restored.current)
+        restored.back(); assertEquals(AppPage.SETTINGS, restored.current)
+        restored.back(); assertEquals(AppPage.PREPARATION, restored.current)
+    }
     @Test fun tutorialRestoresItsParentAndBackReturnsToSettings() {
         val nav = AppNavigation().apply { openSettings(); openTutorial(); openTutorial() }
         val restored = AppNavigation(nav.snapshot())

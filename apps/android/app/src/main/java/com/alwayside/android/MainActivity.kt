@@ -30,6 +30,11 @@ class MainActivity : ThemedActivity() {
     private var chatScreen: ChatScreen? = null
     private var tutorialScreen: TutorialScreen? = null
     private var tutorialFlow = TutorialFlow()
+    private var preparationScreen: PreparationScreen? = null
+    private var preparationHelpExpanded = false
+    private var restoredSettingsPage: String? = null
+    private var pendingChatState: Bundle? = null
+    private var pendingRetainedChat: ChatScreen.RetainedConversation? = null
     private var historyScroll: ScrollView? = null
     private var historyY = 0
     private var historyScreen: HistoryListScreen? = null
@@ -40,6 +45,7 @@ class MainActivity : ThemedActivity() {
     private var retainedChatOffered = false
     private val assistantStateListener: () -> Unit = {
         historyScreen?.updateAssistantAction()
+        if(navigation.current == AppPage.PREPARATION)preparationScreen?.refresh()
         if(ProbeState.serviceRunning && navigation.current == AppPage.TUTORIAL) {
             toast("真实悬浮球已开启，已退出模拟体验；请关闭后再继续练习")
             exitTutorial()
@@ -68,8 +74,12 @@ class MainActivity : ThemedActivity() {
             ?: retained?.historySelection.orEmpty()
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
-        if(navigation.hasChat) chatScreen = createChat(savedState=savedInstanceState?.getBundle("chat"),retained=retained?.chat)
-        if("SETTINGS" in navigation.snapshot()) createSettings(savedInstanceState?.getString("settings_page") ?: retained?.settingsPage)
+        preparationHelpExpanded=savedInstanceState?.getBoolean("preparation_help",false) ?: false
+        restoredSettingsPage=savedInstanceState?.getString("settings_page") ?: retained?.settingsPage
+        pendingChatState=savedInstanceState?.getBundle("chat"); pendingRetainedChat=retained?.chat
+        // Restoring a tutorial must not construct its background chat/provider or decrypt settings.
+        if(navigation.hasChat && navigation.current != AppPage.TUTORIAL) restoreChat()
+        if(navigation.current == AppPage.SETTINGS) createSettings(restoredSettingsPage)
         if(entry != null) route(entry) else showCurrent()
     }
 
@@ -119,7 +129,7 @@ class MainActivity : ThemedActivity() {
             AppBack.SETTINGS_CATEGORY -> settingsScreen?.back()
             AppBack.PAGE -> {
                 if(navigation.current != AppPage.SETTINGS) { settingsScreen?.dispose();settingsScreen=null }
-                if(!navigation.hasChat) { chatScreen?.dispose();chatScreen=null }
+                if(!navigation.hasChat) { chatScreen?.dispose();chatScreen=null;discardPendingChat() }
                 showCurrent()
             }
             AppBack.EXIT -> finish()
@@ -136,6 +146,7 @@ class MainActivity : ThemedActivity() {
     private fun openHistory(): Unit = leaveSettings {
         historyScreen?.back()
         hideKeyboard();chatScreen?.dispose();chatScreen=null
+        discardPendingChat()
         navigation.openHistory();showCurrent()
     }
 
@@ -146,7 +157,8 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun createSettings(page: String? = null) {
-        settingsScreen=SettingsScreen(this,::present,::navigateBack,page,::openTutorial)
+        restoredSettingsPage=page
+        settingsScreen=SettingsScreen(this,::present,::navigateBack,page,::openTutorial,::openPreparation)
     }
 
     private fun openTutorial() {
@@ -163,13 +175,35 @@ class MainActivity : ThemedActivity() {
     private fun showTutorial() {
         if(ProbeState.serviceRunning) { exitTutorial(); return }
         val screen=tutorialScreen ?: TutorialScreen(this,tutorialFlow,::navigateBack,::exitTutorial,
-            { step -> guidePreferences.save(guidePreferences.load().advance(step)) }).also { tutorialScreen=it }
+            { step -> guidePreferences.save(guidePreferences.load().advance(step)) },::openPreparation).also { tutorialScreen=it }
         present(screen.view)
     }
 
     private fun exitTutorial() {
         tutorialScreen=null
         openHistory()
+    }
+
+    private fun openPreparation(): Unit = leaveSettings {
+        hideKeyboard(); tutorialScreen=null; chatScreen?.dispose();chatScreen=null;discardPendingChat()
+        navigation.openPreparation();showCurrent()
+    }
+
+    private fun showPreparation() {
+        val screen=preparationScreen ?: PreparationScreen(this,::navigateBack,{ page ->
+            hideKeyboard();navigation.openSettings();createSettings(page)
+        },::toggleAssistant,preparationHelpExpanded).also { preparationScreen=it }
+        screen.refresh(); present(screen.view)
+    }
+
+    private fun restoreChat() {
+        chatScreen=createChat(savedState=pendingChatState,retained=pendingRetainedChat)
+        pendingChatState=null;pendingRetainedChat=null
+    }
+
+    private fun discardPendingChat() {
+        pendingRetainedChat?.let { if(it.handoff != null)it.handoff.dispose() else it.session.close() }
+        pendingRetainedChat=null;pendingChatState=null
     }
 
     private fun createChat(id: String? = null,savedState: Bundle? = null,
@@ -180,6 +214,7 @@ class MainActivity : ThemedActivity() {
         historyScreen?.back()
         hideKeyboard()
         if(chatScreen?.matches(id) != true) {
+            discardPendingChat()
             chatScreen?.dispose();chatScreen=createChat(id=id,autoAskText=autoAskText)
         }
         navigation.openChat();showCurrent()
@@ -191,15 +226,20 @@ class MainActivity : ThemedActivity() {
             AppPage.SETTINGS -> openSettings()
             AppPage.CHAT -> openChat(entry.conversationId,entry.autoAskText)
             AppPage.TUTORIAL -> openTutorial()
+            AppPage.PREPARATION -> openPreparation()
         }
     }
 
     private fun showCurrent() {
         when(navigation.current) {
             AppPage.HISTORY -> showHistory()
-            AppPage.CHAT -> chatScreen?.let { present(it.view) } ?: openHistory()
-            AppPage.SETTINGS -> settingsScreen?.show() ?: createSettings()
+            AppPage.CHAT -> {
+                if(chatScreen == null)restoreChat()
+                chatScreen?.let { present(it.view) }
+            }
+            AppPage.SETTINGS -> settingsScreen?.show() ?: createSettings(restoredSettingsPage)
             AppPage.TUTORIAL -> showTutorial()
+            AppPage.PREPARATION -> showPreparation()
         }
     }
 
@@ -218,7 +258,7 @@ class MainActivity : ThemedActivity() {
                 addView(history.toolbar)
                 historyPermission = column().apply {
                     addView(label("实际使用悬浮球需要允许悬浮显示；模拟体验不需要。", 12f, true))
-                    action("允许悬浮显示", true) { requestOverlayPermission() }
+                    action("准备实际使用", true, ::openPreparation)
                 }.also { addView(it) }
                 addView(history.scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
             }
@@ -294,6 +334,7 @@ class MainActivity : ThemedActivity() {
         super.onResume()
         if(navigation.current == AppPage.TUTORIAL)return
         if(navigation.current == AppPage.HISTORY)showHistory()
+        if(navigation.current == AppPage.PREPARATION)showPreparation()
         if(!allowOnboarding)return
         val allowed=Settings.canDrawOverlays(this)
         val newlyGranted=allowed && !overlayWasGranted
@@ -308,10 +349,12 @@ class MainActivity : ThemedActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putStringArrayList("pages",ArrayList(navigation.snapshot()))
         outState.putString("tutorial_step",tutorialFlow.step.name)
-        outState.putString("settings_page",settingsScreen?.pageName())
+        outState.putBoolean("preparation_help",preparationScreen?.helpExpanded ?: preparationHelpExpanded)
+        outState.putString("settings_page",settingsScreen?.pageName() ?: restoredSettingsPage)
         outState.putInt("history_y",historyScroll?.scrollY ?: historyY)
         outState.putStringArrayList("history_selection", ArrayList(historyScreen?.selectedIds() ?: restoredHistorySelection))
         chatScreen?.let { chat -> outState.putBundle("chat",Bundle().also { chat.saveState(it) }) }
+            ?: pendingChatState?.let { outState.putBundle("chat",it) }
         outState.putBoolean("assistant_start_attempted",assistantStartAttempted)
         outState.putBoolean("overlay_was_granted",overlayWasGranted)
         outState.putBoolean("allow_onboarding",allowOnboarding)
@@ -320,8 +363,8 @@ class MainActivity : ThemedActivity() {
 
     @Suppress("DEPRECATION")
     override fun onRetainNonConfigurationInstance(): Any {
-        val retained=chatScreen?.retain();retainedChatOffered=retained!=null
-        return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName(),historyScroll?.scrollY ?: historyY,
+        val retained=chatScreen?.retain() ?: pendingRetainedChat;retainedChatOffered=retained!=null
+        return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName() ?: restoredSettingsPage,historyScroll?.scrollY ?: historyY,
             historyScreen?.selectedIds() ?: restoredHistorySelection)
     }
 
@@ -329,6 +372,7 @@ class MainActivity : ThemedActivity() {
         if(Build.VERSION.SDK_INT>=33)backCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
         settingsScreen?.dispose();settingsScreen=null
         chatScreen?.dispose(retaining=isChangingConfigurations && retainedChatOffered);chatScreen=null
+        if(!isChangingConfigurations || !retainedChatOffered)discardPendingChat()
         super.onDestroy()
     }
 
