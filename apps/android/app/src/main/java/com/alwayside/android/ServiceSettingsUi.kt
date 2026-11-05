@@ -246,14 +246,18 @@ internal class ServiceSettingsUi(
     }
 
     private fun renderCard(c: ServiceCatalog) {
-        val p = card ?: return
-        val providerId = p.providerId
+        val draft = card ?: return
+        val providerId = draft.providerId
         val keys = c.credentials.filter { it.providerId == providerId }
         val usable = keys.filter { k ->
             !k.unreadable && k.value.isNotBlank() && c.endpoints.any { e ->
                 e.id in k.endpointIds && (purpose == ModelPurpose.ANSWER || e.transcriptionApi == FileTranscriptionApi.OPENAI_COMPATIBLE)
             }
         }
+        val p = if (draft.credentialId == null && usable.size == 1) {
+            val chosen = usable.single()
+            draft.copy(credentialId = chosen.id, endpointId = chosen.endpointIds.single()).also { card = it }
+        } else draft
         section("服务配置", help = "本页只引用这家服务商已有的密钥。首项保存后自动选中，后续新增不切换；在用途列表点击服务行可选用，不修改另一种用途。\n\n模型可手动填写，也可主动读取列表。列表会联网，服务的能力声明不等于实际验证。")
         row("API 密钥", c.credentials.find { it.id == p.credentialId }?.name ?: "请选择") {
             if (usable.isEmpty()) apiHelpDialog(if (keys.isEmpty()) "此服务商还没有 Key。" else "此服务商没有可用于${purpose.title}的 Key，请在 API 服务中检查转写支持或替换不可用 Key。")
@@ -270,17 +274,15 @@ internal class ServiceSettingsUi(
         }
         input("模型", p.model, "可手动填写；模型能力未知时不会视为已验证。") { card = requireNotNull(card).copy(model = it.trim()) }
         row("从列表选择模型") { fetchDraftModels(c) }
-        val customOptions = if (purpose == ModelPurpose.ANSWER) p.options != GenerationOptions()
-            else p.transcriptionPrompt.isNotBlank() || p.language.isNotBlank()
         section("用途参数", help = if (purpose == ModelPurpose.ANSWER)
             "未设置的参数使用服务默认，支持范围随服务、接口和模型变化。\n\n输出上限：留空或 16–131072。Temperature：0–2，旧版 Claude 为 0–1；Top P：0–1，两种采样参数只设置一项。推理、详细程度及搜索需模型支持。"
             else "转写提示用于专有名词和背景。语言留空时自动识别，也可填写 zh、en 等服务支持的语言代码。这些设置仅属于当前转写服务。")
-        row(if (purpose == ModelPurpose.ANSWER) "生成参数" else "转写参数",
-            if (optionsExpanded) "收起" else if (customOptions) "已自定义" else "默认") {
-            optionsExpanded = !optionsExpanded; redraw()
-        }
-        if (optionsExpanded) {
-            if (purpose == ModelPurpose.ANSWER) renderOptions(p) else {
+        if (purpose == ModelPurpose.ANSWER) renderOptions(p) else {
+            val customOptions = p.transcriptionPrompt.isNotBlank() || p.language.isNotBlank()
+            row("转写参数", if (optionsExpanded) "收起" else if (customOptions) "已自定义" else "默认") {
+                optionsExpanded = !optionsExpanded; redraw()
+            }
+            if (optionsExpanded) {
                 input("转写提示", p.transcriptionPrompt, "留空使用服务默认。", multiline = true) { card = requireNotNull(card).copy(transcriptionPrompt = it) }
                 input("语言", p.language, "留空自动识别，或填写 zh、en 等语言代码。") { card = requireNotNull(card).copy(language = it.trim()) }
             }
