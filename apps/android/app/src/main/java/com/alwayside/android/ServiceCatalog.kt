@@ -3,7 +3,10 @@ package com.alwayside.android
 import java.net.URI
 import java.util.UUID
 
-internal enum class ModelPurpose(val title: String) { ANSWER("图文问答"), TRANSCRIPTION("音频转写") }
+internal enum class ModelPurpose(val title: String, val settingsTitle: String, val configurationTitle: String) {
+    ANSWER("图文问答", "配置问答服务", "问答服务配置"),
+    TRANSCRIPTION("音频转写", "配置转写服务", "转写服务配置"),
+}
 internal enum class FileTranscriptionApi { NONE, OPENAI_COMPATIBLE }
 
 internal data class ServiceProvider(val id: String, val name: String, val kind: ProviderKind)

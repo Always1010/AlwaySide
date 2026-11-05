@@ -33,7 +33,7 @@ internal class SettingsScreen(
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
-        AI("AI 服务", "图文问答、音频转写与 API 管理", android.R.drawable.ic_menu_manage),
+        AI("AI 服务", "问答与转写服务配置、API 管理", android.R.drawable.ic_menu_manage),
         PROMPTS("提示词", "默认问题与音频输出", android.R.drawable.ic_menu_edit),
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),

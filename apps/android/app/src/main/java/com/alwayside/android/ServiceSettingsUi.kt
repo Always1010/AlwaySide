@@ -112,7 +112,7 @@ internal class ServiceSettingsUi(
         if (card == cardInitial && key == keyInitial && fieldDraft == fieldInitial) { closeField(); next(); return }
         if (closeGuard != null) return
         closeGuard = MaterialAlertDialogBuilder(this).setTitle("放弃未保存的修改？")
-            .setMessage("当前流程中还有未保存的卡片或密钥，离开后将丢弃。")
+            .setMessage("当前流程中还有未保存的服务配置或密钥，离开后将丢弃。")
             .setNegativeButton("继续编辑") { _, _ -> closeGuard = null }
             .setPositiveButton("放弃并离开") { _, _ ->
                 closeGuard = null; closeField(); card = cardInitial; key = keyInitial; next()
@@ -133,16 +133,16 @@ internal class ServiceSettingsUi(
             val c = catalog()
             onHeader(when (page) {
                 Page.ROOT -> "AI 服务"
-                Page.PURPOSE -> purpose.title
+                Page.PURPOSE -> purpose.settingsTitle
                 Page.API -> "管理 API 服务"
-                Page.CARD -> if (cardInitial?.let { initial -> c.profiles.any { it.id == initial.id } } == true) "编辑${purpose.title}卡片" else "添加${purpose.title}卡片"
+                Page.CARD -> if (cardInitial?.let { initial -> c.profiles.any { it.id == initial.id } } == true) "编辑${purpose.configurationTitle}" else "添加${purpose.configurationTitle}"
                 Page.KEY -> if (key?.id == null) "添加 Key" else "编辑 Key"
             }, if (page == Page.CARD) card?.let { providerName(c, it.providerId) } else null)
             onEditMenu(null)
             when (page) {
                 Page.ROOT -> {
-                    row("图文问答") { purpose = ModelPurpose.ANSWER; navigate(Page.PURPOSE) }
-                    row("音频转写") { purpose = ModelPurpose.TRANSCRIPTION; navigate(Page.PURPOSE) }
+                    row(ModelPurpose.ANSWER.settingsTitle) { purpose = ModelPurpose.ANSWER; navigate(Page.PURPOSE) }
+                    row(ModelPurpose.TRANSCRIPTION.settingsTitle) { purpose = ModelPurpose.TRANSCRIPTION; navigate(Page.PURPOSE) }
                     row("管理 API 服务") { navigate(Page.API) }
                 }
                 Page.PURPOSE -> renderPurpose(c)
@@ -194,7 +194,7 @@ internal class ServiceSettingsUi(
 
     private fun renderPurpose(c: ServiceCatalog) {
         val cards = c.profiles.filter { it.purpose == purpose }
-        section("服务配置", "添加${purpose.title}服务", help = "点击服务名称即可选用，左侧圆框表示唯一选中项。首个服务保存后自动选中，后续新增不改变当前选择。行尾可编辑或删除；密钥在 API 管理中维护。") { addCard(c) }
+        section("服务配置", "添加${purpose.configurationTitle}", help = "点击服务名称即可选用，左侧圆框表示唯一选中项。首个服务保存后自动选中，后续新增不改变当前选择。行尾可编辑或删除；密钥在 API 管理中维护。") { addCard(c) }
         cards.forEach { profile ->
             val name = providerName(c, c.providerIdOf(profile))
             val selected = activeId(c, purpose) == profile.id
@@ -217,7 +217,7 @@ internal class ServiceSettingsUi(
                     }
                 }
             }
-            addRow(managementRow(serviceRow, "${purpose.title}服务“$name”",
+            addRow(managementRow(serviceRow, "${purpose.configurationTitle}“$name”",
                 edit = { openCard(c, profile) }, remove = { deleteCard(c, profile) }))
         }
         if (cards.isEmpty() && c.credentials.isNotEmpty()) note("尚未添加服务")
@@ -227,7 +227,7 @@ internal class ServiceSettingsUi(
     private fun addCard(c: ServiceCatalog) {
         val providers = c.providers.filter { provider -> c.credentials.any { it.providerId == provider.id } }
         if (providers.isEmpty()) {
-            apiHelpDialog("尚未添加 Key。请先在 API 服务中添加 Key，再为此用途添加服务商卡片。")
+            apiHelpDialog("尚未添加 Key。请先在 API 服务中添加 Key，再为此用途添加服务配置。")
             return
         }
         val existing = c.profiles.filter { it.purpose == purpose }.map(c::providerIdOf).toSet()
@@ -290,7 +290,7 @@ internal class ServiceSettingsUi(
         if (persisted != null) {
             section("连接测试", help = "测试只使用已保存设置，可能产生费用。模型列表和服务声明不能替代实际验证；修改密钥、模型或参数后需重新测试。")
             row("测试连接") {
-                if (card != persisted) toast("请先保存卡片，再测试此配置") else chooseDiagnostic(c, persisted)
+                if (card != persisted) toast("请先保存服务配置，再测试") else chooseDiagnostic(c, persisted)
             }
             verification[p.id]?.takeIf { it.first == c }?.second?.let(::note)
         }
@@ -298,8 +298,8 @@ internal class ServiceSettingsUi(
 
     private fun deleteCard(c: ServiceCatalog, p: ModelProfile) {
         val name = providerName(c, c.providerIdOf(p))
-        confirmDelete("删除“$name”的${p.purpose.title}卡片？", "将移除${p.purpose.title}卡片${if (activeId(c, p.purpose) == p.id) "并停用此用途" else ""}。不会自动选用其他卡片；API 密钥保留。") {
-            if (save(c, "已删除卡片") { it.removeProfile(p.id) }) verification.remove(p.id)
+        confirmDelete("删除“$name”的${p.purpose.configurationTitle}？", "将移除${p.purpose.configurationTitle}${if (activeId(c, p.purpose) == p.id) "并停用此用途" else ""}。不会自动选用其他配置；API 密钥保留。") {
+            if (save(c, "已删除服务配置") { it.removeProfile(p.id) }) verification.remove(p.id)
         }
     }
 
@@ -354,7 +354,7 @@ internal class ServiceSettingsUi(
             compatibleProfile(c, cardInitial ?: p, p, done = {
                 cardInitial = card; leavePage()
             })
-        } catch (ex: Exception) { toast(ex.message ?: "卡片配置无效") }
+        } catch (ex: Exception) { toast(ex.message ?: "服务配置无效") }
     }
 
     private fun renderApi(c: ServiceCatalog) {
@@ -397,7 +397,7 @@ internal class ServiceSettingsUi(
         if (draft.kind == null) return
         input("Key", draft.secret, if (draft.id == null) "请输入此服务的 API Key。" else "已有 Key 不回显；留空保留原值，更换地址来源时请重新输入。", secret = true) { key = requireNotNull(key).copy(secret = it) }
         input("名称", draft.name, "同一服务商下的 Key 名称不可重复。") { key = requireNotNull(key).copy(name = it) }
-        if (draft.kind == ProviderKind.CUSTOM && draft.id == null && c.providers.none { it.id == draft.providerId }) input("自定义服务名称", draft.providerName, "必填，用于服务商分组与用途卡片。") { key = requireNotNull(key).copy(providerName = it) }
+        if (draft.kind == ProviderKind.CUSTOM && draft.id == null && c.providers.none { it.id == draft.providerId }) input("自定义服务名称", draft.providerName, "必填，用于服务商分组与服务配置。") { key = requireNotNull(key).copy(providerName = it) }
         section("连接信息", help = "填写 HTTPS 基础地址，不附加具体请求路由。协议决定请求格式；文件转写支持需服务实际提供对应接口，不能由聊天兼容性推断。\n\nClaude API 版本使用 YYYY-MM-DD；Workspace ID 可选，留空不发送。")
         row("高级设置", if (connectionExpanded) "收起" else "展开") { connectionExpanded = !connectionExpanded; redraw() }
         if (connectionExpanded) {
@@ -434,10 +434,10 @@ internal class ServiceSettingsUi(
 
     private fun deleteKey(c: ServiceCatalog, credential: ServiceCredential) {
         val refs = c.profiles.filter { it.credentialId == credential.id }
-        val impact = if (refs.isEmpty()) "没有用途卡片引用此 Key。" else "受影响用途：\n" + refs.joinToString("\n") {
+        val impact = if (refs.isEmpty()) "没有服务配置引用此 Key。" else "受影响用途：\n" + refs.joinToString("\n") {
             "${it.purpose.title} / ${providerName(c, c.providerIdOf(it))}${if (activeId(c, it.purpose) == it.id) "（当前选中，将停用）" else ""}"
         }
-        confirmDelete("删除 Key“${credential.name}”？", "$impact\n引用卡片将保留供修复，不会自动切换其他 Key 或卡片。") {
+        confirmDelete("删除 Key“${credential.name}”？", "$impact\n引用此 Key 的服务配置将保留供修复，不会自动切换其他 Key 或配置。") {
             save(c, "已删除 Key") { it.removeCredential(credential.id) }
         }
     }
@@ -732,7 +732,7 @@ internal class ServiceSettingsUi(
     }
 
     private fun requestConfig(c: ServiceCatalog, p: ModelProfile): AppConfig? = try {
-        require(catalog() == c) { "配置已改变，请重新打开卡片" }
+        require(catalog() == c) { "配置已改变，请重新打开服务配置" }
         // Model listing is allowed before a model ID has been supplied.
         val endpoint = c.endpoints.find { it.id == p.endpointId }
         val key = c.credentials.find { it.id == p.credentialId }
