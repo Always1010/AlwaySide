@@ -10,7 +10,7 @@ internal enum class ApiProtocol(val title: String) {
 internal enum class ProviderKind(val title: String, val protocol: ApiProtocol, val baseUrl: String) {
     OPENAI("OpenAI", ApiProtocol.RESPONSES, "https://api.openai.com/v1"),
     DEEPSEEK("DeepSeek", ApiProtocol.RESPONSES, "https://api.deepseek.com"),
-    QWEN("通义千问·百炼", ApiProtocol.CHAT_COMPLETIONS, "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    QWEN("Qwen（千问）", ApiProtocol.CHAT_COMPLETIONS, "https://dashscope.aliyuncs.com/compatible-mode/v1"),
     GEMINI("Gemini", ApiProtocol.GEMINI, "https://generativelanguage.googleapis.com/v1beta"),
     CLAUDE("Claude", ApiProtocol.CLAUDE, "https://api.anthropic.com/v1"),
     CUSTOM("自定义兼容服务", ApiProtocol.RESPONSES, "https://api.openai.com/v1");
