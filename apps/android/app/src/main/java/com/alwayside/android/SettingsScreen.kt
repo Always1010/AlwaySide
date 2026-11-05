@@ -34,14 +34,14 @@ internal class SettingsScreen(
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
-        API("API 连接", "服务地址、加密密钥与可用模型", android.R.drawable.ic_menu_manage),
-        MODELS("模型与生成参数", "图文与转写模型、推理、搜索及采样", android.R.drawable.ic_menu_sort_by_size),
-        PROMPTS("提示词", "截图与选中文字问题、转写提示与音频输出", android.R.drawable.ic_menu_edit),
+        API("API 连接", "服务地址与密钥", android.R.drawable.ic_menu_manage),
+        MODELS("模型与生成参数", "模型、搜索与生成参数", android.R.drawable.ic_menu_sort_by_size),
+        PROMPTS("提示词", "默认问题与音频输出", android.R.drawable.ic_menu_edit),
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
-        GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
-        WINDOW("结果窗口", "追问输入区、位置、尺寸、固定与自动提问", android.R.drawable.ic_menu_crop),
-        MEDIA("历史与媒体", "录音时长、截图与音频保留策略", android.R.drawable.ic_menu_recent_history),
+        GESTURES("快捷动作", "空闲与录音中的手势", android.R.drawable.ic_menu_directions),
+        WINDOW("结果窗口", "窗口行为与自动提问", android.R.drawable.ic_menu_crop),
+        MEDIA("历史与媒体", "录音上限与媒体保留", android.R.drawable.ic_menu_recent_history),
         HELP("帮助与引导", "新手引导与使用准备", android.R.drawable.ic_menu_help),
     }
 
@@ -200,12 +200,11 @@ internal class SettingsScreen(
 
     private fun apiPage(config: AppConfig) {
         savedCredential = readable && config.apiKey.isNotBlank()
+        section("连接信息", "密钥会发送到此地址，请只连接可信服务。\n\n密钥加密保存在本机；编辑时输入新密钥。\n\n查看模型列表会联网，但不上传聊天或媒体。")
         input("baseUrl", "服务地址", "示例：https://api.openai.com/v1", config.baseUrl)
-        note("以 /v1 结尾。密钥会发送到此地址，请确认服务可信；不要包含账号、查询参数或 # 片段。")
+        note("使用 HTTPS，以 /v1 结尾。")
         input("apiKey", "API 密钥", "请输入密钥", secret = true)
-        note("密钥加密保存，编辑时输入新密钥。")
         action("查看可用模型") { fetchModels() }
-        note("仅请求模型列表，不上传屏幕、音频或聊天。列出的模型不一定支持所有功能。")
         action("移除密钥") { finishEditing { clearCredential() } }.destructive()
         if (!readable) action("重置连接配置") {
             MaterialAlertDialogBuilder(this).setTitle("重置无法读取的配置？")
@@ -225,22 +224,20 @@ internal class SettingsScreen(
     }
 
     private fun modelPage(config: AppConfig) {
+        section("模型", "列表使用已保存的连接。请按服务说明选择图文和转写模型，列表中的模型不一定支持两种用途。")
         input("model", "图文模型", "请输入模型 ID", config.model)
         action("从列表选择图文模型") { fetchModels("model") }
         input("transcriptionModel", "转写模型", "请输入转写模型 ID", config.transcriptionModel)
         action("从列表选择转写模型") { fetchModels("transcriptionModel") }
-        note("列表使用已保存连接。请按服务说明选择模型用途。")
+        section("生成参数", "留空或不设置时使用模型默认值，部分参数需服务支持。\n\n输出上限受模型限制；问答窗口可单独切换联网搜索。")
         choice("reasoning", "推理程度", config.reasoning, linkedMapOf("" to "不设置（模型默认）", "none" to "none", "minimal" to "minimal", "low" to "low", "medium" to "medium", "high" to "high", "xhigh" to "xhigh", "max" to "max"))
         choice("verbosity", "回答详细程度", config.verbosity, linkedMapOf("" to "不设置（模型默认）", "low" to "low · 简短", "medium" to "medium · 适中", "high" to "high · 详细"))
-        input("maxOutputTokens", "输出上限（tokens）", "请输入上限（选填）", config.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty(), numeric = true)
-        note("可填 16–131072，实际上限由模型决定。留空或 0 使用模型默认。")
+        input("maxOutputTokens", "输出上限（tokens）", "16–131072；留空或 0 使用模型默认", config.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty(), numeric = true)
         check("webSearch", "默认联网搜索", config.webSearch)
-        note("问答窗口可单独切换。需服务和模型支持，可能增加费用。")
+        note("联网搜索需服务支持，可能增加费用。")
+        section("采样参数", "一般留空；需要时只调整一项。\n\nTemperature 越低越稳定；Top P 越小，用词范围越窄。部分模型不支持。")
         input("temperature", "Temperature", "0–2，留空使用默认值", config.temperature?.toString().orEmpty(), decimal = true)
-        note("值低更稳定，值高更灵活。")
         input("topP", "Top P", "0–1，留空使用默认值", config.topP?.toString().orEmpty(), decimal = true)
-        note("值越小，候选用词范围越窄。")
-        note("一般留空即可；需要时只调整其中一项，部分模型不支持。不支持时会显示服务错误。")
     }
 
     private fun promptPage(config: AppConfig) {
@@ -250,20 +247,19 @@ internal class SettingsScreen(
         input("defaultQuestion", "截图问题", "截图后自动填入的问题", config.defaultQuestion, multiline = true)
         input("textQuestion", "选中文字问题", "选中文字后自动填入的问题", config.textQuestion, multiline = true)
         input("audioQuestion", "音频问题", "用于“原文 + 按音频问题回答”，可要求翻译、总结或提取要点", config.audioQuestion, multiline = true)
-        section("音频处理")
+        section("音频处理", "转写提示帮助识别语言和专有名词。\n\n仅转写和翻译不使用「音频问题」；按问题回答时才使用。原文可展开查看并继续追问。")
         input("transcriptionPrompt", "转写提示", "示例：专有名词、背景或语言", config.transcriptionPrompt, multiline = true)
         lateinit var outputNote: TextView
         choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions) { value ->
             outputNote.text = audioOutputDescription(value)
         }
         outputNote = note(audioOutputDescription(config.audioOutput))
-        note("原文可展开查看，之后仍可自由追问。转写提示用于识别语言与专有名词。")
     }
 
     private fun audioOutputDescription(value: String): String = when (value) {
-        "transcript" -> "仅显示原始转写，跳过首次助手回答，不使用“音频问题”。"
-        "translate" -> "使用独立提示词翻译成中文，不使用“音频问题”。"
-        else -> "将转写原文作为资料，按“音频问题”回答；具体任务由你填写的问题决定。"
+        "transcript" -> "只转写，不生成回答。"
+        "translate" -> "将转写原文翻译成中文。"
+        else -> "根据转写原文和「音频问题」回答。"
     }
 
     private fun showTemplateActions() {
@@ -298,6 +294,7 @@ internal class SettingsScreen(
 
     private fun ballPage(config: InteractionConfig) {
         ballSize = config.ballSize; ballOpacity = config.ballOpacity; ballColor = config.ballColor
+        section("大小与透明度", "滑块松手保存，颜色确认即保存。\n\n视觉大小不影响触摸范围。")
         val previewArea = LinearLayout(this).apply {
             gravity = Gravity.CENTER; background = card(SURFACE, dp(16).toFloat())
             ballPreview = View(this@SettingsScreen).also { addView(it) }
@@ -317,22 +314,19 @@ internal class SettingsScreen(
                 }.showTracked()
         }
         updateBallPreview()
-        note("拖动预览，松手保存。颜色选择后立即保存。视觉大小不影响触摸范围。")
     }
 
     private fun gesturePage(config: InteractionConfig) {
-        note("单击和双击会短暂等待，以识别连续点击。拖动只移动悬浮球。")
-        section("空闲时")
+        section("空闲时", "单击和双击会短暂等待，以识别连续点击。拖动只移动悬浮球。")
         choice("singleAction", "单击", config.singleAction, AssistantActions.choices)
         choice("doubleAction", "双击", config.doubleAction, AssistantActions.choices)
         choice("tripleAction", "三击", config.tripleAction, AssistantActions.choices)
         choice("longAction", "长按", config.longAction, AssistantActions.choices)
-        section("录音中")
+        section("录音中", "取消录音会直接丢弃，不上传。\n\n「开始／结束录音并处理」会结束录音，再按自动处理设置执行。")
         choice("recordingSingleAction", "单击", config.recordingSingleAction, AssistantActions.choices)
         choice("recordingDoubleAction", "双击", config.recordingDoubleAction, AssistantActions.choices)
         choice("recordingTripleAction", "三击", config.recordingTripleAction, AssistantActions.choices)
         choice("recordingLongAction", "长按", config.recordingLongAction, AssistantActions.choices)
-        note("“取消并丢弃录音”不上传或处理。录音中选择“开始／结束录音并处理”会结束并处理。")
         action("恢复默认手势") {
             MaterialAlertDialogBuilder(this).setTitle("恢复默认快捷动作？")
                 .setMessage("仅恢复空闲与录音中的八项动作。")
@@ -347,42 +341,34 @@ internal class SettingsScreen(
     }
 
     private fun windowPage(config: AppConfig, interaction: InteractionConfig) {
+        section("窗口行为", "收起的输入框可点「继续提问」展开，下次呼出时应用设置。\n\n固定后点窗口外仍保留窗口；收起窗口不会取消请求。")
         check("collapseFollowUpByDefault", "小窗口追问输入框默认收起", interaction.collapseFollowUpByDefault)
-        note("呼出小窗口时优先显示内容，点左下角“继续提问”展开输入框。关闭后默认显示输入框；修改从下次呼出时生效。")
         check("rememberWindowPosition", "分别记住截图窗与音频窗的位置", interaction.rememberWindowPosition)
         check("rememberWindowSize", "分别记住截图窗与音频窗的尺寸", interaction.rememberWindowSize)
         check("defaultPinned", "新会话窗口默认固定", interaction.defaultPinned)
-        note("固定时，点窗口外部也会保留窗口；否则收起。收起不取消请求，结果仍会保存。")
-        section("首问与截图上下文")
+        section("自动提问", "还需开启悬浮球菜单中的「使用默认提问方式」。\n\n关闭总开关或对应选项后，先填写问题再发送。取消录音始终丢弃。")
         check("autoAskImage", "截图后自动使用默认问题提问", interaction.autoAskImage)
         check("autoAskAudio", "手动结束录音后自动按默认设置处理", interaction.autoAskAudio)
         check("autoAskText", "选中文字后自动提问", interaction.autoAskText)
-        note("悬浮球菜单中的「使用默认提问方式」是总开关。关闭总开关或对应选项后，先展开并聚焦问题输入框，等你补充问题再发送。取消录音始终直接丢弃片段。")
+        section("截图追问", "发送时采集新画面，需开启屏幕共享。\n\n会话中可改为沿用原图或仅发文字。")
         check("autoUpdateImage", "截图追问默认更新当前画面", config.autoUpdateImage)
-        note("发送时才采集新画面，需开启屏幕共享。会话中仍可逐次选择沿用原图或仅发文字。")
     }
 
     private fun mediaPage(config: InteractionConfig) {
-        section("录音")
-        input("recordingMaxMinutes", "录音时长上限（分钟）", "默认 10；0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
-        note("默认 10 分钟。可填写 1～${RecordingLimits.MAX_MINUTES} 分钟，或填 0 手动结束。录音上限和达到上限后的处理方式从下一段录音开始生效。")
-        choice("recordingLimitAction", "达到上限后", config.recordingLimitAction.value, RecordingLimitAction.choices)
-        note("默认自动停止并丢弃本段录音，不发起转写，防止忘记结束录音而产生意外用量。手动结束仍按“手动结束录音后自动按默认设置处理”开关处理。")
-        note("“保留录音并提示”会停止并等待你选择转写或丢弃，不自动发送；“自动处理录音”会按音频默认输出直接转写、翻译或回答。")
-        note("待确认录音暂存在当前悬浮会话，收起窗口不会发送；停止助手或应用进程退出后不保留。")
-        note("填 0 不会触发时长上限处理；仍受设备存储和单个 WAV 文件约 2 GiB 的限制，达到文件大小限制也会按上述选项处理。")
-        note("较长录音会按顺序分段转写，再合并原文。")
-        section("历史截图")
+        section("录音", "时长和上限策略从下次录音生效；0 表示不限时长。\n\n自动处理还需开启菜单中的「使用默认提问方式」；手动结束的行为在「结果窗口」设置。")
+        input("recordingMaxMinutes", "录音时长上限（分钟）", "1～${RecordingLimits.MAX_MINUTES} 分钟；0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
+        choice("recordingLimitAction", "达到上限后", config.recordingLimitAction.value, RecordingLimitAction.choices,
+            optionDescriptions = mapOf(
+                RecordingLimitAction.DISCARD.value to "停止并丢弃，不自动发送。",
+                RecordingLimitAction.PROMPT.value to "停止并等待确认；停止助手或应用退出后丢失。",
+                RecordingLimitAction.PROCESS.value to "停止后按音频默认输出处理，可能产生费用。",
+            ))
+        section("历史截图", "保存首张原图和当前追问图片，可从历史查看并继续使用。\n\n仅影响之后保存的截图，不补存旧图。图片存于本机，删除会话时一并删除。")
         check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
-        note("默认开启。保留会话首张原图和当前追问图片，从历史打开后可查看并继续使用。图片仅保存在应用私有目录，删除会话时一并删除。")
-        note("仅影响新写入的历史，不补存旧截图；旧记录能否显示原图，取决于当时是否保存。")
-        section("历史音频")
+        section("历史音频", "完成录音后存于本机，可从历史回听。取消或丢弃的不保存，待确认录音需确认后保存。\n\n仅影响之后完成的录音，不补存旧音频；关闭不删除旧音频。\n\n删除会话时一并删除音频，总容量上限 512 MiB。")
         check("saveHistoryAudio", "随历史长期保留音频", config.saveHistoryAudio)
-        note("默认开启。新完成的录音随会话保存在本机，可从历史对话中回听；不需要先完成转写。取消或达到上限后选择丢弃的录音不保存；到上限待确认的录音在选择转写后保存。")
-        note("仅影响之后完成的录音，不补存旧录音；关闭不会删除已保存音频。删除会话时一并删除音频。音频仅保存在应用私有目录，总容量上限 512 MiB。")
-        section("对话记录")
-        note("转写、问题和回答随会话保存。追问复用转写文字，不重复上传音频。")
-        note("追问保存在原会话内。待发送、处理中、取消或失败的会话，也可从主页对话列表找到。")
+        section("对话记录", "追问保存在原会话内，复用转写文字，不重复上传音频。\n\n未发送、取消或失败的会话也可从主页找到。")
+        note("问题、回答与转写随会话保存。")
     }
 
     private fun input(name: String, title: String, hintValue: String, initial: String = "", multiline: Boolean = false,
@@ -509,7 +495,8 @@ internal class SettingsScreen(
         addRow(row)
     }
 
-    private fun choice(name: String, title: String, initial: String, options: Map<String, String>, onSelected: ((String) -> Unit)? = null) {
+    private fun choice(name: String, title: String, initial: String, options: Map<String, String>,
+                       optionDescriptions: Map<String, String> = emptyMap(), onSelected: ((String) -> Unit)? = null) {
         selections[name] = initial
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(58); setPadding(dp(16), dp(10), dp(16), dp(10))
@@ -527,7 +514,10 @@ internal class SettingsScreen(
         }, LinearLayout.LayoutParams(dp(16), dp(16)).apply { leftMargin = dp(8) })
         row.setOnClickListener { finishEditing {
             val keys = options.keys.toList()
-            MaterialAlertDialogBuilder(this).setTitle(title).setSingleChoiceItems(options.values.toTypedArray(), keys.indexOf(selections[name])) { dialog, index ->
+            val labels = keys.map { key ->
+                optionDescriptions[key]?.let { "${options[key]}\n$it" } ?: options.getValue(key)
+            }
+            MaterialAlertDialogBuilder(this).setTitle(title).setSingleChoiceItems(labels.toTypedArray(), keys.indexOf(selections[name])) { dialog, index ->
                 if (persistChoice(name, keys[index])) {
                     selections[name] = keys[index]
                     row.findViewWithTag<TextView>(name).text = options[keys[index]]
@@ -786,10 +776,21 @@ internal class SettingsScreen(
         }
     }
 
-    private fun section(text: String) {
+    private fun section(text: String, help: String? = null) {
         group = null
-        body.addView(label(text, 14f, true),
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = if (body.childCount <= 1) dp(4) else dp(20); bottomMargin = dp(8); leftMargin = dp(16) })
+        val heading = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), 0, 0, 0)
+            addView(label(text, 14f, true), LinearLayout.LayoutParams(0, -2, 1f))
+            if (help != null) addView(iconButton(R.drawable.ic_line_info, "查看${text}说明") {
+                MaterialAlertDialogBuilder(this@SettingsScreen).setTitle(text).setMessage(help)
+                    .setPositiveButton("知道了", null).showTracked()
+            }.apply { iconTint = ColorStateList.valueOf(MUTED) })
+        }
+        body.addView(heading, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = if (body.childCount <= 1) dp(4) else dp(16)
+            bottomMargin = dp(8)
+        })
     }
 
     private fun addRow(view: View) {
