@@ -18,6 +18,7 @@ internal class HttpTransport {
         val timedOut = AtomicBoolean(false)
         val timeout = timeouts.schedule({ timedOut.set(true); connection.disconnect() }, 240, TimeUnit.SECONDS)
         try {
+            ActiveServiceRequests.track(config, cancellation)
             connection.requestMethod = method
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 20_000
@@ -40,6 +41,7 @@ internal class HttpTransport {
             if (timedOut.get()) throw ProviderException("请求超时，请手动重试")
             throw error
         } finally {
+            ActiveServiceRequests.release(cancellation)
             timeout.cancel(false); cancellation.detach(connection); connection.disconnect()
         }
     }

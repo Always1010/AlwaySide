@@ -82,9 +82,11 @@ internal class AiProvider : AiGateway {
         val boundary = "alwayside-${UUID.randomUUID()}"
         val prompt = if (config.transcriptionPrompt.isBlank()) "" else
             "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n${config.transcriptionPrompt}"
+        val language = if (config.transcriptionLanguage.isBlank()) "" else
+            "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n${config.transcriptionLanguage}"
         val prefix = ("--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n" +
             config.transcriptionModel + "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson" +
-            prompt +
+            prompt + language +
             "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n" +
             "Content-Type: audio/wav\r\n\r\n").toByteArray(Charsets.UTF_8)
         val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
@@ -113,9 +115,12 @@ internal class AiProvider : AiGateway {
     }
 
     /** Explicit metadata only. Model-list success does not establish image/search compatibility. */
-    fun listModels(config: AppConfig, cancellation: RequestCancellation = RequestCancellation()): List<String> = sanitized(cancellation) {
+    fun listModels(config: AppConfig, cancellation: RequestCancellation = RequestCancellation()): List<String> =
+        listModelCatalog(config, cancellation).map { it.id }
+
+    fun listModelCatalog(config: AppConfig, cancellation: RequestCancellation = RequestCancellation()): List<RemoteModel> = sanitized(cancellation) {
         validateConnection(config)
-        val result = linkedSetOf<String>(); var cursor = ""
+        val result = linkedMapOf<String, RemoteModel>(); var cursor = ""
         repeat(20) {
             val query = when (config.apiProtocol) {
                 ApiProtocol.GEMINI -> buildMap { put("pageSize", "100"); if (cursor.isNotEmpty()) put("pageToken", cursor) }
@@ -129,8 +134,7 @@ internal class AiProvider : AiGateway {
             val key = if (config.apiProtocol == ApiProtocol.GEMINI) "models" else "data"
             if (json[key] !is List<*>) throw ProviderException("模型列表格式无效，可手动填写模型 ID")
             json.items(key).forEach { raw ->
-                val model = raw.wireObject().text(if (config.apiProtocol == ApiProtocol.GEMINI) "name" else "id")
-                if (model.isNotBlank() && model.length <= 200 && model.none(Char::isISOControl)) result.add(model.removePrefix("models/"))
+                RemoteModel.decode(raw.wireObject(), config.apiProtocol)?.let { model -> result[model.id] = model }
             }
             if (result.size > 10000) throw ProviderException("模型列表过大")
             val next = when (config.apiProtocol) {
@@ -138,7 +142,7 @@ internal class AiProvider : AiGateway {
                 ApiProtocol.CLAUDE -> if (json["has_more"] == true) json.text("last_id").ifBlank { throw ProviderException("模型列表分页格式无效") } else ""
                 else -> ""
             }
-            if (next.isEmpty()) return@sanitized result.sorted()
+            if (next.isEmpty()) return@sanitized result.values.sortedBy { it.id }
             if (next == cursor) throw ProviderException("模型列表分页未推进")
             cursor = next
         }

@@ -213,7 +213,7 @@ internal class ChatSession(
     fun close() { if (busy) cancel(); epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
     private fun audioKey(file: File, config: AppConfig): String {
         val target = ProviderConnections.transcription(config)
-        return "${file.absolutePath}:${file.length()}:${file.lastModified()}:${target.connectionId}:${target.baseUrl}:${target.apiProtocol}:${target.transcriptionModel}:${target.credentialRevision}:${target.transcriptionPrompt}"
+        return "${file.absolutePath}:${file.length()}:${file.lastModified()}:${target.connectionId}:${target.endpointId}:${target.credentialId}:${target.baseUrl}:${target.apiProtocol}:${target.transcriptionModel}:${target.credentialRevision}:${target.transcriptionPrompt}:${target.transcriptionLanguage}"
     }
     private fun cancelled(e: Exception) = e is java.util.concurrent.CancellationException || e is InterruptedException
     private fun safeError(e: Exception): String = when (e) {

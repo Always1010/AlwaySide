@@ -28,6 +28,10 @@ internal data class AppConfig(
     val transcriptionConnectionId: String? = "legacy",
     val credentialRevision: Long = 0,
     val continuationMessages: List<Map<String, Any?>> = emptyList(),
+    val serviceCatalog: ServiceCatalog? = null,
+    val credentialId: String = "",
+    val endpointId: String = "",
+    val transcriptionLanguage: String = "",
 ) {
     override fun toString() = "AppConfig(credentials redacted)"
 }

@@ -44,6 +44,7 @@ internal data class ConnectionProfile(
 
 internal object ProviderConnections {
     fun snapshot(config: AppConfig): List<ConnectionProfile> {
+        config.serviceCatalog?.let { catalog -> return catalog.profiles.map { ConnectionProfile.capture(catalog.project(config, it.id)) } }
         val active = ConnectionProfile.capture(config)
         return if (config.connections.any { it.id == active.id })
             config.connections.map { if (it.id == active.id) active else it }
@@ -52,17 +53,30 @@ internal object ProviderConnections {
 
     fun select(config: AppConfig, id: String): AppConfig {
         if (id == config.connectionId) return config
+        config.serviceCatalog?.let { catalog ->
+            require(catalog.profiles.any { it.id == id && it.purpose == ModelPurpose.ANSWER }) { "请选择图文问答配置" }
+            return catalog.copy(activeAnswerId = id).attach(config)
+        }
         val profiles = snapshot(config)
         return (profiles.firstOrNull { it.id == id } ?: error("连接不存在")).applyTo(config).copy(connections = profiles)
     }
 
     fun add(config: AppConfig, kind: ProviderKind): AppConfig {
+        config.serviceCatalog?.let { catalog ->
+            val id = UUID.randomUUID().toString()
+            val extra = ServiceCatalog.migrate(AppConfig(connectionId = id, connectionName = kind.title,
+                providerKind = kind, apiProtocol = kind.protocol, baseUrl = kind.baseUrl, apiKey = "", model = "",
+                transcriptionModel = "", reasoning = "", maxOutputTokens = 0, transcriptionConnectionId = null))
+            return catalog.copy(providers = catalog.providers + extra.providers, endpoints = catalog.endpoints + extra.endpoints,
+                credentials = catalog.credentials + extra.credentials, profiles = catalog.profiles + extra.profiles, activeAnswerId = id).attach(config)
+        }
         require(snapshot(config).size < 20) { "最多保存 20 个连接" }
         val profile = ConnectionProfile(UUID.randomUUID().toString(), kind.title, kind, kind.protocol, kind.baseUrl)
         return profile.applyTo(config).copy(connections = snapshot(config) + profile)
     }
 
     fun remove(config: AppConfig, id: String): AppConfig {
+        config.serviceCatalog?.let { return it.removeProfile(id).attach(config) }
         val remaining = snapshot(config).filterNot { it.id == id }
         require(remaining.isNotEmpty()) { "请至少保留一个连接，可先移除该连接的密钥" }
         val next = if (id == config.connectionId) remaining.first().applyTo(config) else config
@@ -70,6 +84,14 @@ internal object ProviderConnections {
     }
 
     fun transcription(config: AppConfig): AppConfig {
+        config.serviceCatalog?.let { catalog ->
+            val id = catalog.activeTranscriptionId ?: throw ProviderException("请先启用音频转写配置")
+            val profile = catalog.profiles.firstOrNull { it.id == id && it.purpose == ModelPurpose.TRANSCRIPTION }
+                ?: throw ProviderException("转写配置已删除，请重新选择")
+            val endpoint = catalog.endpoints.firstOrNull { it.id == profile.endpointId }
+            require(endpoint?.transcriptionApi == FileTranscriptionApi.OPENAI_COMPATIBLE) { "此接入点未配置兼容文件转写接口" }
+            return catalog.project(config, id)
+        }
         val id = config.transcriptionConnectionId ?: throw ProviderException("请先选择音频转写连接")
         val connection = snapshot(config).firstOrNull { it.id == id } ?: throw ProviderException("转写连接已删除，请重新选择")
         require(connection.apiProtocol in setOf(ApiProtocol.RESPONSES, ApiProtocol.CHAT_COMPLETIONS)) {
@@ -86,6 +108,13 @@ internal object ProviderConnections {
     }
 
     fun credentialsCurrent(requestedConfig: AppConfig, current: AppConfig, answer: Boolean, audio: Boolean): Boolean {
+        current.serviceCatalog?.let { catalog ->
+            val required = buildList {
+                if (answer) add(requestedConfig)
+                if (audio) add(transcription(requestedConfig))
+            }
+            return required.all { credentialCurrent(it, catalog) }
+        }
         val saved = snapshot(current)
         val required = buildList {
             if (answer) add(ConnectionProfile.capture(requestedConfig))
@@ -96,10 +125,22 @@ internal object ProviderConnections {
     }
 
     fun setTranscriptionModel(config: AppConfig, model: String): AppConfig {
+        config.serviceCatalog?.let { catalog ->
+            val id = catalog.activeTranscriptionId ?: throw ProviderException("请先选择音频转写配置")
+            return catalog.copy(profiles = catalog.profiles.map { if (it.id == id) it.copy(model = model.trim()) else it }).attach(config)
+        }
         val target = transcription(config)
         if (target.connectionId == config.connectionId) return config.copy(transcriptionModel = model.trim())
         val updated = ConnectionProfile.capture(target.copy(transcriptionModel = model.trim())).copy(apiProtocol =
             snapshot(config).first { it.id == target.connectionId }.apiProtocol)
         return config.copy(connections = snapshot(config).map { if (it.id == target.connectionId) updated else it })
+    }
+
+    fun credentialCurrent(request: AppConfig, current: ServiceCatalog): Boolean {
+        val key = current.credentials.firstOrNull { it.id == request.credentialId } ?: return false
+        val endpoint = current.endpoints.firstOrNull { it.id == request.endpointId } ?: return false
+        return !key.unreadable && key.value.isNotBlank() && key.value == request.apiKey &&
+            key.revision == request.credentialRevision && endpoint.id in key.endpointIds && key.providerId == endpoint.providerId &&
+            endpoint.baseUrl == request.baseUrl && endpoint.apiVersion == request.apiVersion && endpoint.workspaceId == request.workspaceId
     }
 }
