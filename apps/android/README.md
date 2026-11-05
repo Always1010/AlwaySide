@@ -12,7 +12,7 @@
 
 在本目录创建不纳入 Git 的 `local.properties`，填写自己的 SDK 路径，或通过 `ANDROID_HOME` 指定已安装的 SDK。应用版本及最低系统要求见 [app/build.gradle.kts](app/build.gradle.kts)。
 
-调试构建使用自定义签名。首次构建前，请在 `app/build.gradle.kts` 的 `signingConfigs` 中改用自己的调试密钥，或移除自定义配置以使用 Android 默认调试签名。覆盖安装需要相同包名和签名；请妥善保管私钥，不要将私钥或正式签名密码提交到仓库。
+调试构建使用自定义签名。首次构建前，请在 `app/build.gradle.kts` 的 `signingConfigs` 中改用自己的调试密钥，或移除自定义配置以使用 Android 默认调试签名。覆盖安装需要相同包名，以及相同签名或有效的签名轮换授权链；请妥善保管私钥，不要将私钥或正式签名密码提交到仓库。
 
 ## 构建 APK
 
@@ -26,7 +26,7 @@ macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/ap
 
 ## GitHub Release 自动发包
 
-[Android Release 工作流](../../.github/workflows/release.yml) 只在向 GitHub 推送 `v` 开头的 tag 时运行，普通分支推送不会发包。发布 tag 必须采用 `v主版本.次版本.修订号`，例如 `v0.6.1`；每段为 0–999 的整数，不允许前导零、预发布后缀或 `v0.0.0`。不符合格式时工作流会报错并停止。
+[Android Release 工作流](../../.github/workflows/release.yml) 在向 GitHub 推送 `v` 开头的 tag 时运行，也可在 Actions 页面通过 **Run workflow** 填写已有的 `release_tag` 手动构建；普通分支推送不会发包。发布 tag 必须采用 `v主版本.次版本.修订号`，例如 `v0.6.1`；每段为 0–999 的整数，不允许前导零、预发布后缀或 `v0.0.0`。不符合格式时工作流会报错并停止。
 
 工作流使用 JDK 17 和工程指定的 Android SDK，运行 `lintRelease`、构建并验证签名 APK，然后创建同名 GitHub Release、自动生成发布说明，并上传：
 
@@ -43,8 +43,11 @@ macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/ap
 | `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
 | `ANDROID_KEY_ALIAS` | 签名密钥别名 |
 | `ANDROID_KEY_PASSWORD` | 签名密钥密码 |
+| `ANDROID_SIGNING_LINEAGE_BASE64` | 可选，旧签名到当前签名的轮换授权链（`apksigner rotate` 输出文件的 Base64 内容） |
 
-使用计划长期保留的签名密钥。若需要覆盖已安装的测试包，必须使用与该测试包相同的密钥；改用其他签名时需先卸载旧包，卸载会清除应用本地数据。工作流不会生成临时签名，也不会将私钥上传到 Release；Secrets 缺失或签名校验失败时停止发包。
+使用计划长期保留的签名密钥。若需要覆盖已安装的测试包，应沿用原签名，或提供由旧私钥授权新证书的签名轮换链。直接换成无授权关系的新签名将无法覆盖安装；卸载旧包会清除应用本地数据。工作流不会生成临时签名，也不会将私钥上传到 Release；必需的 Secrets 缺失或签名校验失败时停止发包。
+
+配置轮换链后，工作流会使用当前私钥重新签署最终 APK，携带 V3 轮换证明，并将轮换最低 API 设为 28。项目最低 API 为 29，因此无需用旧私钥生成 V1/V2 兼容签名，旧私钥也无需上传 GitHub。生成轮换链时须保留旧证书的 `installed-data` 能力，以支持保留应用数据的升级；后续版本必须继续携带这条链。密钥和轮换链都应备份，覆盖安装及数据保留仍需在目标设备上验收。
 
 在 PowerShell 中可用以下命令将现有 keystore 转成 Base64 并复制到剪贴板，将路径替换成自己的文件位置：
 
@@ -65,7 +68,7 @@ git tag -a v0.6.1 -m "发布 v0.6.1"
 git push origin v0.6.1
 ```
 
-tag 必须指向包含工作流及待发布代码的提交，构建使用该 tag 对应的代码。发布后在仓库 Actions 和 Releases 查看结果。失败后可在 Actions 中重跑；已存在的 Release 不会被覆盖，需要为新内容使用新版本 tag。
+自动触发时，tag 必须指向包含工作流及待发布代码的提交。手动触发时可选择包含修复后工作流的分支，再填写已有 tag；检出的应用源码始终来自该 tag，无需移动 tag 即可修复发布流程或签名配置后重建。发布后在仓库 Actions 和 Releases 查看结果。配置问题修复后可重跑原任务；工作流本身修复后应从包含修复的分支手动触发。已存在的 Release 不会被覆盖，需要为新内容使用新版本 tag。
 
 本地需要签名 Release 时，设置 `ANDROID_KEYSTORE_PATH`（绝对路径）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 环境变量，再运行 `:app:assembleRelease`；可通过 `"-PreleaseVersionName=0.6.1" "-PreleaseVersionCode=6001"` 指定版本。未设置签名路径的本地 Release 构建会生成未签名 APK，不能直接安装。
 

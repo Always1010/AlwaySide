@@ -1,16 +1,22 @@
 name: Android Release
-run-name: Release ${{ github.ref_name }}
+run-name: Release ${{ inputs.release_tag || github.ref_name }}
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: android-release-${{ github.ref }}
+  group: android-release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -21,12 +27,13 @@ jobs:
       run:
         shell: bash
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
           persist-credentials: false
 
       - name: Validate release version
@@ -56,7 +63,9 @@ jobs:
             apps/android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Set release signing key path
-        run: echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/alwayside-release.jks" >> "$GITHUB_ENV"
+        run: |
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/alwayside-release.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_SIGNING_LINEAGE_PATH=$RUNNER_TEMP/alwayside.lineage" >> "$GITHUB_ENV"
 
       - name: Prepare release signing key
         env:
@@ -64,6 +73,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_SIGNING_LINEAGE_BASE64: ${{ secrets.ANDROID_SIGNING_LINEAGE_BASE64 }}
         run: |
           for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [[ -z "${!name}" ]]; then
@@ -75,6 +85,9 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
           keytool -list -keystore "$ANDROID_KEYSTORE_PATH" \
             -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" > /dev/null
+          if [[ -n "$ANDROID_SIGNING_LINEAGE_BASE64" ]]; then
+            printf '%s' "$ANDROID_SIGNING_LINEAGE_BASE64" | base64 --decode > "$ANDROID_SIGNING_LINEAGE_PATH"
+          fi
 
       - name: Ensure Android SDK packages
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
@@ -88,17 +101,34 @@ jobs:
         run: bash ./gradlew --no-daemon --console=plain :app:lintRelease :app:assembleRelease
 
       - name: Verify and package APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           apk=apps/android/app/build/outputs/apk/release/app-release.apk
           tools="$ANDROID_HOME/build-tools/36.0.0"
-          "$tools/apksigner" verify --verbose "$apk"
-          badging=$("$tools/aapt" dump badging "$apk")
+          mkdir -p dist
+          output="dist/AlwaySide-$RELEASE_TAG.apk"
+          if [[ -s "$ANDROID_SIGNING_LINEAGE_PATH" ]]; then
+            # The app requires API 29+. V3 supports rotation without retaining
+            # the old private key for V1/V2 compatibility on older devices.
+            "$tools/apksigner" sign \
+              --ks "$ANDROID_KEYSTORE_PATH" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+              --lineage "$ANDROID_SIGNING_LINEAGE_PATH" --rotation-min-sdk-version 28 \
+              --v1-signing-enabled false --v2-signing-enabled false \
+              --v3-signing-enabled true --v4-signing-enabled false \
+              --out "$output" "$apk"
+          else
+            cp "$apk" "$output"
+          fi
+          "$tools/apksigner" verify --verbose --print-certs "$output"
+          badging=$("$tools/aapt" dump badging "$output")
           package_line=${badging%%$'\n'*}
           grep -F "name='com.alwayside.android'" <<< "$package_line"
           grep -F "versionName='$ORG_GRADLE_PROJECT_releaseVersionName'" <<< "$package_line"
           grep -F "versionCode='$ORG_GRADLE_PROJECT_releaseVersionCode'" <<< "$package_line"
-          mkdir -p dist
-          cp "$apk" "dist/AlwaySide-$RELEASE_TAG.apk"
           cd dist
           sha256sum "AlwaySide-$RELEASE_TAG.apk" > "AlwaySide-$RELEASE_TAG.apk.sha256"
 
@@ -114,4 +144,4 @@ jobs:
 
       - name: Remove signing key
         if: always()
-        run: rm -f -- "$ANDROID_KEYSTORE_PATH"
+        run: rm -f -- "$ANDROID_KEYSTORE_PATH" "$ANDROID_SIGNING_LINEAGE_PATH"
