@@ -13,6 +13,7 @@ internal interface ChatAdapter {
 internal interface AnswerDecoder {
     val complete: Boolean
     val searchUsed: Boolean get() = false
+    val searchSuggestions: String get() = ""
     fun accept(eventName: String, data: Map<String, Any?>, onDelta: (String) -> Unit)
     fun finish(onDelta: (String) -> Unit): String
 }

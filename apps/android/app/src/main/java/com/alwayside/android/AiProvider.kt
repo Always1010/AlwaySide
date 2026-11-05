@@ -15,11 +15,14 @@ internal interface AiGateway {
     fun respond(config: AppConfig, history: List<ChatMessage>, question: String, imageDataUrl: String?,
         cancellation: RequestCancellation, onDelta: (String) -> Unit): String
     fun transcribe(config: AppConfig, file: File, cancellation: RequestCancellation): String
+    fun searchSuggestions(): String = ""
 }
 
 /** Blocking transport: callers must use a worker thread and a fresh cancellation token. */
 internal class AiProvider : AiGateway {
     var lastSearchUsed: Boolean = false; private set
+    private var lastSuggestions: String = ""
+    override fun searchSuggestions(): String = lastSuggestions
     override fun respond(
         config: AppConfig,
         history: List<ChatMessage>,
@@ -28,7 +31,7 @@ internal class AiProvider : AiGateway {
         cancellation: RequestCancellation,
         onDelta: (String) -> Unit,
     ): String = sanitized(cancellation) {
-        lastSearchUsed = false
+        lastSearchUsed = false; lastSuggestions = ""
         validateConnection(config)
         validateModel(config.model)
         ProviderProtocol.validateOptions(config)
@@ -58,16 +61,18 @@ internal class AiProvider : AiGateway {
                     else decoder.accept(event.name, WireJson.decode(event.data), emit)
                 }
                 cancellation.throwIfCancelled()
-                decoder.finish(emit).also { lastSearchUsed = decoder.searchUsed }
+                decoder.finish(emit).also { lastSearchUsed = decoder.searchUsed; lastSuggestions = decoder.searchSuggestions }
             }
         }
     }
 
     override fun transcribe(config: AppConfig, file: File, cancellation: RequestCancellation): String = sanitized(cancellation) {
-        validateConnection(config)
-        validateModel(config.transcriptionModel)
+        val target = ProviderConnections.transcription(config)
+        validateConnection(target)
+        validateModel(target.transcriptionModel)
+        if (target.transcriptionPrompt.length > 32000) throw ProviderException("转写提示过长")
         WavTranscription.transcribe(file, cancellation, MAX_OUTPUT_CHARS) { source, bytes ->
-            transcribePart(config, source, bytes, cancellation)
+            transcribePart(target, source, bytes, cancellation)
         }
     }
 
@@ -184,7 +189,11 @@ internal class AiProvider : AiGateway {
         catch (_: SocketTimeoutException) { cancellation.throwIfCancelled(); throw ProviderException("网络请求超时，请手动重试") }
         catch (_: IOException) { cancellation.throwIfCancelled(); throw ProviderException("网络连接失败，请检查网络与 API 地址后手动重试") }
         catch (_: JSONException) { cancellation.throwIfCancelled(); throw ProviderException("服务返回格式无效，请检查 API 兼容性") }
-        catch (_: IllegalArgumentException) { cancellation.throwIfCancelled(); throw ProviderException("请求配置无效，请检查设置") }
+        catch (error: IllegalArgumentException) {
+            cancellation.throwIfCancelled()
+            val message = error.message.orEmpty()
+            throw ProviderException(message.take(180).ifBlank { "请求配置无效，请检查设置" })
+        }
     }
 
     private companion object {

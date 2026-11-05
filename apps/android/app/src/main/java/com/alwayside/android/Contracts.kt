@@ -32,7 +32,7 @@ internal data class AppConfig(
     override fun toString() = "AppConfig(credentials redacted)"
 }
 
-internal data class ChatMessage(val role: String, val text: String, val evidence: String = "")
+internal data class ChatMessage(val role: String, val text: String, val evidence: String = "", val searchSuggestions: String = "")
 internal data class StoredConversation(
     val id: String,
     val updatedAt: Long,

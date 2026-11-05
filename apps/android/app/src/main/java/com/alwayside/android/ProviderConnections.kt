@@ -79,4 +79,22 @@ internal object ProviderConnections {
         return config.copy(baseUrl = address.trim(), apiKey = if (previous == next) config.apiKey else "",
             credentialRevision = config.credentialRevision + 1)
     }
+
+    fun credentialsCurrent(requestedConfig: AppConfig, current: AppConfig, answer: Boolean, audio: Boolean): Boolean {
+        val saved = snapshot(current)
+        val required = buildList {
+            if (answer) add(ConnectionProfile.capture(requestedConfig))
+            if (audio) add(ConnectionProfile.capture(transcription(requestedConfig)))
+        }
+        return required.all { requested -> saved.any { it.id == requested.id && it.apiKey.isNotBlank() &&
+            it.apiKey == requested.apiKey && it.credentialRevision == requested.credentialRevision && it.baseUrl == requested.baseUrl } }
+    }
+
+    fun setTranscriptionModel(config: AppConfig, model: String): AppConfig {
+        val target = transcription(config)
+        if (target.connectionId == config.connectionId) return config.copy(transcriptionModel = model.trim())
+        val updated = ConnectionProfile.capture(target.copy(transcriptionModel = model.trim())).copy(apiProtocol =
+            snapshot(config).first { it.id == target.connectionId }.apiProtocol)
+        return config.copy(connections = snapshot(config).map { if (it.id == target.connectionId) updated else it })
+    }
 }

@@ -4,12 +4,15 @@ package com.alwayside.android
 internal sealed interface SettingsUpdate {
     fun applyTo(current: AppConfig): AppConfig
 
-    enum class TextField { baseUrl, apiKey, model, transcriptionModel, instructions, defaultQuestion, textQuestion, audioQuestion, transcriptionPrompt, maxOutputTokens, temperature, topP;
+    enum class TextField { baseUrl, apiKey, model, transcriptionModel, instructions, defaultQuestion, textQuestion, audioQuestion, transcriptionPrompt, maxOutputTokens, temperature, topP, connectionName, apiVersion, workspaceId;
         fun read(current: AppConfig): String = when (this) {
             baseUrl -> current.baseUrl
             apiKey -> ""
             model -> current.model
-            transcriptionModel -> current.transcriptionModel
+            transcriptionModel -> runCatching { ProviderConnections.transcription(current).transcriptionModel }.getOrDefault("")
+            connectionName -> current.connectionName
+            apiVersion -> current.apiVersion
+            workspaceId -> current.workspaceId
             instructions -> current.instructions
             defaultQuestion -> current.defaultQuestion
             textQuestion -> current.textQuestion
@@ -27,7 +30,10 @@ internal sealed interface SettingsUpdate {
             TextField.baseUrl -> ProviderConnections.addressChanged(current, value)
             TextField.apiKey -> current.copy(credentialRevision = current.credentialRevision + 1, apiKey = value.trim().also { require(it.isNotBlank()) { "密钥不能为空；移除请使用移除密钥" } })
             TextField.model -> current.copy(model = value.trim())
-            TextField.transcriptionModel -> current.copy(transcriptionModel = value.trim())
+            TextField.transcriptionModel -> ProviderConnections.setTranscriptionModel(current, value)
+            TextField.connectionName -> current.copy(connectionName = value.trim())
+            TextField.apiVersion -> current.copy(apiVersion = value.trim())
+            TextField.workspaceId -> current.copy(workspaceId = value.trim())
             TextField.instructions -> current.copy(instructions = value)
             TextField.defaultQuestion -> current.copy(defaultQuestion = value)
             TextField.textQuestion -> current.copy(textQuestion = value)

@@ -200,7 +200,7 @@ internal class SettingsStore(context: Context) {
             require(config.workspaceId.length <= 200 && config.workspaceId.none { it.code < 33 || it.code > 126 }) { "Workspace ID 无效" }
             ProviderProtocol.validateOptions(config)
             require(listOf(config.instructions, config.defaultQuestion, config.audioQuestion, config.transcriptionPrompt, config.textQuestion).all { it.length <= 32000 }) { "单项提示词不能超过 32000 字符" }
-            require(config.apiKey.length <= 8192 && config.apiKey.none { it.isWhitespace() }) { "API Key 不能包含空白字符" }
+            require(config.apiKey.length <= 4096 && config.apiKey.none { it.code < 33 || it.code > 126 }) { "API Key 请使用不含空白的有效凭证，最多 4096 字符" }
         }
     }
 }

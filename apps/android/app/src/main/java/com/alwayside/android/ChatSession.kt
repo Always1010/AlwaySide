@@ -18,10 +18,12 @@ internal class ChatSession(
     private val worker: ExecutorService,
     private val saveHistory: (StoredConversation) -> Unit,
     private val changed: () -> Unit,
+    private val credentialsCurrent: (AppConfig, Boolean, Boolean) -> Boolean = { _, _, _ -> true },
 ) {
     constructor(context: Context, changed: () -> Unit) : this(
         AiProvider(), androidDispatcher(), Executors.newSingleThreadExecutor(),
         HistoryStore(context)::save, changed,
+        credentialValidator(context),
     )
     private var observer: (() -> Unit)? = null
     fun setObserver(observer: (() -> Unit)?) { this.observer = observer }
@@ -40,6 +42,7 @@ internal class ChatSession(
     var partial = ""; private set
     var question = ""; private set
     var status = "等待提问"; private set
+    var requestProviderLabel = ""; private set
     var evidence = "未附媒体"; private set
     var transcript = ""; private set
     private var selectedText = ""
@@ -57,7 +60,7 @@ internal class ChatSession(
     }
     val canRetry get() = !busy && retry != null
     private data class Request(val config: AppConfig, val history: List<ChatMessage>, val question: String,
-        val image: Bitmap?, val evidence: String, val audio: File?, val transcript: String, val sourceText: String)
+        val image: Bitmap?, val evidence: String, val audio: File?, val transcript: String, val sourceText: String, val continuationCount: Int = 0, val continuationPrefix: String = "")
 
     fun submit(config: AppConfig, text: String, image: Bitmap?, label: String, audio: File? = null,
                useDefaultAudioOutput: Boolean = true) {
@@ -67,7 +70,8 @@ internal class ChatSession(
         val effectiveQuestion = if (audio != null && requestConfig.audioOutput == "translate") AUDIO_TRANSLATION_QUESTION else text
         require(effectiveQuestion.isNotBlank()) { "请输入问题" }
         require(effectiveQuestion.length <= 12000) { "问题过长，请控制在 12000 字以内" }
-        require(config.apiKey.isNotBlank()) { "请先到设置填写 API Key" }
+        if (audio == null || requestConfig.audioOutput != "transcript") require(config.apiKey.isNotBlank()) { "请先为问答连接填写 API Key" }
+        if (audio != null) require(ProviderConnections.transcription(requestConfig).apiKey.isNotBlank()) { "请先为转写连接填写 API Key" }
         val audioKey = audio?.let { audioKey(it, requestConfig) }
         val known = if (audioKey != null) {
             if (cachedAudio?.first == audioKey) cachedAudio!!.second else ""
@@ -75,18 +79,27 @@ internal class ChatSession(
         if (audio != null) kind = "audio" else if (image != null) kind = "photo"
         start(Request(requestConfig.copy(), messages.takeLast(24).toList(), effectiveQuestion, image, label, audio, known, sourceText))
     }
-    fun retry() { if (!busy) retry?.let { start(it) } }
+    val retryLabel: String get() = if (retry?.config?.continuationMessages?.isNotEmpty() == true) "继续生成" else "重试上次请求"
+    fun retry() { if (!busy) retry?.let { request ->
+        val needsAnswer = request.audio == null || request.config.audioOutput != "transcript"
+        val needsAudio = request.audio != null && request.transcript.isEmpty()
+        if (!credentialsCurrent(request.config, needsAnswer, needsAudio)) {
+            retry = null; status = "连接或密钥已更新，请重新发送问题"; notifyChanged()
+        } else start(request)
+    } }
     private fun start(request: Request) {
         val token = ++epoch
         val cancel = RequestCancellation()
         cancellation = cancel; retry = request; busy = true
-        partial = ""; question = request.question; evidence = request.evidence
+        requestProviderLabel = ProviderCapabilities.label(request.config)
+        partial = request.continuationPrefix; question = request.question; evidence = request.evidence
         transcript = request.transcript
         selectedText = request.sourceText
         status = if (request.audio != null && transcript.isEmpty()) "正在转写音频…" else "正在连接…"
         archive()
         notifyChanged()
         worker.execute {
+            val accumulated = StringBuilder(request.continuationPrefix)
             try {
                 var words = request.transcript
                 if (request.audio != null && words.isEmpty()) {
@@ -114,8 +127,7 @@ internal class ChatSession(
                     }
                 }
                 var lastUpdate = 0L
-                val accumulated = StringBuilder()
-                val answer = if (request.audio != null && request.config.audioOutput == "transcript") words else
+                val generated = if (request.audio != null && request.config.audioOutput == "transcript") words else
                     provider.respond(request.config, request.history, prompt, imageUrl, cancel) { delta ->
                     accumulated.append(delta)
                     val now = System.nanoTime()
@@ -125,17 +137,33 @@ internal class ChatSession(
                         post { if (epoch == token) { partial = value; status = "正在回答…"; notifyChanged() } }
                     }
                 }
+                val answer = request.continuationPrefix + generated
+                val suggestions = if (request.audio != null && request.config.audioOutput == "transcript") "" else provider.searchSuggestions()
                 cancel.throwIfCancelled()
                 post {
                     if (epoch != token) return@post
                     if (answerTitle.isBlank()) answerTitle = ConversationTitle.fromAnswer(answer)
                     messages.add(ChatMessage("user", request.question, request.evidence))
-                    messages.add(ChatMessage("assistant", answer))
+                    messages.add(ChatMessage("assistant", answer, searchSuggestions = suggestions))
                     while (messages.size > 40) { messages.removeAt(0); messages.removeAt(0) }
                     transcript = words; partial = ""; question = ""; busy = false; retry = null; cancellation = null
                     status = if (messages.size >= 24) "已完成 · 后续追问最多参考最近 24 条文字消息" else "已完成"
                     archive()
                     notifyChanged()
+                }
+            } catch (e: ProviderPausedException) {
+                post {
+                    if (epoch != token) return@post
+                    busy = false; cancellation = null
+                    partial = accumulated.toString()
+                    if (request.continuationCount >= 3) {
+                        retry = null; status = "搜索续接已达 3 次，回答仍未完成，请缩小问题范围后重新发送"
+                    } else {
+                        retry = (retry ?: request).copy(config = request.config.copy(continuationMessages = e.messages),
+                            continuationCount = request.continuationCount + 1, continuationPrefix = accumulated.toString())
+                        status = "搜索尚未完成，点击继续生成；继续会再次调用原服务"
+                    }
+                    archive(); notifyChanged()
                 }
             } catch (e: Exception) {
                 post {
@@ -183,7 +211,10 @@ internal class ChatSession(
         runCatching { saveHistory(snapshot()) }.onFailure { status += " · 本地历史保存失败" }
     }
     fun close() { if (busy) cancel(); epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
-    private fun audioKey(file: File, config: AppConfig) = "${file.absolutePath}:${file.length()}:${file.lastModified()}:${config.baseUrl}:${config.transcriptionModel}:${config.transcriptionPrompt}"
+    private fun audioKey(file: File, config: AppConfig): String {
+        val target = ProviderConnections.transcription(config)
+        return "${file.absolutePath}:${file.length()}:${file.lastModified()}:${target.connectionId}:${target.baseUrl}:${target.apiProtocol}:${target.transcriptionModel}:${target.credentialRevision}:${target.transcriptionPrompt}"
+    }
     private fun cancelled(e: Exception) = e is java.util.concurrent.CancellationException || e is InterruptedException
     private fun safeError(e: Exception): String = when (e) {
         is java.net.SocketTimeoutException -> "请求超时；可手动重试"
@@ -205,6 +236,10 @@ internal class ChatSession(
     }
     private companion object {
         const val AUDIO_TRANSLATION_QUESTION = "请将以下音频转写内容翻译成中文，忠实保留原意，仅输出译文，不添加总结、分析或解读。"
+
+        fun credentialValidator(context: Context): (AppConfig, Boolean, Boolean) -> Boolean = { snapshot, answer, audio ->
+            kotlin.runCatching { ProviderConnections.credentialsCurrent(snapshot, SettingsStore(context).load(), answer, audio) }.getOrDefault(false)
+        }
 
         fun androidDispatcher(): (() -> Unit) -> Unit {
             val main = Handler(Looper.getMainLooper())
