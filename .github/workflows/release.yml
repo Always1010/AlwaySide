@@ -22,7 +22,6 @@ jobs:
         shell: bash
     env:
       RELEASE_TAG: ${{ github.ref_name }}
-      ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/alwayside-release.jks
 
     steps:
       - name: Check out tagged commit
@@ -55,6 +54,9 @@ jobs:
             apps/android/**/*.gradle.kts
             apps/android/gradle.properties
             apps/android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Set release signing key path
+        run: echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/alwayside-release.jks" >> "$GITHUB_ENV"
 
       - name: Prepare release signing key
         env:
