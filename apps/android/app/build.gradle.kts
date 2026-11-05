@@ -12,8 +12,8 @@ android {
         applicationId = "com.alwayside.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = releaseVersionCode.orNull?.toInt() ?: 13
-        versionName = releaseVersionName.orNull ?: "0.6.0"
+        versionCode = releaseVersionCode.orNull?.toInt() ?: 1000000
+        versionName = releaseVersionName.orNull ?: "1.0.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
