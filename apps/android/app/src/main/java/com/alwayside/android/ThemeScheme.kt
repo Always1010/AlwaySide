@@ -9,6 +9,6 @@ internal enum class ThemeScheme(val value: String) {
     }
     fun onAccent(night: Boolean): Int = if(night)0xFF101820.toInt() else 0xFFFFFFFF.toInt()
     companion object {
-        fun parse(value: String?): ThemeScheme = entries.firstOrNull { it.value == value } ?: BLACK
+        fun parse(value: String?): ThemeScheme = entries.firstOrNull { it.value == value } ?: BLUE
     }
 }

@@ -4,9 +4,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ThemeSchemeTest {
-    @Test fun defaultSchemeIsNeutralAndBothAppearancesUseReadableForegrounds() {
-        assertEquals(ThemeScheme.BLACK,ThemeScheme.parse(null))
-        assertEquals(ThemeScheme.BLACK,ThemeScheme.parse("obsolete"))
+    @Test fun defaultSchemeIsBlueAndExplicitBlackRemainsAvailable() {
+        assertEquals(ThemeScheme.BLUE,ThemeScheme.parse(null))
+        assertEquals(ThemeScheme.BLUE,ThemeScheme.parse("obsolete"))
+        assertEquals(ThemeScheme.BLACK,ThemeScheme.parse("black"))
+        assertEquals(ThemeScheme.BLUE,ThemeScheme.parse("blue"))
         assertEquals(0xFF191C20.toInt(),ThemeScheme.BLACK.accent(false))
         assertEquals(0xFFFFFFFF.toInt(),ThemeScheme.BLACK.onAccent(false))
         assertNotEquals(ThemeScheme.BLACK.accent(false),ThemeScheme.BLACK.accent(true))

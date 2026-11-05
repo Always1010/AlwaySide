@@ -19,14 +19,14 @@ internal object AppAppearance {
     private const val MODE = "mode"
     private const val SCHEME = "scheme"
     private var selectedMode = AppearanceMode.SYSTEM
-    private var selectedScheme = ThemeScheme.BLACK
+    private var selectedScheme = ThemeScheme.BLUE
     private fun preferences(context: Context) = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
     fun mode(context: Context): String {
         selectedMode = AppearanceMode.parse(preferences(context).getString(MODE, "system"))
-        selectedScheme = ThemeScheme.parse(preferences(context).getString(SCHEME, "black"))
+        selectedScheme = ThemeScheme.parse(preferences(context).getString(SCHEME, "blue"))
         return selectedMode.value
     }
-    fun scheme(context: Context): String = ThemeScheme.parse(preferences(context).getString(SCHEME,"black")).also { selectedScheme=it }.value
+    fun scheme(context: Context): String = ThemeScheme.parse(preferences(context).getString(SCHEME,"blue")).also { selectedScheme=it }.value
     fun saveScheme(context: Context, value: String) {
         val next=ThemeScheme.parse(value)
         check(preferences(context).edit().putString(SCHEME,next.value).commit()) { "无法保存配色，请重试" }
