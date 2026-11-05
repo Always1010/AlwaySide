@@ -24,4 +24,12 @@ class ResponsesAdapterTest {
         assertThrows(ProviderException::class.java) { ProviderCapabilities.validate(AppConfig(providerKind = ProviderKind.DEEPSEEK, model = "deepseek-v4-pro"), true) }
         assertFalse(ProviderCapabilities.search(AppConfig(providerKind = ProviderKind.DEEPSEEK, model = "deepseek-flash")))
     }
+    @Test fun completedWithoutFinalTextCannotValidatePartialDeltas() {
+        val decoder = ResponsesAdapter.decoder(AppConfig())
+        decoder.accept("response.output_text.delta", mapOf("delta" to "partial")) {}
+        assertThrows(ProviderException::class.java) {
+            decoder.accept("response.completed", mapOf("response" to mapOf("status" to "completed", "output" to emptyList<Any>()))) {}
+        }
+        assertFalse(decoder.complete)
+    }
 }

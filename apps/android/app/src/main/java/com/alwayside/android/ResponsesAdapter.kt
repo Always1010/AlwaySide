@@ -42,7 +42,7 @@ internal object ResponsesAdapter : ChatAdapter {
                         }
                     }
                     if (answer.value.isEmpty()) answer.append(finalText, onDelta)
-                    else if (finalText.isNotEmpty() && finalText != answer.value) throw ProviderException("回答片段与最终结果不一致，请重试")
+                    else if (finalText != answer.value) throw ProviderException("回答片段与最终结果不一致，请重试")
                     complete = true
                 }
             }
