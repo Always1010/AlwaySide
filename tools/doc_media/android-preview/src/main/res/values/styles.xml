@@ -1,0 +1,9 @@
+<resources>
+    <!-- The reading fixture belongs to the demo stage, not the production App. -->
+    <style name="TextAppearance.DocMedia.ReadingTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textSize">24sp</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+</resources>

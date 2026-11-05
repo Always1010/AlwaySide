@@ -145,6 +145,8 @@ def capture(args):
             # The native host publishes this completion file atomically.
             manifest = run(adb + ["exec-out", "run-as", PACKAGE, "cat", remote + "/manifest.json"], check=False)
             if manifest.startswith("{"):
+                if json.loads(manifest).get("error"):
+                    raise RuntimeError("Native frame writer failed: " + json.loads(manifest)["error"])
                 break
             if not run(adb + ["shell", "pidof", PACKAGE], check=False):
                 raise RuntimeError(f"Preview Activity stopped: {name}. Inspect emulator logcat for {PACKAGE}.")
@@ -193,67 +195,99 @@ def render(args):
     selected = args.scene or [p.name for p in source.iterdir() if (p / "manifest.json").is_file()]
     if not selected:
         raise RuntimeError("No captured scenes found.")
-    font = ImageFont.truetype(font_path(args.font), 15)
-    small = ImageFont.truetype(font_path(args.font), 12)
-    title_font = ImageFont.truetype(font_path(args.font), 19)
+    # Compose at 2x: retain native detail in PNG, supersample the GIF like the approved set.
+    font = ImageFont.truetype(font_path(args.font), 32)
+    small = ImageFont.truetype(font_path(args.font), 22)
+    title_font = ImageFont.truetype(font_path(args.font), 38)
     output.mkdir(parents=True)
     results = []
     for name in selected:
         manifest = read_json(source / name / "manifest.json")
         native_width, native_height = manifest["width"], manifest["height"]
-        scale = 432 / native_width
+        scale = 800 / native_width
         height = round(native_height * scale)
+        outer_width, left, top = 864, 32, 132
+        mask = Image.new("L", (800,height), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0,0,799,height-1),radius=36,fill=255)
+        still = bool(config[name].get("still"))
         rendered, durations = [], []
         records = manifest["frames"]
         if not records:
             raise RuntimeError("Empty capture: " + name)
+        cue_timing = [(0,1)] * len(records)
+        start = 0
+        while start < len(records):
+            end = start + 1
+            while end < len(records) and records[end].get("cue") == records[start].get("cue"):
+                end += 1
+            span = max(1,records[end-1]["at"]-records[start]["at"])
+            for position in range(start,end):
+                cue_timing[position] = (records[start]["at"],span)
+            start = end
         for index, frame in enumerate(records):
             with Image.open(source / name / frame["file"]) as native:
-                native = native.convert("RGB").resize((432, height), Image.Resampling.LANCZOS)
-            canvas = Image.new("RGB", (480, height + 158), "#F5F7FB")
-            canvas.paste(native, (24, 58))
+                native = native.convert("RGB").resize((800, height), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGB", (outer_width, height + 320), "#F5F7FB")
+            canvas.paste(native, (left,top),mask)
             draw = ImageDraw.Draw(canvas)
-            draw.text((24, 18), "AlwaySide", font=title_font, fill="#202428")
-            draw.text((350, 23), "原生组件演示", font=small, fill="#68717C")
-            draw.rounded_rectangle((23, 57, 456, height + 59), radius=2, outline="#DCE0E5", width=1)
-            y, line = height + 71, ""
+            draw.text((36, 40), "AlwaySide", font=title_font, fill="#202428")
+            draw.rounded_rectangle((624,40,828,86),radius=22,fill="#E8EDF7")
+            draw.text((644, 48), "原生组件演示", font=small, fill="#52617C")
+            draw.rounded_rectangle((left-1,top-1,left+800,top+height),radius=36,outline="#DCE0E5",width=2)
+            y, line = height + 162, ""
             for char in frame["caption"]:
-                if draw.textlength(line + char, font=font) > 432:
-                    draw.text((24, y), line, font=font, fill="#202428")
-                    line, y = "", y + 23
+                if draw.textlength(line + char, font=font) > 768:
+                    draw.text((48, y), line, font=font, fill="#202428")
+                    line, y = "", y + 46
                 line += char
-            draw.text((24, y), line, font=font, fill="#202428")
-            draw.text((24, height + 135), "预设内容 · 手势标记为后期叠加 · 非真实采集", font=small, fill="#68717C")
+            draw.text((48, y), line, font=font, fill="#202428")
+            draw.text((48, height + 272), "原生界面 · 预设内容 · 手势标记为后期叠加", font=small, fill="#68717C")
+            if not still:
+                progress=min(1,frame["at"]/max(1,records[-1]["at"]))
+                draw.line((48,height+308,816,height+308),fill="#DCE0E5",width=4)
+                draw.line((48,height+308,48+768*progress,height+308),fill="#2155CD",width=4)
             cue = frame.get("cue")
             if cue and cue["target"] in frame["targets"]:
                 x1, y1, x2, y2 = frame["targets"][cue["target"]]
-                cx, cy = 24 + (x1 + x2) / 2 * scale, 58 + (y1 + y2) / 2 * scale
+                cx, cy = left + (x1 + x2) / 2 * scale, top + (y1 + y2) / 2 * scale
                 kind = cue["kind"]
                 # Bounds come from native views, so annotations follow layout changes.
                 if kind.startswith("swipe-"):
+                    cx=left+x2*scale-18
                     direction = -1 if kind == "swipe-up" else 1
-                    draw.line((cx, cy - direction * 35, cx, cy + direction * 35), fill="#2155CD", width=3)
-                    end = cy + direction * 35
-                    draw.line((cx - 7, end - direction * 9, cx, end, cx + 7, end - direction * 9), fill="#2155CD", width=3)
+                    draw.line((cx, cy - direction * 70, cx, cy + direction * 70), fill="#2155CD", width=6)
+                    end = cy + direction * 70
+                    draw.line((cx - 14, end - direction * 18, cx, end, cx + 14, end - direction * 18), fill="#2155CD", width=6)
                 else:
-                    phase = (frame["at"] % 600) / 600
-                    radius = 18 + round(phase * 8)
-                    draw.ellipse((cx-radius, cy-radius, cx+radius, cy+radius), outline="#2155CD", width=3)
-                    count = {"double-tap": "2", "triple-tap": "3", "long-press": "按住"}.get(kind, "1")
-                    tx = min(422, max(30, cx - 12))
-                    draw.rounded_rectangle((tx-4, cy-48, tx+32, cy-27), radius=5, fill="#2155CD")
-                    draw.text((tx, cy-47), count, font=small, fill="white")
-            rendered.append(canvas)
-            following = records[index + 1]["at"] if index + 1 < len(records) else frame["at"] + 100
+                    cue_start,cue_span=cue_timing[index]
+                    elapsed=frame["at"]-cue_start
+                    taps={"double-tap":2,"triple-tap":3}.get(kind,1)
+                    phase=(elapsed % 220)/220
+                    radius=36+round(phase*16)
+                    if kind=="long-press":
+                        radius=44
+                        bounds=(cx-radius,cy-radius,cx+radius,cy+radius)
+                        draw.ellipse(bounds,outline="#B5C7F3",width=3)
+                        draw.arc(bounds,start=-90,end=-90+360*min(1,elapsed/cue_span),fill="#2155CD",width=6)
+                        count="按住"
+                    else:
+                        if elapsed<taps*220:
+                            draw.ellipse((cx-radius,cy-radius,cx+radius,cy+radius),outline="#2155CD",width=6)
+                        count=f"{min(taps,int(elapsed/220)+1)}/{taps}" if taps>1 else "1"
+                    tx = min(784, max(48, cx - 24))
+                    draw.rounded_rectangle((tx-8, cy-96, tx+64, cy-54), radius=10, fill="#2155CD")
+                    draw.text((tx, cy-94), count, font=small, fill="white")
+            rendered.append(canvas if still else canvas.resize((540,round(canvas.height*540/outer_width)),Image.Resampling.LANCZOS))
+            following = records[index + 1]["at"] if index + 1 < len(records) else frame["at"] + manifest.get("frameIntervalMs",100)
             durations.append(max(20, round((following - frame["at"]) / 10) * 10))
-        still = bool(config[name].get("still"))
         target = output / (name + (".png" if still else ".gif"))
         if still:
             rendered[-1].save(target)
         else:
             # One shared palette prevents colors jumping between frames.
             samples = rendered[::max(1, len(rendered)//8)][:8]
-            strip = Image.new("RGB", (480, rendered[0].height * len(samples)))
+            final_width=rendered[0].width
+            strip = Image.new("RGB", (final_width, rendered[0].height * len(samples)))
             for index, sample in enumerate(samples):
                 strip.paste(sample, (0, index * sample.height))
             palette = strip.quantize(colors=240)
@@ -261,10 +295,10 @@ def render(args):
             paletted[0].save(target, save_all=True, append_images=paletted[1:], duration=durations,
                              loop=0, optimize=False, disposal=1)
             # QA contact sheet is local-only and is never exported to docs by `export`.
-            sheet = Image.new("RGB", (480 * 3, rendered[0].height * 2), "white")
+            sheet = Image.new("RGB", (final_width * 3, rendered[0].height * 2), "white")
             for index, pos in enumerate((0, len(rendered)//4, len(rendered)//2,
                                          len(rendered)*2//3, len(rendered)*5//6, len(rendered)-1)):
-                sheet.paste(rendered[pos], ((index % 3)*480, (index // 3)*rendered[0].height))
+                sheet.paste(rendered[pos], ((index % 3)*final_width, (index // 3)*rendered[0].height))
             sheet.save(output / (name + "-contact.png"))
             rendered[-1].save(output / (name + "-final.png"))
         results.append({"scene": name, "file": target.name, "sha256": digest(target),

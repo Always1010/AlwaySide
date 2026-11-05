@@ -6,6 +6,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -17,6 +19,8 @@ import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Standalone fixture host. No service, provider, permissions or production state. */
 class DocMediaActivity : ThemedActivity() {
@@ -31,6 +35,12 @@ class DocMediaActivity : ThemedActivity() {
     private var composerExpanded = false
     private var answer: TextView? = null
     private var answerText = ""
+    private var sourceText: TextView? = null
+    private var menuBackdrop: View? = null
+    private val frameWriter = Executors.newFixedThreadPool(2)
+    private val pendingWrites = AtomicInteger()
+    @Volatile private var captureError: String? = null
+    private val frameIntervalMs = 50L
     private var caption = ""
     private var cue: JSONObject? = null
     private val targets = linkedMapOf<String, View>()
@@ -50,7 +60,12 @@ class DocMediaActivity : ThemedActivity() {
         }
         window.setDecorFitsSystemWindows(false)
         root = FrameLayout(this).apply { setBackgroundColor(BACKGROUND) }
-        setContentView(root)
+        val metrics = resources.displayMetrics
+        setContentView(FrameLayout(this).apply {
+            setBackgroundColor(BACKGROUND)
+            addView(root,FrameLayout.LayoutParams(minOf(dp(400),metrics.widthPixels),
+                minOf(dp(800),metrics.heightPixels),Gravity.CENTER))
+        })
         root.post {
             root.windowInsetsController?.let {
                 it.hide(WindowInsets.Type.systemBars())
@@ -63,22 +78,25 @@ class DocMediaActivity : ThemedActivity() {
 
     private fun createReading() {
         val audio = scene.optString("kind") == "audio"
-        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        page.addView(materialToolbar(if (audio) "音频示例" else "阅读示例", {}))
-        val article = column()
-        article.addView(label(if (audio) "LISTEN & TRANSLATE" else "DAILY READING", 11f, true))
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL;setPadding(0,dp(24),0,0) }
+        page.addView(materialToolbar(if (audio) "音频示例" else "阅读示例", {}).apply {
+            setTitleTextAppearance(this@DocMediaActivity,R.style.TextAppearance_DocMedia_ReadingTitle)
+        })
+        page.addView(View(this).apply {setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)))
+        val article = column().apply { setPadding(dp(28),dp(36),dp(28),dp(24)) }
+        article.addView(label(if (audio) "LISTEN & TRANSLATE" else "DAILY READING", 11f, true).apply { textSize=11f;letterSpacing=0f })
         article.addView(label(if (audio) "A longer audio clip" else "Weekend plans", 24f).apply {
-            setPadding(0, dp(20), 0, dp(18))
+            textSize=29f;letterSpacing=0f;setPadding(0, dp(22), 0, dp(18))
         })
         article.addView(label(if (audio) "双击悬浮球，演示录音结束后查看原文和译文。\n\n预设音频内容，不采集设备声音。"
             else fixture.getJSONObject("reading").getString("original"), 14f, true).apply {
-            setLineSpacing(dp(4).toFloat(), 1f)
+            textSize=15f;letterSpacing=0f;setLineSpacing(dp(4).toFloat(), 1f)
         })
         page.addView(ScrollView(this).apply { addView(article) }, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(page, FrameLayout.LayoutParams(-1, -1))
         bubble = AssistantBubbleView(this)
-        root.addView(bubble, FrameLayout.LayoutParams(dp(40), dp(48), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            marginEnd = dp(6)
+        root.addView(bubble, FrameLayout.LayoutParams(dp(40), dp(48), Gravity.END or Gravity.TOP).apply {
+            marginEnd = dp(2);topMargin=dp(331)
         })
         targets["bubble"] = bubble
     }
@@ -86,28 +104,36 @@ class DocMediaActivity : ThemedActivity() {
     private fun showMenu() {
         removePanel()
         val menu = AssistantMenuViews(this, onAction = {})
+        menuBackdrop = View(this).apply { setBackgroundColor(0x52000000) }.also {
+            root.addView(it,root.indexOfChild(bubble),FrameLayout.LayoutParams(-1,-1))
+        }
         val scroll = ScrollView(this).apply { addView(menu.view); isFillViewport = false }
         panel = FrameLayout(this).apply {
-            background = outlinedCard(BACKGROUND, 12)
-            elevation = dp(5).toFloat()
+            background = card(SURFACE,dp(12).toFloat())
             addView(scroll)
         }
-        root.addView(panel, FrameLayout.LayoutParams(dp(menu.preferredWidthDp), -2, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-            marginEnd = dp(54)
+        val width=minOf(dp(menu.preferredWidthDp),root.width-dp(64))
+        menu.view.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED))
+        val height=minOf(menu.view.measuredHeight,root.height-dp(16))
+        root.addView(panel, FrameLayout.LayoutParams(width,height,Gravity.END or Gravity.TOP).apply {
+            marginEnd = dp(47);topMargin=(bubble.top-dp(50)).coerceIn(dp(8),(root.height-height-dp(8)).coerceAtLeast(dp(8)))
         })
         targets["menu"] = menu.view
     }
 
     private fun removePanel() {
         panel?.let(root::removeView)
+        menuBackdrop?.let(root::removeView)
+        menuBackdrop=null;sourceText=null
         panel = null
         conversation = null
-        listOf("menu", "window", "toggle", "send", "scroll").forEach(targets::remove)
+        listOf("menu", "window", "toggle", "send", "scroll", "question", "answer").forEach(targets::remove)
     }
 
     private fun showWindow(audio: Boolean) {
         removePanel()
-        val views = AssistantWindowViews(this, if (audio) "音频问答" else "截图问答", !audio,
+        val views = AssistantWindowViews(this, if (audio) "听一段" else "截图问答", !audio,
             AssistantWindowActions(toggle = { toggleComposer() }, send = { sendFollowup() }))
         conversation = views
         views.cancel.visibility = View.GONE
@@ -115,11 +141,15 @@ class DocMediaActivity : ThemedActivity() {
         views.status.text = "已完成 · 预设演示内容"
         views.sourceContent.visibility = if (audio) View.VISIBLE else View.GONE
         if (audio) {
-            views.sourceContent.addView(label("转录原文", 12f, true))
-            views.sourceContent.addView(label(fixture.getJSONObject("audio").getString("original"), 12f, true).apply {
+            val sourceLabel=label("转写原文 · 示例  ▾",11f,true).apply { textSize=11f;minHeight=dp(28);gravity=Gravity.CENTER_VERTICAL }
+            views.sourceContent.addView(sourceLabel)
+            sourceText=label(fixture.getJSONObject("audio").getString("original"), 12f, true).apply {
                 setLineSpacing(0f, 1.3f)
                 setPadding(0, dp(8), 0, dp(8))
-            })
+            }.also(views.sourceContent::addView)
+            sourceLabel.setOnClickListener {
+                sourceText!!.visibility=if(sourceText!!.visibility==View.VISIBLE)View.GONE else View.VISIBLE
+            }
             addMessage(false, "中文翻译\n\n" + fixture.getJSONObject("audio").getString("translation"))
         } else {
             addMessage(false, fixture.getJSONObject("reading").getString("translation"))
@@ -127,16 +157,23 @@ class DocMediaActivity : ThemedActivity() {
         composerExpanded = false
         views.input.showSoftInputOnFocus = false
         views.input.isCursorVisible = false
+        views.input.addTextChangedListener(object:TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int)=Unit
+            override fun afterTextChanged(s:Editable?)=Unit
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
+                views.send.isEnabled=!s.isNullOrBlank()
+            }
+        })
         panel = FrameLayout(this).apply {
-            background = outlinedCard(BACKGROUND, 16)
+            background = outlinedCard(BACKGROUND, 15)
             clipToOutline = true
             elevation = dp(3).toFloat()
             addView(views.body, FrameLayout.LayoutParams(-1, -1))
         }
         // Placement belongs to the documentation stage, not to the shared components.
-        val height = minOf(dp(if (audio) 590 else 410), root.height - dp(240))
-        root.addView(panel, FrameLayout.LayoutParams(root.width - dp(74), height, Gravity.END or Gravity.BOTTOM).apply {
-            marginEnd = dp(48); bottomMargin = dp(22)
+        val height = minOf(dp(assistantWindowHeightDp()), root.height-dp(72))
+        root.addView(panel, FrameLayout.LayoutParams(minOf(dp(320),root.width-dp(24)),height,Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply {
+            topMargin=minOf(dp(328),root.height-height-dp(40)).coerceAtLeast(dp(8))
         })
         targets.putAll(mapOf("window" to views.body, "toggle" to views.toggle,
             "send" to views.send, "scroll" to views.scroll))
@@ -153,17 +190,13 @@ class DocMediaActivity : ThemedActivity() {
     private fun toggleComposer() {
         composerExpanded = !composerExpanded
         conversation!!.setComposer(composerExpanded)
-        // Retain enough native scrolling area while the input section is open.
-        panel!!.layoutParams = (panel!!.layoutParams as FrameLayout.LayoutParams).apply {
-            height = minOf(dp(520), root.height - dp(260))
-        }
     }
 
     private fun sendFollowup() {
         val views = conversation!!
         val question = views.input.text.toString()
         require(question == fixture.getJSONObject("reading").getString("question"))
-        addMessage(true, question)
+        targets["question"]=addMessage(true, question)
         views.input.setText("")
         views.input.clearFocus()
         answer = addMessage(false, "")
@@ -198,6 +231,14 @@ class DocMediaActivity : ThemedActivity() {
             "scroll-middle" -> conversation!!.scroll.smoothScrollTo(0, conversation!!.content.height / 3)
             "scroll-bottom" -> conversation!!.scroll.smoothScrollTo(0, conversation!!.content.height)
             "scroll-top" -> conversation!!.scroll.smoothScrollTo(0, 0)
+            "translation-start" -> {
+                sourceText!!.visibility=View.GONE
+                conversation!!.scroll.post { conversation!!.scroll.smoothScrollTo(0,0) }
+            }
+            "original" -> {
+                sourceText!!.visibility=View.VISIBLE
+                conversation!!.scroll.post { conversation!!.scroll.smoothScrollTo(0,0) }
+            }
             else -> error("Unknown action: ${event.getString("action")}")
         }
     }
@@ -213,13 +254,22 @@ class DocMediaActivity : ThemedActivity() {
     }
 
     private fun captureFrame() {
+        if(pendingWrites.get()>=3) {
+            handler.postDelayed({captureFrame()},16)
+            return
+        }
         val elapsed = SystemClock.uptimeMillis() - origin
         bubble.invalidate()
         val bitmap = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
         root.draw(Canvas(bitmap))
         val name = "frame-%04d.png".format(frames.length())
-        File(directory, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        bitmap.recycle()
+        pendingWrites.incrementAndGet()
+        frameWriter.execute {
+            try {
+                File(directory,name).outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG,100,it)) }
+            } catch(error:Exception) { captureError=error.toString() }
+            finally { bitmap.recycle();pendingWrites.decrementAndGet() }
+        }
         val rectangles = JSONObject()
         val rootLocation = IntArray(2).also(root::getLocationOnScreen)
         targets.forEach { (name, view) ->
@@ -228,27 +278,37 @@ class DocMediaActivity : ThemedActivity() {
                 location[0] - rootLocation[0] + view.width, location[1] - rootLocation[1] + view.height)))
         }
         frames.put(JSONObject().put("file", name).put("at", elapsed).put("caption", caption)
-            .put("targets", rectangles).put("cue", cue ?: JSONObject.NULL))
+            .put("targets", rectangles).put("cue", cue ?: JSONObject.NULL)
+            .put("sendEnabled",conversation?.send?.isEnabled ?: false))
         if (elapsed < scene.getLong("duration")) {
-            handler.postDelayed({ captureFrame() }, (100 - (SystemClock.uptimeMillis() - origin - elapsed)).coerceAtLeast(1))
+            handler.postDelayed({ captureFrame() }, (frameIntervalMs - (SystemClock.uptimeMillis() - origin - elapsed)).coerceAtLeast(1))
         } else {
             val manifest = JSONObject().put("schema", 1).put("scene", intent.getStringExtra("scene"))
                 .put("width", root.width).put("height", root.height)
                 .put("frames", frames).put("androidApi", android.os.Build.VERSION.SDK_INT)
                 .put("density", resources.displayMetrics.density)
+                .put("fontScale",resources.configuration.fontScale)
+                .put("frameIntervalMs",frameIntervalMs)
                 .put("nativeViews", true)
                 .put("finalAnswer", answer?.text?.toString() ?: "")
                 .put("finalAnswerVisible", answer?.let {
                     val visible = android.graphics.Rect()
                     it.getGlobalVisibleRect(visible) && visible.height() >= it.height && visible.width() >= it.width
                 } ?: false)
-            File(directory, "manifest.tmp").writeText(manifest.toString(2))
-            check(File(directory, "manifest.tmp").renameTo(File(directory, "manifest.json")))
+            finishCapture(manifest)
         }
+    }
+
+    private fun finishCapture(manifest:JSONObject) {
+        if(pendingWrites.get()>0) { handler.postDelayed({finishCapture(manifest)},20);return }
+        captureError?.let { manifest.put("error",it) }
+        File(directory,"manifest.tmp").writeText(manifest.toString(2))
+        check(File(directory,"manifest.tmp").renameTo(File(directory,"manifest.json")))
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        frameWriter.shutdown()
         super.onDestroy()
     }
 }

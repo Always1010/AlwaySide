@@ -132,9 +132,14 @@
           }
         },
         {
-          "at": 7500,
+          "at": 6200,
+          "action": "translation-start",
+          "caption": "收起原文，查看中文翻译。"
+        },
+        {
+          "at": 8700,
           "action": "scroll-bottom",
-          "caption": "滑到回答部分，查看中文翻译。",
+          "caption": "向上滑动，继续阅读中文译文。",
           "cue": {
             "target": "scroll",
             "kind": "swipe-up"
@@ -147,16 +152,12 @@
         },
         {
           "at": 11900,
-          "action": "scroll-top",
-          "caption": "向下滑动，可返回核对转录原文。",
-          "cue": {
-            "target": "scroll",
-            "kind": "swipe-down"
-          }
+          "action": "original",
+          "caption": "点开原文，可返回核对转录内容。"
         },
         {
           "at": 13400,
-          "action": "scroll-bottom",
+          "action": "translation-start",
           "caption": "原文与中文翻译在同一个原生小窗内。"
         }
       ]
