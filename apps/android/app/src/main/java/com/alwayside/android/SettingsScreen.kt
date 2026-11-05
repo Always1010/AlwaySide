@@ -30,6 +30,7 @@ internal class SettingsScreen(
     initialPage: String? = null,
     private val onTutorial: () -> Unit = {},
     private val onPreparation: () -> Unit = {},
+    private val onHelp: () -> Unit = {},
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
@@ -41,7 +42,7 @@ internal class SettingsScreen(
         GESTURES("快捷动作", "分别设置空闲和录音中的快捷动作", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "追问输入区、位置、尺寸、固定与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "录音时长、截图保留策略与证据说明", android.R.drawable.ic_menu_recent_history),
-        HELP("帮助与引导", "不消耗 Token 的截图提问练习", android.R.drawable.ic_menu_help),
+        HELP("帮助与引导", "新手引导与使用准备", android.R.drawable.ic_menu_help),
     }
 
     private lateinit var store: SettingsStore
@@ -88,6 +89,11 @@ internal class SettingsScreen(
     }
 
     /** An active editor consumes back before category navigation. */
+    fun consumeEditorBack(): Boolean {
+        if(activeEdit==null)return false
+        finishEditing {};return true
+    }
+
     fun back(): Boolean {
         if (disposed) return false
         if (activeEdit != null) { finishEditing {}; return true }
@@ -120,7 +126,8 @@ internal class SettingsScreen(
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND); fitsSystemWindows = true
         }
-        val header = materialToolbar(next.title, if (next == Page.HOME) onBack else ({ back(); Unit })).apply {
+        // The host handles both toolbar and system Back, including direct entries from preparation.
+        val header = materialToolbar(next.title, onBack).apply {
             if (next == Page.PROMPTS) {
                 addIconAction(4201, android.R.drawable.ic_menu_agenda, "模板") { finishEditing { showTemplateActions() } }
                     .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
@@ -154,9 +161,9 @@ internal class SettingsScreen(
             Page.WINDOW -> windowPage(config, interaction)
             Page.MEDIA -> mediaPage(interaction)
             Page.HELP -> {
-                note("使用内置示例练习悬浮球、截图问答和追问。全程模拟，不联网，不调用 API，也不需要系统权限。")
-                action("开始模拟体验") { finishEditing(onTutorial) }
-                action("准备实际使用") { finishEditing(onPreparation) }
+                note("通过内置示例了解悬浮球、截图问答和追问。全程模拟，不联网，不调用 API，也不需要系统权限。")
+                action("查看新手引导") { finishEditing(onTutorial) }.apply { applyOnboardingPrimaryStyle() }
+                action("准备实际使用") { finishEditing(onPreparation) }.apply { applyOnboardingPrimaryStyle() }
             }
         }
         root.addView(ScrollView(this).apply {
@@ -186,7 +193,7 @@ internal class SettingsScreen(
                 imageTintList = ColorStateList.valueOf(MUTED)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }, LinearLayout.LayoutParams(dp(16), dp(16)))
-            setOnClickListener { showPage(value) }
+            setOnClickListener { if(value==Page.HELP)onHelp() else showPage(value) }
         }
         addRow(row)
     }

@@ -19,13 +19,11 @@ import androidx.appcompat.widget.PopupMenu
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.textfield.TextInputEditText
-import com.google.android.material.textfield.TextInputLayout
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.abs
-import kotlin.math.sin
 
 /** The bubble dispatches actions. Each evidence type owns a separate compact conversation. */
 class AssistantService : Service() {
@@ -44,7 +42,7 @@ class AssistantService : Service() {
     private val recordingGate = RecordingGate()
     private var alive = true
     private var bubble: FrameLayout? = null
-    private var bubbleVisual: BubbleVisual? = null
+    private var bubbleVisual: AssistantBubbleView? = null
     private var bubbleLayout: WindowManager.LayoutParams? = null
     private var menu: View? = null
     private var menuBlurListener: java.util.function.Consumer<Boolean>? = null
@@ -327,7 +325,7 @@ class AssistantService : Service() {
         val size = screenSize()
         val position = preferences.ballPosition()
         val view = FrameLayout(uiContext).apply { isClickable = true; isFocusable = true; accessible("AlwaySide，快捷手势可在设置中修改") }
-        val glyph = BubbleVisual().also { view.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+        val glyph = AssistantBubbleView(uiContext,config.ballSize,config.ballOpacity,config.ballColor).also { view.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         val layout = params(dp(48), dp(48), false).apply {
             x = if (position.first) 0 else (size.first - dp(48)).coerceAtLeast(0)
             y = (position.second * size.second).toInt().coerceIn(dp(8), (size.second - dp(100)).coerceAtLeast(dp(8)))
@@ -377,31 +375,6 @@ class AssistantService : Service() {
         try { windows.addView(view, layout); bubble = view; bubbleVisual = glyph; bubbleLayout = layout }
         catch (_: RuntimeException) { toast("悬浮权限不可用，请从应用重新开启"); stopSelf() }
     }
-    private inner class BubbleVisual : View(uiContext) {
-        var recording = false
-        var working = false
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val sparkle = prototypeIcon(R.drawable.ic_line_sparkles).apply { setTint(Color.WHITE) }
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val radius = dp(config.ballSize) / 2f
-            val x = width / 2f; val y = height / 2f
-            paint.color = config.ballColor; paint.alpha = if (recording) 245 else (config.ballOpacity * 2.55f).toInt()
-            paint.style = Paint.Style.FILL; canvas.drawCircle(x, y, radius, paint)
-            paint.color = Color.WHITE; paint.alpha = if (recording) 255 else (config.ballOpacity * 2.55f).toInt()
-            if (recording) {
-                val phase = SystemClock.uptimeMillis() / 180.0
-                for (i in -1..1) {
-                    val h = radius * (.35 + .55 * abs(sin(phase + i))).toFloat()
-                    canvas.drawRoundRect(x + i * radius * .35f - dp(1), y - h / 2, x + i * radius * .35f + dp(1), y + h / 2, dp(1).toFloat(), dp(1).toFloat(), paint)
-                }
-            } else {
-                val r = radius * .57f
-                sparkle.alpha=paint.alpha;sparkle.setBounds((x-r).toInt(),(y-r).toInt(),(x+r).toInt(),(y+r).toInt());sparkle.draw(canvas)
-                if (working) { paint.style = Paint.Style.STROKE; paint.strokeWidth = dp(1).toFloat(); canvas.drawArc(x-radius-2,y-radius-2,x+radius+2,y+radius+2,(SystemClock.uptimeMillis()%1800)/5f,90f,false,paint); paint.style=Paint.Style.FILL }
-            }
-        }
-    }
     private fun dispatchAction(action: String) {
         if (!alive) return
         removeMenu()
@@ -442,34 +415,21 @@ class AssistantService : Service() {
             setOnClickListener { removeMenu() }
         }
         installOverlayBack(body,::removeMenu)
-        val items = LinearLayout(uiContext).apply {
-            orientation = LinearLayout.VERTICAL;setPadding(dp(4),dp(4),dp(4),dp(4))
-            background=card(SURFACE,dp(12).toFloat());elevation=0f;clipToOutline=true
-        }
-        var rowCount = 0
-        fun item(resource: Int, title: String, action: () -> Unit) {
-            val row = MaterialButton(uiContext, null, androidx.appcompat.R.attr.borderlessButtonStyle).apply {
-                text = title; icon = prototypeIcon(resource); iconSize = dp(20); iconPadding = dp(12)
-                iconTint = android.content.res.ColorStateList.valueOf(MUTED)
-                gravity=Gravity.CENTER_VERTICAL or Gravity.START; isAllCaps = false
-                setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge)
-                applyActionStyle(false);stateListAnimator=null;elevation=0f;translationZ=0f
-                setTextColor(INK); cornerRadius=dp(8); insetTop=0; insetBottom=0
-                setPadding(dp(12),0,dp(12),0); accessible(title)
-                setOnClickListener { removeMenu(); action() }
+        val presentation = AssistantMenuViews(uiContext,recorder != null,nodes["audio"]?.clip != null) { action ->
+            removeMenu()
+            when(action) {
+                AssistantMenuAction.SCREEN -> captureNew(false)
+                AssistantMenuAction.AUDIO -> if(recorder != null)finishRecording(false) else startRecording()
+                AssistantMenuAction.CANCEL_AUDIO -> cancelRecording(true)
+                AssistantMenuAction.CROP -> captureNew(true)
+                AssistantMenuAction.LAST -> dispatchAction(AssistantActions.LAST)
+                AssistantMenuAction.PLAY -> playClip()
+                AssistantMenuAction.HISTORY -> openApplication(AppPage.HISTORY)
+                AssistantMenuAction.SETTINGS -> openApplication(AppPage.SETTINGS)
+                AssistantMenuAction.STOP -> AssistantControl.stop(this)
             }
-            items.addView(row,LinearLayout.LayoutParams(-1,dp(48)));rowCount++
         }
-        item(R.drawable.ic_line_scan,"截图问答") { captureNew(false) }
-        item(R.drawable.ic_line_audio,if (recorder != null) "结束录音并处理" else "听一段") { if (recorder != null) finishRecording(false) else startRecording() }
-        if (recorder != null) item(R.drawable.ic_line_close,"取消并丢弃录音") { cancelRecording(true) }
-        item(R.drawable.ic_line_crop,"框选问答") { captureNew(true) }
-        item(R.drawable.ic_line_text,"最近悬浮对话") { dispatchAction(AssistantActions.LAST) }
-        if (nodes["audio"]?.clip != null) item(R.drawable.ic_line_play,"回听上一段") { playClip() }
-        items.addView(View(uiContext).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)).apply{setMargins(dp(8),dp(4),dp(8),dp(4))})
-        item(R.drawable.ic_line_history,"对话记录") { openApplication(AppPage.HISTORY) }
-        item(R.drawable.ic_line_settings,"设置") { openApplication(AppPage.SETTINGS) }
-        item(R.drawable.ic_line_power,"关闭悬浮球") { AssistantControl.stop(this) }
+        val items=presentation.view;val rowCount=presentation.rowCount
         val size=screenSize(); val ball=bubbleLayout
         val w=minOf(dp(204),size.first-dp(16)); val h=minOf(dp(rowCount*48+21),size.second-dp(100))
         val menuX=(if ((ball?.x ?: 0)<size.first/2)dp(47) else size.first-w-dp(47))
@@ -535,21 +495,24 @@ class AssistantService : Service() {
         clamp(layout)
         val root=OutsideFrame { if(!node.pinned) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
         root.isFocusableInTouchMode=true
-        val body=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL }
-        val header=uiContext.materialToolbar(when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"}, null, compact=true).apply {
-            node.pin=addIconAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示") {
-                node.pinned=!node.pinned;updatePin(node)
-            }
-            addIconAction(2,R.drawable.ic_line_expand,"在应用中打开") { openConversationInApp(node) }
-        }
-        body.addView(header,LinearLayout.LayoutParams(-1,dp(48)))
-        val content=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(15),dp(13),dp(15),dp(8)) }
-        node.content=content
-        val sourceCard = MaterialCardView(uiContext).apply {
-            setCardBackgroundColor(SURFACE); strokeWidth=0; cardElevation=0f; radius=dp(12).toFloat()
-        }
-        val sourceContent=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(10),dp(12),dp(10)) }
-        sourceCard.addView(sourceContent); content.addView(sourceCard,LinearLayout.LayoutParams(-1,-2))
+        val presentation=AssistantWindowViews(uiContext,when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"},
+            node.kind=="photo",AssistantWindowActions(
+                pin={node.pinned=!node.pinned;updatePin(node)},expand={openConversationInApp(node)},
+                toggle={setComposerExpanded(node,!node.composerExpanded,fromUser=true)},
+                cancel={node.chat.cancel()},retry={if(!gathering)node.chat.retry()},
+                copy={
+                    val text=node.chat.partial.ifBlank { node.chat.messages.lastOrNull{it.role=="assistant"}?.text.orEmpty() }
+                    if(text.isNotBlank()){getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("AlwaySide",text));toast("已复制")}
+                },
+                search={node.webSearchOverride=!(node.webSearchOverride ?: node.searchDefault);updateSearch(node)},
+                send={sendQuestion(node,node.draft)},
+            ))
+        val body=presentation.body;val header=presentation.header;val sourceContent=presentation.sourceContent
+        node.pin=presentation.pin;node.content=presentation.content;node.response=presentation.response;node.status=presentation.status
+        node.scroll=presentation.scroll;node.composerToggle=presentation.toggle;node.composer=presentation.composerSection
+        node.cancel=presentation.cancel;node.retry=presentation.retry;node.copy=presentation.copy
+        node.imageChoice=presentation.imageChoice;node.search=presentation.search;node.send=presentation.send
+        val resize=presentation.resize
         node.source=uiContext.label("",11f,true).apply { minHeight=dp(28); gravity=Gravity.CENTER_VERTICAL;isClickable=true;accessible(when(node.kind){"photo"->"展开本次截图";"audio"->"展开转写原文";else->"展开所选原文"});setOnClickListener {
             if(node.kind=="photo")node.sourceImage?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE}
             else if(node.kind=="text") {node.originalExpanded=!node.originalExpanded;node.transcript?.apply{maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}}
@@ -568,80 +531,28 @@ class AssistantService : Service() {
             setPadding(dp(9),0,dp(9),0)
         }.also { sourceContent.addView(it,LinearLayout.LayoutParams(dp(32),dp(32)).apply { gravity=Gravity.END }) }
         if(node.kind=="text")node.transcript?.apply{visibility=View.VISIBLE;maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}
-        node.response=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL;setPadding(0,dp(12),0,0) }.also{content.addView(it)}
-        node.status=uiContext.label("",11f,true).apply{setPadding(0,dp(6),0,0)}.also{content.addView(it)}
-        val scroll=ScrollView(uiContext).apply { addView(content);isFillViewport=true;isVerticalScrollBarEnabled=true }
-        node.scroll=scroll;body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-        val controls=LinearLayout(uiContext).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),0,dp(8),0) }
-        fun compactControl(resource:Int,description:String,action:()->Unit)=icon(resource,description,action).apply {
-            iconSize=dp(14);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
-            setPadding(dp(9),0,dp(9),0)
-        }.also{controls.addView(it,LinearLayout.LayoutParams(dp(32),dp(32)))}
-        val followUpEntry=FrameLayout(uiContext)
-        controls.addView(followUpEntry,LinearLayout.LayoutParams(0,dp(32),1f))
-        node.composerToggle=MaterialButton(uiContext,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
-            applyActionStyle()
-            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelMedium)
-            iconSize=dp(14);iconPadding=dp(4);iconGravity=MaterialButton.ICON_GRAVITY_TEXT_END
-            minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
-            insetLeft=0;insetRight=0;insetTop=0;insetBottom=0
-            setPadding(dp(8),0,dp(8),0);cornerRadius=dp(8)
-            maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
-            backgroundTintList=android.content.res.ColorStateList.valueOf(TONAL_SURFACE)
-            setOnClickListener { setComposerExpanded(node,!node.composerExpanded,fromUser=true) }
-        }.also { followUpEntry.addView(it,FrameLayout.LayoutParams(-2,-1,Gravity.START or Gravity.CENTER_VERTICAL)) }
-        node.cancel=compactControl(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答") { node.chat.cancel() }
-        node.retry=compactControl(android.R.drawable.ic_popup_sync,"重试原问题与证据") { if(!gathering)node.chat.retry() }
-        val resize=compactControl(R.drawable.ic_resize,"拖动调整窗口大小") {}
-        node.copy=compactControl(R.drawable.ic_copy,"复制最近回答") {
-            val text=node.chat.partial.ifBlank { node.chat.messages.lastOrNull{it.role=="assistant"}?.text.orEmpty() }
-            if(text.isNotBlank()){getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("AlwaySide",text));toast("已复制")}
-        }
-        body.addView(controls,LinearLayout.LayoutParams(-1,-2))
-        val composerSection=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL }
-        node.composer=composerSection
-        composerSection.addView(View(uiContext).apply{setBackgroundColor(BORDER)},LinearLayout.LayoutParams(-1,dp(1)))
-        val composer=LinearLayout(uiContext).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(9)) }
-        val requestTools=LinearLayout(uiContext).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(4),0,0) }
-        if(node.kind=="photo")node.imageChoice=MaterialButton(uiContext, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+        node.imageChoice?.apply {
             val choices=listOf("沿用本次截图","发送时更新画面","仅文字上下文")
-            text="${choices[node.imageMode]}  ▾"; isAllCaps=false
-            maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;minWidth=0;minimumWidth=0
-            setPadding(dp(10),0,dp(10),0)
-            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge)
-            accessible("图片上下文：${choices[node.imageMode]}，点按选择")
+            text="${choices[node.imageMode]}  ▾";accessible("图片上下文：${choices[node.imageMode]}，点按选择")
             setOnClickListener { anchor ->
                 PopupMenu(uiContext,anchor).apply {
-                    choices.forEachIndexed { index,label -> menu.add(0,index,index,label).apply { isCheckable=true; isChecked=index==node.imageMode } }
+                    choices.forEachIndexed { index,label -> menu.add(0,index,index,label).apply { isCheckable=true;isChecked=index==node.imageMode } }
                     setOnMenuItemClickListener { item ->
-                        node.imageMode=item.itemId; text="${choices[item.itemId]}  ▾"
-                        accessible("图片上下文：${choices[item.itemId]}，点按选择")
-                        true
+                        node.imageMode=item.itemId;text="${choices[item.itemId]}  ▾"
+                        accessible("图片上下文：${choices[item.itemId]}，点按选择");true
                     }
                 }.show()
             }
-        }.also{requestTools.addView(it,LinearLayout.LayoutParams(0,dp(48),1f))}
-        else requestTools.addView(View(uiContext),LinearLayout.LayoutParams(0,1,1f))
-        val row=LinearLayout(uiContext).apply { gravity=Gravity.BOTTOM }
-        val inputLayout=TextInputLayout(uiContext, null, com.google.android.material.R.attr.textInputOutlinedStyle).apply {
-            hint="想了解什么？";boxBackgroundMode=TextInputLayout.BOX_BACKGROUND_OUTLINE
         }
-        node.input=TextInputEditText(inputLayout.context).apply {
-            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
-            minLines=1;maxLines=3;minHeight=dp(48)
+        node.input=presentation.input.apply {
             setText(node.draft);accessible("${when(node.kind){"photo"->"截图";"audio"->"音频";else->"文字"}}追问")
-            filters=arrayOf(android.text.InputFilter.LengthFilter(12000))
-            addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty();updateComposerToggle(node)};override fun afterTextChanged(s:Editable?){} })
-        }.also{inputLayout.addView(it,LinearLayout.LayoutParams(-1,-2))}
-        row.addView(inputLayout,LinearLayout.LayoutParams(-1,-2))
-        node.search=icon(R.drawable.ic_globe,"联网搜索") {
-            node.webSearchOverride=!(node.webSearchOverride ?: node.searchDefault);updateSearch(node)
-        }.also{requestTools.addView(it,LinearLayout.LayoutParams(dp(48),dp(48)).apply{marginStart=dp(4)})}
-        node.send=icon(android.R.drawable.ic_menu_send,"发送问题") { sendQuestion(node,node.draft) }.apply{applyIconActionStyle(primary=true)}.also{requestTools.addView(it,LinearLayout.LayoutParams(dp(48),dp(48)).apply{marginStart=dp(4)})}
-        composer.addView(row)
-        composer.addView(requestTools,LinearLayout.LayoutParams(-1,-2))
-        composerSection.addView(composer,LinearLayout.LayoutParams(-1,-2))
-        body.addView(composerSection,LinearLayout.LayoutParams(-1,-2));root.addView(body,FrameLayout.LayoutParams(-1,-1))
+            addTextChangedListener(object:TextWatcher {
+                override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int)=Unit
+                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty();updateComposerToggle(node)}
+                override fun afterTextChanged(s:Editable?)=Unit
+            })
+        }
+        root.addView(body,FrameLayout.LayoutParams(-1,-1))
         setComposerExpanded(node,node.composerExpanded)
         installDrag(node,header,root,layout,false);installDrag(node,resize,root,layout,true)
         if(Build.VERSION.SDK_INT>=30)root.setOnApplyWindowInsetsListener{_,insets->
@@ -767,22 +678,8 @@ class AssistantService : Service() {
             var row=container.getChildAt(index)
             if(row==null || row.tag!=user) {
                 if(row!=null)container.removeViewAt(index)
-                val message=uiContext.label("",if(user)12f else 13f).apply {
-                    setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
-                    setTextIsSelectable(true);setLineSpacing(dp(3).toFloat(),1f)
-                    movementMethod=android.text.method.LinkMovementMethod.getInstance()
-                    if(user){setTextColor(ON_TONAL_SURFACE);setPadding(dp(12),dp(8),dp(12),dp(8))}
-                }
-                row=if(user)MaterialCardView(uiContext).apply {
-                    setCardBackgroundColor(TONAL_SURFACE);strokeWidth=0;cardElevation=0f;radius=dp(16).toFloat()
-                    addView(message)
-                } else FrameLayout(uiContext).apply { addView(message) }
-                row.tag=user
-                container.addView(row,index,LinearLayout.LayoutParams(if(user)-2 else -1,-2).apply {
-                    gravity=if(user)Gravity.END else Gravity.START
-                    if(user)marginStart=dp(24)
-                    bottomMargin=dp(12)
-                })
+                row=uiContext.assistantMessageRow(user)
+                container.addView(row,index)
             }
             val message=(row as ViewGroup).getChildAt(0) as TextView
             val presentation=value to node.chat.busy

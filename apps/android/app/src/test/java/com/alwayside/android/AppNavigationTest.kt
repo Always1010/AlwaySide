@@ -5,30 +5,45 @@ import org.junit.Test
 
 class AppNavigationTest {
     @Test fun preparationSettingsReturnToPreparationAndRestoreAfterRecreation() {
-        val nav = AppNavigation().apply { openTutorial(); openPreparation(); openSettings() }
+        val nav = AppNavigation().apply { openTutorial(); openPreparation(); openPreparationSettings() }
         val restored = AppNavigation(nav.snapshot())
-        assertEquals(listOf("HISTORY", "PREPARATION", "SETTINGS"), restored.snapshot())
-        assertEquals(AppBack.SETTINGS_CATEGORY, restored.back(false))
+        assertEquals(listOf("HISTORY", "HELP", "PREPARATION", "PREPARATION_SETTINGS"), restored.snapshot())
         assertEquals(AppBack.PAGE, restored.back())
         assertEquals(AppPage.PREPARATION, restored.current)
         assertEquals(AppBack.PAGE, restored.back())
-        assertEquals(AppPage.HISTORY, restored.current)
+        assertEquals(AppPage.HELP, restored.current)
     }
 
     @Test fun tutorialFromPreparationHelpKeepsThePreparationParent() {
-        val nav = AppNavigation().apply { openPreparation(); openSettings(); openTutorial() }
+        val nav = AppNavigation().apply { openPreparation(); back(); openTutorial() }
         val restored = AppNavigation(nav.snapshot())
         assertEquals(AppPage.TUTORIAL, restored.current)
-        restored.back(); assertEquals(AppPage.SETTINGS, restored.current)
-        restored.back(); assertEquals(AppPage.PREPARATION, restored.current)
+        restored.back(); assertEquals(AppPage.HELP, restored.current)
+        restored.back(); assertEquals(AppPage.HISTORY, restored.current)
     }
     @Test fun tutorialRestoresItsParentAndBackReturnsToSettings() {
         val nav = AppNavigation().apply { openSettings(); openTutorial(); openTutorial() }
         val restored = AppNavigation(nav.snapshot())
-        assertEquals(listOf("HISTORY", "SETTINGS", "TUTORIAL"), restored.snapshot())
+        assertEquals(listOf("HISTORY", "SETTINGS", "HELP", "TUTORIAL"), restored.snapshot())
         assertEquals(AppBack.PAGE, restored.back())
-        assertEquals(AppPage.SETTINGS, restored.current)
+        assertEquals(AppPage.HELP, restored.current)
         assertEquals(AppPage.HISTORY, AppNavigation(listOf("TUTORIAL")).current)
+    }
+    @Test fun preparationKeepsHelpAndItsOriginalSettingsParent() {
+        val nav=AppNavigation().apply { openChat();openSettings();openHelp();openPreparation();openPreparationSettings() }
+        var restored=AppNavigation(nav.snapshot())
+        assertEquals(AppBack.PAGE,restored.back(false))
+        assertEquals(AppPage.PREPARATION,restored.current)
+        restored=AppNavigation(restored.snapshot())
+        restored.back();assertEquals(AppPage.HELP,restored.current)
+        restored.back();assertEquals(AppPage.SETTINGS,restored.current)
+        restored.back();assertEquals(AppPage.CHAT,restored.current)
+    }
+    @Test fun legacyPreparationStateGetsAnExplicitHelpParent() {
+        val nav=AppNavigation(listOf("HISTORY","PREPARATION","SETTINGS"))
+        assertEquals(AppPage.PREPARATION_SETTINGS,nav.current)
+        nav.back(false);assertEquals(AppPage.PREPARATION,nav.current)
+        nav.back();assertEquals(AppPage.HELP,nav.current)
     }
     @Test fun settingsDetailBackKeepsSettingsBeforeReturningToHistory() {
         val nav = AppNavigation()

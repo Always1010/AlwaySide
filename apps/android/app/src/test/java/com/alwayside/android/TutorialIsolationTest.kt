@@ -14,16 +14,19 @@ class TutorialIsolationTest {
         val files = if (resource.protocol == "jar") {
             (resource.openConnection() as JarURLConnection).apply { useCaches = false }.jarFile.use { jar ->
                 jar.entries().asSequence().filter {
-                    it.name.startsWith("com/alwayside/android/Tutorial") && it.name.endsWith(".class")
+                    audited(it.name.substringAfterLast('/')) && it.name.endsWith(".class")
                 }.associate { entry -> entry.name.substringAfterLast('/') to jar.getInputStream(entry).use { it.readBytes() } }
             }
         } else {
             Files.list(Paths.get(resource.toURI()).parent).use { paths ->
-                paths.filter { it.fileName.toString().startsWith("Tutorial") && it.toString().endsWith(".class") }
+                paths.filter { audited(it.fileName.toString()) && it.toString().endsWith(".class") }
                     .toList().associate { it.fileName.toString() to Files.readAllBytes(it) }
             }
         }
         assertTrue("Must inspect the view code, not just the pure flow", files.containsKey("TutorialScreen.class"))
+        assertTrue("Shared window components must also remain isolated",files.containsKey("AssistantWindowViews.class"))
+        assertTrue(files.containsKey("AssistantMenuViews.class"))
+        assertTrue(files.containsKey("AssistantBubbleView.class"))
         for ((file, bytes) in files) {
             DataInputStream(bytes.inputStream()).use { input ->
                 assertEquals(0xCAFEBABE.toInt(), input.readInt())
@@ -51,7 +54,7 @@ class TutorialIsolationTest {
                 }
                 for (reference in classes.mapNotNull { strings[it] }) {
                     val type = reference.trimStart('[').removePrefix("L").removeSuffix(";")
-                    val allowed = type.length == 1 || type == "com/alwayside/android/R" || allowedPrefixes.any(type::startsWith)
+                    val allowed = type.length == 1 || type in resourceClasses || allowedPrefixes.any(type::startsWith)
                     assertTrue("$file depends on forbidden capability $type", allowed)
                 }
                 for (name in methods.mapNotNull { names[it] }.mapNotNull { strings[it] }) {
@@ -62,10 +65,15 @@ class TutorialIsolationTest {
     }
 
     companion object {
+        private val resourceClasses=setOf("com/alwayside/android/R","androidx/appcompat/R","android/R")
+        private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction","AssistantBubbleView","AssistantPresentationKt","TapSequence")
+        private fun audited(name: String)=name.startsWith("Tutorial") || sharedClasses.any { name=="$it.class" || name.startsWith("$it$") }
         private val allowedPrefixes = listOf(
             "com/alwayside/android/Tutorial", "com/alwayside/android/UiKt", "com/alwayside/android/PrototypeIconsKt",
+            *sharedClasses.map { "com/alwayside/android/$it" }.toTypedArray(),
             "com/alwayside/android/R$", "android/app/Activity", "android/content/Context", "android/content/res/",
-            "android/graphics/", "android/view/", "android/widget/", "com/google/android/material/",
+            "android/graphics/", "android/view/", "android/widget/", "android/text/", "android/os/SystemClock",
+            "androidx/appcompat/R$", "com/google/android/material/", "android/R$",
             "java/lang/", "java/util/", "kotlin/", "org/jetbrains/annotations/",
         )
         private val forbiddenMethods = setOf(

@@ -10,10 +10,10 @@ internal class GuidePreferences(context: Context) {
         if (!prefs.contains("status")) save(GuideProgress.initial(existingUser))
     }
 
-    fun load(): GuideProgress = GuideProgress.restore(prefs.getString("status", null), prefs.getString("step", null))
+    fun load(): GuideProgress = GuideProgress.restore(prefs.getString("status", null), prefs.getString("step", null),prefs.getStringSet("lessons",null))
 
     fun save(progress: GuideProgress) {
-        prefs.edit().putInt("version", 1).putString("status", progress.status.name)
-            .putString("step", progress.step.name).apply()
+        prefs.edit().putInt("version", 2).putString("status", progress.status.name)
+            .putString("step", progress.step.name).putStringSet("lessons",progress.completedLessons.map { it.name }.toSet()).apply()
     }
 }

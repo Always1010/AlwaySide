@@ -62,6 +62,21 @@ internal fun MaterialButton.applyIconActionStyle(primary:Boolean=false) {
     insetTop=0;insetBottom=0;insetLeft=0;insetRight=0
     minWidth=context.dp(48);minHeight=context.dp(48)
 }
+/** Local to onboarding callers; never changes the user's scheme or real conversation controls. */
+internal fun MaterialButton.applyOnboardingPrimaryStyle(iconOnly:Boolean=false) {
+    if(iconOnly)applyIconActionStyle(primary=true) else applyActionStyle(primary=true)
+    val night=AppAppearance.isNight
+    backgroundTintList=stateColors(ThemeScheme.BLUE.accent(night),DISABLED_SURFACE)
+    val foreground=stateColors(ThemeScheme.BLUE.onAccent(night),DISABLED_INK)
+    setTextColor(foreground);iconTint=foreground
+}
+/** A visible secondary action, with normal contrast and a surface even when it is not primary. */
+internal fun MaterialButton.applySecondarySurfaceStyle() {
+    applyActionStyle(false)
+    backgroundTintList=stateColors(SURFACE,DISABLED_SURFACE)
+    setTextColor(stateColors(INK,DISABLED_INK));iconTint=stateColors(INK,DISABLED_INK)
+    strokeWidth=context.dp(1).coerceAtLeast(1);strokeColor=ColorStateList.valueOf(BORDER);cornerRadius=context.dp(12)
+}
 internal fun Context.iconButton(resource:Int,description:String,action:()->Unit):MaterialButton =
     MaterialButton(this,null,com.google.android.material.R.attr.materialIconButtonStyle).apply {
         icon=prototypeIcon(resource);iconGravity=MaterialButton.ICON_GRAVITY_TEXT_START

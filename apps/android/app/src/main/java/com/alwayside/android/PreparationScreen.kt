@@ -1,69 +1,63 @@
 package com.alwayside.android
 
 import android.app.Activity
+import android.content.res.ColorStateList
 import android.provider.Settings
-import android.view.View
+import android.view.Gravity
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
-/** An explicit destination after the simulation; merely opening it never tests or starts a service. */
+/** Three short actions; explanations are available on demand, never ahead of the next action. */
 internal class PreparationScreen(
     private val activity: Activity,
     private val onBack: () -> Unit,
     private val onSettings: (String) -> Unit,
     private val onToggleAssistant: () -> Unit,
-    var helpExpanded: Boolean = false,
 ) {
-    val view = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND) }
-
+    val view=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL;setBackgroundColor(BACKGROUND) }
     init { refresh() }
 
     fun refresh(): Unit = with(activity) {
         view.removeAllViews()
-        view.addView(materialToolbar("准备实际使用", onBack))
-        val body = column()
-        view.addView(ScrollView(this).apply { isFillViewport = true; addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        body.addView(label("以下为实际使用设置", 20f))
-        body.addView(label("模拟体验已经结束。这里不会自动调用 API；之后真正提问会向你配置的服务发送内容，并可能产生费用。",14f,true).apply {
-            setPadding(0,dp(12),0,dp(20))
+        view.addView(materialToolbar("准备实际使用",onBack).apply {
+            addIconAction(702,R.drawable.ic_line_help,"API 与使用费用说明",::showHelp)
         })
-        val connection = try { SettingsStore(this).connectionPreparation() }
-            catch (_: Exception) { ConnectionPreparation(readable = false) }
-        val api = column().apply { background = card(SURFACE) }
-        api.addView(label("1 · 连接你自己的 AI 服务",17f))
-        api.addView(label("AlwaySide 提供截图与对话界面，AI 服务负责生成回答。服务地址决定请求发往哪里，API 密钥是调用凭证；截图需要支持图片输入的模型。",14f,true).apply {
-            setPadding(0,dp(12),0,dp(12))
-        })
-        api.action(if(helpExpanded) "收起获取说明" else "还没有服务地址或密钥？") {
-            helpExpanded=!helpExpanded; refresh()
+        val body=column()
+        view.addView(ScrollView(this).apply { isFillViewport=true;addView(body) },LinearLayout.LayoutParams(-1,0,1f))
+        body.addView(label("先连接 AI 服务，再开启悬浮助手。",14f,true).apply { setPadding(0,0,0,dp(20)) })
+        val connection=try { SettingsStore(this).connectionPreparation() } catch(_:Exception) { ConnectionPreparation(readable=false) }
+        val connected=connection.readable && connection.addressEntered && connection.credentialSaved
+        val model=connection.readable && connection.imageModelEntered
+        fun row(number: String,title: String,summary: String,next: Boolean,action: () -> Unit) {
+            val item=LinearLayout(this).apply {
+                gravity=Gravity.CENTER_VERTICAL;minimumHeight=dp(88);setPadding(dp(16),dp(16),dp(16),dp(16))
+                background=if(next)card(TONAL_SURFACE) else touchFeedback();isClickable=true;isFocusable=true
+                accessible("$title，$summary${if(next)"，下一步" else ""}");setOnClickListener { action() }
+            }
+            item.addView(label(number,20f).apply { setTextColor(ACCENT);gravity=Gravity.CENTER },LinearLayout.LayoutParams(dp(32),dp(48)).apply { marginEnd=dp(12) })
+            item.addView(LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL
+                addView(label(title,17f))
+                addView(label(if(next)"下一步 · $summary" else summary,14f,true).apply { setPadding(0,dp(6),0,0) })
+            },LinearLayout.LayoutParams(0,-2,1f))
+            item.addView(ImageView(this).apply {
+                setImageDrawable(prototypeIcon(R.drawable.ic_line_next));imageTintList=ColorStateList.valueOf(MUTED)
+                importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            },LinearLayout.LayoutParams(dp(20),dp(20)).apply { marginStart=dp(8) })
+            body.addView(item,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
         }
-        if(helpExpanded) api.addView(label(
-            "从你选择的 AI 服务提供方注册账号，在其控制台创建 API 密钥，并查看接口地址及支持图片的模型名称。没有这些资料时可以先返回，之后继续。\n\n" +
-            "服务需要支持 Responses 问答接口和图片输入，仅支持 Chat Completions 的服务不兼容。模型列表中有某个名称，不代表它支持看图。\n\n" +
-            "密钥应只填写在你信任的服务地址下；不要把它当成练习内容或发给其他人。费用和可用额度由服务提供方决定。",14f,true))
-        if(connection.readable) api.addView(label(
-            "服务地址：${if(connection.addressEntered) "已填写" else "待填写"}\n" +
-            "API 密钥：${if(connection.credentialSaved) "已保存，尚未验证" else "待填写"}\n" +
-            "图文模型：${if(connection.imageModelEntered) "已填写，请确认支持图片" else "待填写"}",14f).apply {
-                setPadding(0,dp(12),0,dp(12))
-            })
-        api.addView(label(connection.description,14f,true))
-        api.action("填写服务地址与密钥",true) { onSettings("API") }
-        api.action("选择图文模型") { onSettings("MODELS") }
-        api.addView(label("保存不会自动测试。设置中的模型列表操作会向服务发起真实网络请求，请按需主动使用。",12f,true).apply {
-            setPadding(0,dp(12),0,0)
-        })
-        body.addView(api)
-        val overlay = column().apply { background = card(SURFACE) }
-        overlay.addView(label("2 · 按需开启悬浮助手",17f))
-        val granted = Settings.canDrawOverlays(this)
-        overlay.addView(label("悬浮显示权限：${if(granted) "已允许" else "未允许"}\n" +
-            "悬浮助手：${if(ProbeState.serviceRunning) "已开启" else "未开启"}",14f).apply { setPadding(0,dp(12),0,dp(12)) })
-        overlay.addView(label("开启后可以在其他应用中点小球，再选择截图问答。开启助手本身不会发送提问；截图操作可能按设置自动发送画面，并消耗你的 API 额度。",14f,true))
-        overlay.action(if(ProbeState.serviceRunning) "关闭真实悬浮助手" else "开启真实悬浮助手",true,onToggleAssistant)
-        overlay.addView(label("系统截图授权会在真正截图时按需请求。普通应用内文字聊天不需要悬浮权限。",12f,true).apply {
-            setPadding(0,dp(12),0,0)
-        })
-        body.addView(overlay,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(16) })
+        row("1","服务地址与密钥",if(!connection.readable)"配置需修复" else if(connected)"已填写，未验证" else "填写服务提供方给你的信息",!connected) { onSettings("API") }
+        row("2","图文模型",if(model)"已填写，请确认支持看图" else "选择支持图片输入的模型",connected && !model) { onSettings("MODELS") }
+        val running=ProbeState.serviceRunning
+        row("3",if(running)"关闭悬浮助手" else "开启悬浮助手",if(running)"正在运行" else if(Settings.canDrawOverlays(this))"权限已允许，点此开启" else "点此开启并按需授权",connected && model && !running,onToggleAssistant)
+        body.addView(label("保存配置不会发起请求。真实提问可能产生 API 费用。",12f,true).apply { setPadding(dp(4),dp(16),dp(4),0) })
+    }
+
+    private fun showHelp() {
+        MaterialAlertDialogBuilder(activity).setTitle("连接 AI 服务")
+            .setMessage("从服务提供方获取服务地址、API 密钥和支持图片的模型名称。密钥是调用凭证，请只连接你信任的服务。\n\n服务需要兼容 Responses 接口和图片输入。保存配置不会测试；主动读取模型列表会联网，真实提问可能按服务规则收费。\n\n悬浮与截图权限会在实际需要时申请。新手引导始终使用本地示例，不消耗 Token。")
+            .setPositiveButton("知道了",null).show()
     }
 }
