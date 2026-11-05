@@ -431,9 +431,11 @@ class AssistantService : Service() {
                 AssistantMenuAction.STOP -> AssistantControl.stop(this)
             }
         }
-        val items=presentation.view;val rowCount=presentation.rowCount
+        val items=presentation.view
         val size=screenSize(); val ball=bubbleLayout
-        val w=minOf(dp(204),size.first-dp(16)); val h=minOf(dp(rowCount*48+21),size.second-dp(100))
+        val w=minOf(dp(presentation.preferredWidthDp),size.first-dp(16))
+        items.measure(View.MeasureSpec.makeMeasureSpec(w,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED))
+        val h=minOf(items.measuredHeight,size.second-dp(100))
         val menuX=(if ((ball?.x ?: 0)<size.first/2)dp(47) else size.first-w-dp(47))
             .coerceIn(dp(8),(size.first-w-dp(8)).coerceAtLeast(dp(8)))
         val menuY=((ball?.y ?: dp(120))-dp(50)).coerceIn(dp(8),(size.second-h-dp(60)).coerceAtLeast(dp(8)))

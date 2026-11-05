@@ -64,19 +64,21 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
         background=card(SURFACE,context.dp(12).toFloat());elevation=0f;clipToOutline=true
     }
     val buttons = linkedMapOf<AssistantMenuAction,MaterialButton>()
-    val rowCount: Int get() = buttons.size
+    val preferredWidthDp = (188 * context.resources.configuration.fontScale.coerceAtLeast(1f)).toInt()
     init { with(context) {
         fun item(action: AssistantMenuAction, resource: Int, title: String) {
             val row=MaterialButton(this,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
-                text=title;icon=prototypeIcon(resource);iconSize=dp(20);iconPadding=dp(12)
+                text=title;icon=prototypeIcon(resource);iconSize=dp(18);iconPadding=dp(8)
                 gravity=Gravity.CENTER_VERTICAL or Gravity.START;isAllCaps=false
                 setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge)
                 applyActionStyle(false);iconTint=ColorStateList.valueOf(MUTED);stateListAnimator=null;elevation=0f;translationZ=0f
                 setTextColor(INK);cornerRadius=dp(8);insetTop=0;insetBottom=0
-                setPadding(dp(12),0,dp(12),0);accessible(title)
+                minHeight=dp(40);minimumHeight=dp(40);minWidth=0;minimumWidth=0
+                textSize=13f;maxLines=2
+                setPadding(dp(8),dp(6),dp(8),dp(6));accessible(title)
                 setOnClickListener { onAction(action) }
             }
-            buttons[action]=row;view.addView(row,LinearLayout.LayoutParams(-1,dp(48)))
+            buttons[action]=row;view.addView(row,LinearLayout.LayoutParams(-1,-2))
         }
         item(AssistantMenuAction.SCREEN,R.drawable.ic_line_scan,"截图问答")
         item(AssistantMenuAction.AUDIO,R.drawable.ic_line_audio,if(recording)"结束录音并处理" else "听一段")
@@ -87,9 +89,18 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
         view.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)).apply {
             setMargins(dp(8),dp(4),dp(8),dp(4))
         })
-        item(AssistantMenuAction.HISTORY,R.drawable.ic_line_history,"对话记录")
-        item(AssistantMenuAction.SETTINGS,R.drawable.ic_line_settings,"设置")
-        item(AssistantMenuAction.STOP,R.drawable.ic_line_power,"关闭悬浮球")
+        val footer=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+        fun footerAction(action:AssistantMenuAction,resource:Int,title:String) {
+            val button=iconButton(resource,title) { onAction(action) }.apply {
+                iconSize=dp(18);minWidth=0;minimumWidth=0;minHeight=dp(40);minimumHeight=dp(40)
+                stateListAnimator=null;elevation=0f;translationZ=0f
+            }
+            buttons[action]=button;footer.addView(button,LinearLayout.LayoutParams(0,dp(40),1f))
+        }
+        footerAction(AssistantMenuAction.HISTORY,R.drawable.ic_line_history,"对话记录")
+        footerAction(AssistantMenuAction.SETTINGS,R.drawable.ic_line_settings,"设置")
+        footerAction(AssistantMenuAction.STOP,R.drawable.ic_line_power,"关闭悬浮球")
+        view.addView(footer,LinearLayout.LayoutParams(-1,-2))
     } }
 }
 

@@ -146,6 +146,7 @@ internal class TutorialScreen(
         var target: View?=null
         var overlay: View?=null
         var menu: ScrollView?=null
+        var menuWidthDp=188
         var window: FrameLayout?=null
         if(flow.step in setOf(TutorialStep.BUBBLE,TutorialStep.LONG_PRESS,TutorialStep.AUDIO_START,TutorialStep.AUDIO_RECORDING,TutorialStep.CANCEL_START,TutorialStep.CANCEL_RECORDING))target=bubble
         else if(flow.step==TutorialStep.MENU) {
@@ -154,7 +155,8 @@ internal class TutorialScreen(
                 else explain("本项先介绍「截图问答」，其他功能可在实际使用时操作。")
             }
             menu=ScrollView(this).apply { isVerticalScrollBarEnabled=false;addView(shared.view);background=card(SURFACE,dp(12).toFloat());clipToOutline=true }
-            scene.addView(menu,FrameLayout.LayoutParams(dp(204),-2))
+            menuWidthDp=shared.preferredWidthDp
+            scene.addView(menu,FrameLayout.LayoutParams(dp(menuWidthDp),-2))
             target=shared.buttons[AssistantMenuAction.SCREEN]
             scene.setOnClickListener { act(TutorialAction.CLOSE_MENU) }
         } else if(flow.step==TutorialStep.CANCEL_RESULT) {
@@ -220,8 +222,13 @@ internal class TutorialScreen(
             val width=right-left;val height=bottom-top
             val ballY=(height/2-dp(24)).coerceAtLeast(dp(8))
             bubble.layoutParams=FrameLayout.LayoutParams(dp(48),dp(48)).apply { leftMargin=(width-dp(48)).coerceAtLeast(0);topMargin=ballY }
-            menu?.layoutParams=FrameLayout.LayoutParams(minOf(dp(204),width-dp(64)),minOf(dp(357),height-dp(16))).apply {
-                leftMargin=(width-this.width-dp(47)).coerceAtLeast(dp(8));topMargin=(ballY-dp(50)).coerceIn(dp(8),(height-this.height-dp(8)).coerceAtLeast(dp(8)))
+            menu?.let { scroll ->
+                val menuWidth=minOf(dp(menuWidthDp),(width-dp(64)).coerceAtLeast(1))
+                val items=scroll.getChildAt(0)
+                items.measure(View.MeasureSpec.makeMeasureSpec(menuWidth,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED))
+                scroll.layoutParams=FrameLayout.LayoutParams(menuWidth,minOf(items.measuredHeight,(height-dp(16)).coerceAtLeast(1))).apply {
+                    leftMargin=(width-this.width-dp(47)).coerceAtLeast(dp(8));topMargin=(ballY-dp(50)).coerceIn(dp(8),(height-this.height-dp(8)).coerceAtLeast(dp(8)))
+                }
             }
             window?.layoutParams=FrameLayout.LayoutParams(minOf(dp(320),width-dp(24)),minOf(dp(340),height-dp(24))).apply {
                 leftMargin=(width-this.width)/2;topMargin=(height-this.height)/2
