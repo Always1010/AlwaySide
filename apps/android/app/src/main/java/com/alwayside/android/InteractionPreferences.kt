@@ -39,7 +39,7 @@ internal data class InteractionConfig(
     val autoAskText: Boolean = true,
     val recordingMaxMinutes: Int = RecordingLimits.DEFAULT_MINUTES,
     val collapseFollowUpByDefault: Boolean = true,
-    val saveHistoryAudio: Boolean = false,
+    val saveHistoryAudio: Boolean = true,
 ) {
     fun action(taps: Int, recording: Boolean): String = when {
         recording && taps == 1 -> recordingSingleAction
