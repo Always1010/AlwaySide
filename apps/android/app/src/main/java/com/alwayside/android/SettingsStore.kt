@@ -15,6 +15,9 @@ import javax.crypto.spec.GCMParameterSpec
 internal class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("assistant_settings", Context.MODE_PRIVATE)
 
+    /** Install migration checks presence only; no credential is read or decrypted. */
+    fun hasSavedConfiguration(): Boolean = prefs.contains("config") || prefs.contains("credential")
+
     fun load(): AppConfig = synchronized(lock) {
         val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
         val defaults = AppConfig()

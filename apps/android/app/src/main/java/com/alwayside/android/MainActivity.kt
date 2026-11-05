@@ -20,6 +20,7 @@ import android.widget.Toast
 /** One application window for history, settings and conversations. */
 class MainActivity : ThemedActivity() {
     private val onboarding by lazy { getSharedPreferences("assistant_onboarding", MODE_PRIVATE) }
+    private val guidePreferences by lazy { GuidePreferences(this) }
     private var assistantStartAttempted = false
     private var overlayWasGranted = false
     private var allowOnboarding = true
@@ -37,7 +38,13 @@ class MainActivity : ThemedActivity() {
     private var restoredHistorySelection = emptyList<String>()
     private var backCallback: android.window.OnBackInvokedCallback? = null
     private var retainedChatOffered = false
-    private val assistantStateListener: () -> Unit = { historyScreen?.updateAssistantAction() }
+    private val assistantStateListener: () -> Unit = {
+        historyScreen?.updateAssistantAction()
+        if(ProbeState.serviceRunning && navigation.current == AppPage.TUTORIAL) {
+            toast("真实悬浮球已开启，已退出模拟体验；请关闭后再继续练习")
+            exitTutorial()
+        }
+    }
     private data class RetainedApp(
         val pages: List<String>, val chat: ChatScreen.RetainedConversation?,
         val settingsPage: String?, val historyY: Int, val historySelection: List<String>,
@@ -49,8 +56,10 @@ class MainActivity : ThemedActivity() {
         @Suppress("DEPRECATION")
         val retained = lastNonConfigurationInstance as? RetainedApp
         val entry = AppEntry.take(intent)
+        guidePreferences.initialize(onboarding.contains("overlay_prompted") || onboarding.contains("assistant_enabled") ||
+            SettingsStore(this).hasSavedConfiguration())
         navigation = AppNavigation(savedInstanceState?.getStringArrayList("pages") ?: retained?.pages.orEmpty())
-        tutorialFlow = TutorialFlow(TutorialStep.restore(savedInstanceState?.getString("tutorial_step")))
+        tutorialFlow = TutorialFlow(TutorialStep.restore(savedInstanceState?.getString("tutorial_step") ?: guidePreferences.load().step.name))
         assistantStartAttempted = savedInstanceState?.getBoolean("assistant_start_attempted", false) ?: false
         overlayWasGranted = savedInstanceState?.getBoolean("overlay_was_granted", false) ?: false
         allowOnboarding = savedInstanceState?.getBoolean("allow_onboarding") ?: (entry == null)
@@ -60,7 +69,7 @@ class MainActivity : ThemedActivity() {
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
         if(navigation.hasChat) chatScreen = createChat(savedState=savedInstanceState?.getBundle("chat"),retained=retained?.chat)
-        if(navigation.current == AppPage.SETTINGS) createSettings(savedInstanceState?.getString("settings_page") ?: retained?.settingsPage)
+        if("SETTINGS" in navigation.snapshot()) createSettings(savedInstanceState?.getString("settings_page") ?: retained?.settingsPage)
         if(entry != null) route(entry) else showCurrent()
     }
 
@@ -141,18 +150,26 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun openTutorial() {
-        hideKeyboard(); tutorialFlow=TutorialFlow(); tutorialScreen=null
+        if(ProbeState.serviceRunning) {
+            toast("请先在首页关闭真实悬浮球，再开始模拟体验，避免误触真实功能")
+            return
+        }
+        val progress=guidePreferences.load().start()
+        guidePreferences.save(progress)
+        hideKeyboard(); tutorialFlow=TutorialFlow(progress.step); tutorialScreen=null
         navigation.openTutorial(); showCurrent()
     }
 
     private fun showTutorial() {
-        val screen=tutorialScreen ?: TutorialScreen(this,tutorialFlow,::navigateBack,::exitTutorial).also { tutorialScreen=it }
+        if(ProbeState.serviceRunning) { exitTutorial(); return }
+        val screen=tutorialScreen ?: TutorialScreen(this,tutorialFlow,::navigateBack,::exitTutorial,
+            { step -> guidePreferences.save(guidePreferences.load().advance(step)) }).also { tutorialScreen=it }
         present(screen.view)
     }
 
     private fun exitTutorial() {
         tutorialScreen=null
-        navigation.openHistory(); showCurrent()
+        openHistory()
     }
 
     private fun createChat(id: String? = null,savedState: Bundle? = null,
@@ -191,7 +208,8 @@ class MainActivity : ThemedActivity() {
         if(root == null) {
             val history = HistoryListScreen(this, onOpen = { openChat(it) }, onSettings = ::openSettings,
                 onToggleAssistant = ::toggleAssistant,
-                onSelectionChanged = ::historySelectionChanged, initialSelection = restoredHistorySelection)
+                onSelectionChanged = ::historySelectionChanged, initialSelection = restoredHistorySelection,
+                onIntro = ::showGuideInvitation)
             restoredHistorySelection = emptyList()
             historyScreen = history
             historyScroll = history.scrollView
@@ -199,7 +217,7 @@ class MainActivity : ThemedActivity() {
                 orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND)
                 addView(history.toolbar)
                 historyPermission = column().apply {
-                    addView(label("允许悬浮显示后，即可从小球截图或听一段。", 12f, true))
+                    addView(label("实际使用悬浮球需要允许悬浮显示；模拟体验不需要。", 12f, true))
                     action("允许悬浮显示", true) { requestOverlayPermission() }
                 }.also { addView(it) }
                 addView(history.scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -213,8 +231,24 @@ class MainActivity : ThemedActivity() {
 
     private fun historySelectionChanged() {
         val selecting=historyScreen?.selecting == true
-        historyPermission?.visibility=if(selecting || Settings.canDrawOverlays(this))View.GONE else View.VISIBLE
+        historyPermission?.visibility=if(selecting || guidePreferences.load().showOnHome || Settings.canDrawOverlays(this))View.GONE else View.VISIBLE
         updateBackCallback()
+    }
+
+    private fun showGuideInvitation(rows: LinearLayout) {
+        val progress=guidePreferences.load()
+        if(!progress.showOnHome)return
+        rows.addView(column().apply {
+            background=card(SURFACE)
+            addView(label(if(progress.status == GuideStatus.IN_PROGRESS) "继续模拟体验" else "先练习一次截图提问",17f))
+            addView(label("不用配置 API。使用内置示例，学习悬浮球和结果小窗的操作；不联网、不消耗 Token。",14f,true).apply {
+                setPadding(0,dp(8),0,0)
+            })
+            action(if(progress.status == GuideStatus.IN_PROGRESS) "继续体验" else "开始体验",true,::openTutorial)
+            action("跳过") {
+                guidePreferences.save(progress.skip()); historyScreen?.refresh(); historySelectionChanged()
+            }
+        },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(16) })
     }
 
     private fun requestOverlayPermission() {
@@ -266,8 +300,9 @@ class MainActivity : ThemedActivity() {
         overlayWasGranted=allowed
         if(allowed) {
             onboarding.edit().putBoolean("overlay_prompted",true).apply()
-            if(AssistantControl.isEnabled(this) && (!assistantStartAttempted || newlyGranted)) { assistantStartAttempted=true;ensureAssistant() }
-        } else if(!onboarding.getBoolean("overlay_prompted",false))requestOverlayPermission()
+            // Resume only an explicitly enabled assistant. A new install must never prompt or start during the guide.
+            if(onboarding.getBoolean("assistant_enabled",false) && (!assistantStartAttempted || newlyGranted)) { assistantStartAttempted=true;ensureAssistant() }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

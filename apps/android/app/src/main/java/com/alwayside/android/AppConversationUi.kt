@@ -28,6 +28,7 @@ internal class HistoryListScreen(
     private val onToggleAssistant: () -> Unit,
     private val onSelectionChanged: () -> Unit,
     initialSelection: List<String> = emptyList(),
+    private val onIntro: (LinearLayout) -> Unit = {},
 ) {
     private val store = HistoryStore(activity)
     private val media = ConversationMediaStore(activity)
@@ -129,6 +130,7 @@ internal class HistoryListScreen(
             updateAssistantAction()
             toolbar.addIconAction(4,android.R.drawable.ic_menu_manage,"设置",onSettings)
         }
+        if (!selecting) onIntro(rows)
         if (readFailed) {
             rows.addView(activity.label("无法读取会话记录。可以重试，或明确清空损坏的本机记录。", 12f, true))
             rows.action("重试读取") { refresh() }
