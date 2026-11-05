@@ -34,7 +34,8 @@ class TutorialIsolationTest {
                 val count = input.readUnsignedShort()
                 val strings = arrayOfNulls<String>(count)
                 val classes = mutableListOf<Int>()
-                val methods = mutableListOf<Int>()
+                val classNames = mutableMapOf<Int, Int>()
+                val methods = mutableListOf<Pair<Int, Int>>()
                 val names = mutableMapOf<Int, Int>()
                 var index = 1
                 while (index < count) {
@@ -42,10 +43,10 @@ class TutorialIsolationTest {
                         1 -> strings[index] = input.readUTF()
                         3, 4 -> input.readInt()
                         5, 6 -> { input.readLong(); index++ }
-                        7 -> classes.add(input.readUnsignedShort())
+                        7 -> input.readUnsignedShort().also { classes.add(it); classNames[index] = it }
                         8, 16, 19, 20 -> input.readUnsignedShort()
                         9, 17, 18 -> { input.readUnsignedShort(); input.readUnsignedShort() }
-                        10, 11 -> { input.readUnsignedShort(); methods.add(input.readUnsignedShort()) }
+                        10, 11 -> methods.add(input.readUnsignedShort() to input.readUnsignedShort())
                         12 -> { names[index] = input.readUnsignedShort(); input.readUnsignedShort() }
                         15 -> { input.readUnsignedByte(); input.readUnsignedShort() }
                         else -> error("Unknown class constant $tag")
@@ -54,11 +55,18 @@ class TutorialIsolationTest {
                 }
                 for (reference in classes.mapNotNull { strings[it] }) {
                     val type = reference.trimStart('[').removePrefix("L").removeSuffix(";")
-                    val allowed = type.length == 1 || type in resourceClasses || allowedPrefixes.any(type::startsWith)
+                    val allowed = type.length == 1 || type in resourceClasses || type == inMemoryAppearance || allowedPrefixes.any(type::startsWith)
                     assertTrue("$file depends on forbidden capability $type", allowed)
                 }
-                for (name in methods.mapNotNull { names[it] }.mapNotNull { strings[it] }) {
+                for ((ownerIndex, methodIndex) in methods) {
+                    val name = names[methodIndex]?.let { strings[it] } ?: continue
                     assertFalse("$file calls forbidden side effect $name", name in forbiddenMethods)
+                    val owner = classNames[ownerIndex]?.let { strings[it] }
+                    if (owner == inMemoryAppearance) {
+                        // Shared presentation may read the selected theme already in memory,
+                        // but cannot call mode(), save() or any preference/context accessor.
+                        assertEquals("$file accesses appearance configuration", "isNight", name)
+                    }
                 }
             }
         }
@@ -66,6 +74,7 @@ class TutorialIsolationTest {
 
     companion object {
         private val resourceClasses=setOf("com/alwayside/android/R","androidx/appcompat/R","android/R")
+        private const val inMemoryAppearance = "com/alwayside/android/AppAppearance"
         private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction","AssistantBubbleView","AssistantPresentationKt","TapSequence")
         private fun audited(name: String)=name.startsWith("Tutorial") || sharedClasses.any { name=="$it.class" || name.startsWith("$it$") }
         private val allowedPrefixes = listOf(
