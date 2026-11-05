@@ -3,7 +3,6 @@ package com.alwayside.android
 import android.app.Activity
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.card.MaterialCardView
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.slider.Slider
 import android.content.ContextWrapper
@@ -20,6 +19,7 @@ import android.widget.Toast
 import android.view.MenuItem
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.appbar.MaterialToolbar
 
 /** Category pages intentionally keep their draft only in the current view, never saved instance state. */
 internal class SettingsScreen(
@@ -33,8 +33,7 @@ internal class SettingsScreen(
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
-        API("服务商与密钥", "接入点与命名密钥", android.R.drawable.ic_menu_manage),
-        MODELS("模型与服务", "图文问答与音频转写", android.R.drawable.ic_menu_sort_by_size),
+        AI("AI 服务", "图文问答、音频转写与 API 管理", android.R.drawable.ic_menu_manage),
         PROMPTS("提示词", "默认问题与音频输出", android.R.drawable.ic_menu_edit),
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
@@ -70,6 +69,8 @@ internal class SettingsScreen(
     private val dialogs = mutableSetOf<AlertDialog>()
     private var disposed = false
     private var serviceUi: ServiceSettingsUi? = null
+    private var serviceToolbar: MaterialToolbar? = null
+    private val serviceEntry = initialPage?.takeIf { it in setOf("API", "ANSWER", "TRANSCRIPTION") } ?: "AI"
     private var renderedConnectionId: String? = null
     private var editorConnectionId: String? = null
     private var editorTranscriptionId: String? = null
@@ -77,7 +78,8 @@ internal class SettingsScreen(
     init {
         store = SettingsStore(this)
         interactionStore = InteractionPreferences(this)
-        showPage(Page.entries.firstOrNull { it.name == initialPage } ?: Page.HOME)
+        showPage(if (initialPage in setOf("API", "ANSWER", "TRANSCRIPTION", "MODELS")) Page.AI
+            else Page.entries.firstOrNull { it.name == initialPage } ?: Page.HOME)
     }
 
     val isHome: Boolean get() = page == Page.HOME
@@ -91,14 +93,14 @@ internal class SettingsScreen(
 
     /** An active editor consumes back before category navigation. */
     fun consumeEditorBack(): Boolean {
-        if (page in setOf(Page.API, Page.MODELS) && serviceUi?.back() == true) return true
+        if (page == Page.AI && serviceUi?.back() == true) return true
         if(activeEdit==null)return false
         finishEditing {};return true
     }
 
     fun back(): Boolean {
         if (disposed) return false
-        if (page in setOf(Page.API, Page.MODELS) && serviceUi?.back() == true) return true
+        if (page == Page.AI && serviceUi?.back() == true) return true
         if (activeEdit != null) { finishEditing {}; return true }
         if (isHome) return false
         showPage(Page.HOME)
@@ -108,7 +110,7 @@ internal class SettingsScreen(
     fun requestLeave(leave: () -> Unit) {
         if (!disposed) {
             val ui = serviceUi
-            if (page in setOf(Page.API, Page.MODELS) && ui != null) ui.finishEditing(leave) else finishEditing(leave)
+            if (page == Page.AI && ui != null) ui.requestLeave(leave) else finishEditing(leave)
         }
     }
 
@@ -124,7 +126,7 @@ internal class SettingsScreen(
 
     private fun showPage(next: Page) {
         if (disposed) return
-        if (next !in setOf(Page.API, Page.MODELS)) { serviceUi?.dispose(); serviceUi = null }
+        if (next != Page.AI) { serviceUi?.dispose(); serviceUi = null }
         dismissDialogs()
         clearDraft()
         page = next; generation++; group = null
@@ -139,6 +141,7 @@ internal class SettingsScreen(
                     .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
             }
         }
+        serviceToolbar = header.takeIf { next == Page.AI }
         root.addView(header)
         root.addView(divider())
         status = label("", 14f, true).apply {
@@ -156,12 +159,23 @@ internal class SettingsScreen(
             else try { store.load().also { readable = true } } catch (_: Exception) { readable = false; AppConfig() }
         val interaction = interactionStore.load()
         renderedConnectionId = config.connectionId
-        if (!readable) status.text = "无法读取配置或解密密钥。请到服务商与密钥检查对应凭证。"
+        if (!readable) status.text = "无法读取配置。请到 AI 服务中的 API 管理检查。"
         when (next) {
             Page.HOME -> Page.entries.filter { it != Page.HOME }.forEach { category(it) }
-            Page.API, Page.MODELS -> {
-                val ui = serviceUi ?: ServiceSettingsUi(activity).also { serviceUi = it }
-                ui.render(body, next == Page.API)
+            Page.AI -> {
+                val ui = serviceUi ?: ServiceSettingsUi(activity, onHeader = { title, subtitle ->
+                    serviceToolbar?.apply {
+                        this.title = title; this.subtitle = subtitle
+                        navigationContentDescription = "返回上一级"
+                    }
+                }, onEditMenu = { edit ->
+                    serviceToolbar?.apply {
+                        menu.removeItem(4302)
+                        if (edit != null) addIconAction(4302, android.R.drawable.ic_menu_manage, "编辑服务", edit)
+                            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+                    }
+                }).also { serviceUi = it }
+                ui.render(body, serviceEntry)
             }
             Page.PROMPTS -> promptPage(config)
             Page.APPEARANCE -> appearancePage()
@@ -188,23 +202,9 @@ internal class SettingsScreen(
     }
 
     private fun category(value: Page) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(64); setPadding(dp(16), dp(14), dp(16), dp(14)); background = touchFeedback()
-            isClickable = true; isFocusable = true; contentDescription = "${value.title}，${value.description}，进入详情"
-            addView(LinearLayout(this@SettingsScreen).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(label(value.title, 16f))
-                addView(label(value.description, 14f, true).apply { setPadding(0, dp(4), 0, 0) })
-            }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
-            addView(android.widget.ImageView(this@SettingsScreen).apply {
-                setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
-                imageTintList = ColorStateList.valueOf(MUTED)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(16), dp(16)))
-            setOnClickListener { if(value==Page.HELP)onHelp() else showPage(value) }
-        }
-        addRow(row)
+        addRow(settingsListRow(value.title, value.description) {
+            if (value == Page.HELP) onHelp() else showPage(value)
+        })
     }
 
     private fun appearancePage() {
@@ -378,7 +378,7 @@ internal class SettingsScreen(
                         if (secret) "" else SettingsUpdate.TextField.valueOf(name).read(current)
                     }
                 } catch (_: Exception) {
-                    toast("无法读取配置，请先检查服务商与密钥")
+                    toast("无法读取配置，请先检查 API 管理")
                     return@finishEditing
                 }
                 activeEdit = FieldEditState(name, start)
@@ -677,7 +677,7 @@ internal class SettingsScreen(
             MaterialAlertDialogBuilder(this).setTitle("选择提示词模板").setItems(names) { _, index ->
                 val preset = presets.getValue(names[index])
                 val preview = try { preset.mergeInto(store.load()) } catch (_: Exception) {
-                    toast("无法读取当前配置，请先在服务商与密钥中修复密钥或重置配置")
+                    toast("无法读取当前配置，请先在 API 管理中检查密钥")
                     return@setItems
                 }
                 val summary = listOf("助手回答方式" to preview.instructions, "截图默认问题" to preview.defaultQuestion,
@@ -712,15 +712,10 @@ internal class SettingsScreen(
 
     private fun section(text: String, help: String? = null) {
         group = null
-        val heading = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), 0, 0, 0)
-            addView(label(text, 14f, true), LinearLayout.LayoutParams(0, -2, 1f))
-            if (help != null) addView(iconButton(R.drawable.ic_line_info, "查看${text}说明") {
-                MaterialAlertDialogBuilder(this@SettingsScreen).setTitle(text).setMessage(help)
-                    .setPositiveButton("知道了", null).showTracked()
-            }.apply { iconTint = ColorStateList.valueOf(MUTED) })
-        }
+        val heading = settingsSectionHeader(text, help, onHelp = {
+            MaterialAlertDialogBuilder(this).setTitle(text).setMessage(help)
+                .setPositiveButton("知道了", null).showTracked()
+        })
         body.addView(heading, LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = if (body.childCount <= 1) dp(4) else dp(16)
             bottomMargin = dp(8)
@@ -729,10 +724,7 @@ internal class SettingsScreen(
 
     private fun addRow(view: View) {
         val container = group ?: column().apply { setPadding(0, 0, 0, 0) }.also { content ->
-            body.addView(MaterialCardView(this).apply {
-                radius = dp(16).toFloat(); cardElevation = 0f; strokeWidth = 0; setCardBackgroundColor(SURFACE)
-                addView(content, android.widget.FrameLayout.LayoutParams(-1, -2))
-            }, LinearLayout.LayoutParams(-1, -2).apply { if (body.childCount > 1) topMargin = dp(8) })
+            body.addView(settingsListGroup(content), LinearLayout.LayoutParams(-1, -2).apply { if (body.childCount > 1) topMargin = dp(8) })
             group = content
         }
         if (container.childCount > 0) container.addView(divider().apply {

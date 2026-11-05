@@ -15,91 +15,58 @@ import javax.crypto.spec.GCMParameterSpec
 internal class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("assistant_settings", Context.MODE_PRIVATE)
 
-    /** Install migration checks presence only; no credential is read or decrypted. */
-    fun hasSavedConfiguration(): Boolean = prefs.contains("config") || prefs.contains("credential")
+    /** Old service schemas intentionally require re-entry; history and unrelated preferences stay intact. */
+    fun hasSavedConfiguration(): Boolean = synchronized(lock) {
+        val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
+        data.optInt("schemaVersion", 1) == 4 &&
+            (data.optJSONObject("services")?.optJSONArray("credentials")?.length() ?: 0) > 0
+    }
 
-    /** Preparation reads presence and public fields only, never decrypts a credential or connects. */
+    fun requiresServiceSetup(): Boolean = synchronized(lock) {
+        val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
+        prefs.contains("config") && data.optInt("schemaVersion", 1) < 4
+    }
+
+    /** Reads presence and public fields only, never decrypts credentials or connects. */
     fun connectionPreparation(): ConnectionPreparation = synchronized(lock) {
         val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
-        if (data.optInt("schemaVersion", 1) == 3) {
-            val catalog = ServiceCatalogCodec.decode(WireJson.decode(data.getJSONObject("services").toString())) { id ->
-                (if (prefs.contains("credential.$id")) "present" else "") to false
-            }
-            val active = catalog.profiles.firstOrNull { it.id == catalog.activeAnswerId }
-            val endpoint = catalog.endpoints.firstOrNull { it.id == active?.endpointId }
-            val key = catalog.credentials.firstOrNull { it.id == active?.credentialId }
-            ConnectionPreparation(endpoint != null, key != null && key.value.isNotBlank() && endpoint?.id in key.endpointIds,
-                active?.model?.isNotBlank() == true,
-                serviceResourcesReady = catalog.credentials.any { credential -> credential.value.isNotBlank() &&
-                    catalog.endpoints.any { it.providerId == credential.providerId && it.id in credential.endpointIds } },
-                transcriptionConfigured = catalog.activeTranscriptionId != null)
-        } else if (data.optInt("schemaVersion", 1) == 2) {
-            val active = data.optString("activeConnectionId")
-            val profiles = data.optJSONArray("connections")
-            val profile = (0 until (profiles?.length() ?: 0)).mapNotNull { profiles?.optJSONObject(it) }
-                .firstOrNull { it.optString("id") == active }
-            ConnectionPreparation(profile?.optString("baseUrl").orEmpty().isNotBlank(),
-                prefs.contains("credential.$active"), profile?.optString("model").orEmpty().isNotBlank())
-        } else ConnectionPreparation(data.optString("baseUrl").isNotBlank(), prefs.contains("credential"), data.optString("model").isNotBlank())
+        if (data.optInt("schemaVersion", 1) != 4) return@synchronized ConnectionPreparation()
+        val catalog = ServiceCatalogCodec.decode(WireJson.decode(data.getJSONObject("services").toString())) { id ->
+            (if (prefs.contains("credential.$id")) "present" else "") to false
+        }
+        val active = catalog.profiles.firstOrNull { it.id == catalog.activeAnswerId }
+        val endpoint = catalog.endpoints.firstOrNull { it.id == active?.endpointId }
+        val key = catalog.credentials.firstOrNull { it.id == active?.credentialId }
+        ConnectionPreparation(endpoint != null, key != null && key.value.isNotBlank() && endpoint?.id in key.endpointIds,
+            active?.model?.isNotBlank() == true,
+            serviceResourcesReady = catalog.credentials.any { it.value.isNotBlank() },
+            transcriptionConfigured = catalog.activeTranscriptionId != null)
     }
 
     fun load(): AppConfig = synchronized(lock) {
         val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
-        require(data.optInt("schemaVersion", 1) in 1..3) { "不支持的配置版本" }
+        val schema = data.optInt("schemaVersion", 1)
+        require(schema in 1..4) { "不支持的配置版本" }
         val defaults = AppConfig()
-        val legacy = AppConfig(
-            apiKey = readCredential("credential").first,
-            baseUrl = data.optString("baseUrl", defaults.baseUrl),
-            model = data.optString("model", defaults.model),
-            transcriptionModel = data.optString("transcriptionModel", defaults.transcriptionModel),
+        val globals = defaults.copy(
             instructions = data.optString("instructions", defaults.instructions),
             defaultQuestion = data.optString("defaultQuestion", defaults.defaultQuestion),
             audioQuestion = data.optString("audioQuestion", defaults.audioQuestion),
             autoUpdateImage = data.optBoolean("autoUpdateImage", defaults.autoUpdateImage),
-            maxOutputTokens = data.optInt("maxOutputTokens", defaults.maxOutputTokens),
-            reasoning = data.optString("reasoning", defaults.reasoning),
-            webSearch = data.optBoolean("webSearch", defaults.webSearch),
-            verbosity = data.optString("verbosity", defaults.verbosity),
-            temperature = if (data.isNull("temperature")) null else data.getDouble("temperature"),
-            topP = if (data.isNull("topP")) null else data.getDouble("topP"),
             transcriptionPrompt = data.optString("transcriptionPrompt", defaults.transcriptionPrompt),
             audioOutput = data.optString("audioOutput", defaults.audioOutput),
             textQuestion = data.optString("textQuestion", defaults.textQuestion),
         )
-        if (data.optInt("schemaVersion", 1) == 3) {
-            val catalog = ServiceCatalogCodec.decode(WireJson.decode(data.getJSONObject("services").toString())) { id ->
-                readCredential("credential.$id")
-            }
-            return@synchronized catalog.attach(legacy)
+        if (schema != 4) return@synchronized ServiceCatalog().attach(globals)
+        val catalog = ServiceCatalogCodec.decode(WireJson.decode(data.getJSONObject("services").toString())) { id ->
+            readCredential("credential.$id")
         }
-        if (!prefs.contains("config") && !prefs.contains("credential")) return@synchronized ServiceCatalog().attach(legacy)
-        if (data.optInt("schemaVersion", 1) != 2) {
-            val old = ConnectionConfigCodec.migrateLegacy(legacy)
-            val catalog = ServiceCatalog.migrate(old)
-            return@synchronized catalog.copy(credentials = catalog.credentials.map { it.copy(unreadable = readCredential("credential").second) }).attach(old)
-        }
-        val records = data.getJSONArray("connections")
-        require(records.length() in 1..20) { "连接数量无效" }
-        val profiles = (0 until records.length()).map { index ->
-            val item = records.getJSONObject(index)
-            val id = item.getString("id")
-            ConnectionConfigCodec.decode(WireJson.decode(item.toString()), readCredential("credential.$id").first)
-        }
-        require(profiles.map { it.id }.distinct().size == profiles.size) { "连接 ID 重复" }
-        val active = profiles.firstOrNull { it.id == data.getString("activeConnectionId") } ?: error("当前连接不存在")
-        val old = active.applyTo(legacy).copy(connections = profiles,
-            transcriptionConnectionId = data.optionalPresetString("transcriptionConnectionId"))
-        val migrated = ServiceCatalog.migrate(old)
-        val safe = migrated.copy(credentials = migrated.credentials.map { credential ->
-            val originalId = credential.id.removePrefix("key-")
-            credential.copy(unreadable = readCredential("credential.$originalId").second)
-        })
-        safe.attach(old)
+        catalog.attach(globals)
     }
 
     fun save(config: AppConfig) = synchronized(lock) {
         validate(config)
-        val catalog = config.serviceCatalog ?: ServiceCatalog.migrate(config)
+        val catalog = config.serviceCatalog ?: ServiceCatalog()
         saveState(config, catalog)
     }
 
@@ -124,20 +91,13 @@ internal class SettingsStore(context: Context) {
     private fun saveState(config: AppConfig, catalog: ServiceCatalog) {
         catalog.validate()
         // Stage every ciphertext first. Preserve an unreadable slot until explicitly replaced/deleted.
-        val sourceSchema = JSONObject(prefs.getString("config", "{}") ?: "{}").optInt("schemaVersion", 1)
         val encrypted = catalog.credentials.associate { credential ->
-            // Select by source schema rather than guessing: a v2 connection ID can itself start with key-.
-            val previousSlot = when (sourceSchema) {
-                3 -> "credential.${credential.id}"
-                2 -> if (credential.id.startsWith("key-")) "credential.${credential.id.removePrefix("key-")}" else null
-                else -> if (credential.id == "key-legacy") "credential" else null
-            }
-            val previous = previousSlot?.let { prefs.getString(it, null) }
+            val previous = prefs.getString("credential.${credential.id}", null)
             credential.id to if (credential.unreadable) previous.also { check(it != null) { "无法保留损坏的密钥，请先删除此密钥" } }
                 else credential.value.takeIf(String::isNotBlank)?.let(::encrypt)
         }
         val data = JSONObject().apply {
-            put("schemaVersion", 3)
+            put("schemaVersion", 4)
             put("services", JSONObject(WireJson.encode(ServiceCatalogCodec.encode(catalog))))
             put("instructions", config.instructions)
             put("defaultQuestion", config.defaultQuestion)
@@ -156,22 +116,11 @@ internal class SettingsStore(context: Context) {
     }
 
     fun clearCredential() = synchronized(lock) {
-        val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
-        if (data.optInt("schemaVersion", 1) == 3) {
-            val current = load()
-            val catalog = current.serviceCatalog!!
-            val key = catalog.profiles.firstOrNull { it.id == catalog.activeAnswerId }?.credentialId
-            saveState(current, catalog.removeCredential(key ?: return@synchronized))
-        } else if (data.optInt("schemaVersion", 1) == 2) {
-            val id = data.getString("activeConnectionId")
-            val profiles = data.getJSONArray("connections")
-            for (i in 0 until profiles.length()) {
-                val profile = profiles.getJSONObject(i)
-                if (profile.optString("id") == id) profile.put("credentialRevision", profile.optLong("credentialRevision") + 1)
-            }
-            check(prefs.edit().putString("config", data.toString()).remove("credential.$id").commit())
-        } else check(prefs.edit().remove("credential").commit())
-        // Other connections may still use the encryption key; never delete it here.
+        val current = load()
+        val catalog = current.serviceCatalog!!
+        val key = catalog.profiles.firstOrNull { it.id == catalog.activeAnswerId }?.credentialId
+            ?: return@synchronized
+        saveState(current, catalog.removeCredential(key))
     }
 
     fun resetConfiguration() = synchronized(lock) {

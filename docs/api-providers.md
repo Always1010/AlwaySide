@@ -6,20 +6,22 @@
 
 ## 1. 服务、密钥与用途配置分别保存
 
-`ProviderKind` 表示供应商，`ApiProtocol` 表示回答的线上数据格式。「服务商与密钥」管理服务商实例、具体接入点及多个命名密钥；「模型与服务」分别管理图文问答和音频转写配置。每份用途配置显式引用接入点与密钥，并保存模型和该用途的参数；同一模型可以有多套配置。两用途分别选择当前配置，可共用同一服务及 Key，也可分开。
+`ProviderKind` 表示供应商，`ApiProtocol` 表示回答的线上数据格式。设置中只有「AI 服务」入口，其下只有「图文问答」「音频转写」「管理 API 服务」三行。管理页按实际服务商分组列出命名 Key，一条 Key 包含自己的 API 地址及接口信息；添加时先选服务商，再填 Key 与名称。Key 统一在管理页编辑，不提供独立接入点或密钥授权页面。
 
-点击配置只查看详情，新增和保存不自动启用；需通过明确的启用操作改变当前用途。保存不等于验证可用，模型目录可读取也不代表支持图片、搜索或转写。回答协议和文件转写支持分别判断，不能从 Chat 或 Responses 兼容性推断转写能力。
+图文问答与音频转写分别显示服务商卡片，每个服务商在每个用途中只保留一张。添加卡片依次选择服务商、该服务商已有 Key、模型及默认参数；不另填模型配置名称。首项保存后自动选中，后续新增不切换；点击服务行选用，右上角菜单编辑。两个用途可共用同一服务及 Key，也可分开。内部 `ServiceCatalog` 仍以服务商、接入点、凭证、用途配置和绑定等实体表达关系，这些内部实体不对应额外的用户配置层级。
 
-| 供应商 | 新建接入点默认回答协议 | 基础地址默认值 | 回答接口 |
+保存不等于验证可用，模型目录可读取也不代表支持图片、搜索或转写。回答协议和文件转写支持分别判断，不能从 Chat 或 Responses 兼容性推断转写能力。
+
+| 供应商 | 新建 Key 默认回答协议 | 基础地址默认值 | 回答接口 |
 | --- | --- | --- | --- |
 | OpenAI | Responses | `https://api.openai.com/v1` | `POST /responses` |
 | DeepSeek | Responses | `https://api.deepseek.com` | `POST /responses` |
-| Qwen（千问） | Chat Completions | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `POST /chat/completions` |
+| Qwen | Chat Completions | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `POST /chat/completions` |
 | Gemini | Gemini 原生 GenerateContent | `https://generativelanguage.googleapis.com/v1beta` | `POST /models/{model}:streamGenerateContent?alt=sse` |
 | Claude | Claude Messages | `https://api.anthropic.com/v1` | `POST /messages` |
 | 自定义兼容服务 | Responses | `https://api.openai.com/v1`，使用前修改 | 按明确选择的协议拼接 |
 
-Qwen（千问）是模型系列，本应用通过阿里云百炼（Model Studio / DashScope）接入。请使用阿里云百炼对应地域的 API 地址和 API Key。 `ProviderKind.QWEN` 的专有参数适配针对千问模型，不代表支持阿里云百炼平台所有模型的专有能力。
+Qwen是模型系列，本应用通过阿里云百炼（Model Studio / DashScope）接入。请使用阿里云百炼对应地域的 API 地址和 API Key。 `ProviderKind.QWEN` 的专有参数适配针对千问模型，不代表支持阿里云百炼平台所有模型的专有能力。
 
 基础地址包含版本或兼容路径，**不包含回答接口路径**。例如 Claude 填到 `/v1`，阿里云百炼填到 `/compatible-mode/v1`；DeepSeek 默认直接使用域名。自建代理可带路径前缀。只能使用 HTTPS，禁止用户名、密码、查询参数、片段、路径回退、编码路径混淆和无效端口。客户端不跟随重定向，也不把密钥放在查询字符串。
 
@@ -210,7 +212,7 @@ Responses 使用 URL citation annotations；Chat Completions 使用兼容的 `de
 
 ## 4. 参数映射与模型限制
 
-新建图文问答配置默认可选生成参数为空；空值表示不发送，供应商自行选择默认。旧配置原值迁移，可能保留原有 `maxOutputTokens=8192`、`reasoning=none`。图文问答配置先校验：输出上限为空／0 或 16–131072；temperature 为有限数 0–2；top_p 为有限数 0–1；两种采样参数只能设置一种。供应商及模型还可能有更窄范围。
+新建图文问答卡片默认可选生成参数为空；空值表示不发送，供应商自行选择默认。参数值按协议和模型适配，未知时留空；旧版服务参数不自动迁移。图文问答配置先校验：输出上限为空／0 或 16–131072；temperature 为有限数 0–2；top_p 为有限数 0–1；两种采样参数只能设置一种。供应商及模型还可能有更窄范围。
 
 | 应用字段 | Responses | 普通 Chat | 千问 Chat | Gemini | Claude |
 | --- | --- | --- | --- | --- | --- |
@@ -226,7 +228,7 @@ Responses 使用 URL citation annotations；Chat Completions 使用兼容的 `de
 
 官方说明还包括采样在不同模型／思考模式下生效范围不同：thinking 模式 temperature 无效；Flash 的 top_p 在 thinking 模式下限为 0.95、非 thinking 模式固定 1；V4 Pro 的 top_p 在 thinking 模式被忽略。当前代码只对这些采样值执行通用范围验证，开发者不应将“已发送”写成“必然生效”。服务端可能静默忽略兼容参数，因此新增参数前必须核对其兼容表。[DeepSeek 参数兼容说明](https://api-docs.deepseek.com/guides/responses_api/)
 
-### Qwen（千问）
+### Qwen
 
 当前适配器对 Qwen3.5–3.8 Plus／Flash 和 Qwen3.7–3.8 Max 使用 `max_completion_tokens`；其余使用 `max_tokens`。temperature 必须小于 2，top_p 必须大于 0。verbosity 不支持。
 
@@ -262,7 +264,7 @@ Google Search 也按适配器已知家族校验，未知模型不自动猜测支
 
 ## 5. 获取模型列表
 
-用户在模型配置中主动操作触发 `GET {baseUrl}/models`，使用该配置选择的接入点、协议及密钥鉴权。目录按接入点和凭证版本隔离，换 Key 后不能沿用另一账号的可访问模型结论。结果用于选择模型，不发回答请求；服务返回的能力信息和客户端适配器支持范围分别处理，不能替代实际用途测试。没有列表权限或服务不提供列表时可手工填写。
+用户在用途卡片编辑中主动操作触发 `GET {baseUrl}/models`，使用所选 Key 的 API 地址、协议及密钥鉴权。目录按接入点和凭证版本隔离，换 Key 后不能沿用另一账号的可访问模型结论。结果用于选择模型，不发回答请求；服务返回的能力信息和客户端适配器支持范围分别处理，不能替代实际用途测试。没有列表权限或服务不提供列表时可手工填写。
 
 | 协议 | 请求分页参数 | 返回读取字段 | 后续页 |
 | --- | --- | --- | --- |
@@ -274,11 +276,11 @@ Google Search 也按适配器已知家族校验，未知模型不自动猜测支
 
 ## 6. 独立的 WAV 文件转写
 
-录音首先写成本地 WAV，再由当前启用的音频转写配置发送 OpenAI 兼容文件接口；之后按需把转写文字交给当前图文问答配置处理。两者分别绑定供应商接入点、命名密钥、模型和用途参数，可共用也可分开。仅原始转写不要求问答 Key，未配置转写不影响图文功能。Gemini／Claude 原生回答接口没有被当成音频文件转写接口，也不会自动把录音送入它们的原生音频能力。
+录音首先写成本地 WAV，再由当前选用的音频转写卡片发送 OpenAI 兼容文件接口；之后按需把转写文字交给当前图文问答卡片处理。两者分别选择服务商、已有命名 Key、模型和用途参数，可共用也可分开。仅原始转写不要求问答 Key，未配置转写不影响图文功能。Gemini／Claude 原生回答接口没有被当成音频文件转写接口，也不会自动把录音送入它们的原生音频能力。
 
 转写提示和语言分别保存在每份音频转写配置中，请求读取该配置的值。为兼容原六字段提示词模板，提示词页保留「新转写配置的默认提示」，只作为之后新建转写配置的初始值；修改全局默认提示或应用模板不会覆盖已有转写配置。
 
-转写接入点必须声明本客户端已实现的 OpenAI 兼容文件转写支持，且目标服务实际实现 `POST {baseUrl}/audio/transcriptions`。新接入点须明确声明使用本客户端支持的文件转写接口；自定义接入点可由用户明确声明，但仍需主动验证。旧配置迁移保留原有兼容声明，不代表已经验证；不能把未知能力当作已验证。Responses 或 Chat Completions 回答协议可选，不代表目标供应商提供转写路由。请求为非流式 `multipart/form-data`，Bearer 鉴权，字段如下：
+转写接入点必须声明本客户端已实现的 OpenAI 兼容文件转写支持，且目标服务实际实现 `POST {baseUrl}/audio/transcriptions`。新接入点须明确声明使用本客户端支持的文件转写接口；自定义接入点可由用户明确声明，但仍需主动验证。本版不继承旧服务配置的兼容声明；重新配置时仍不能把未知能力当作已验证。Responses 或 Chat Completions 回答协议可选，不代表目标供应商提供转写路由。请求为非流式 `multipart/form-data`，Bearer 鉴权，字段如下：
 
 ```text
 Content-Disposition: form-data; name="model"
@@ -298,7 +300,7 @@ Content-Type: audio/wav
 
 实际请求包含自动生成的 multipart boundary 和各段分隔；上例仅展示字段。客户端按录音限制分段读取 WAV PCM，每段重建 WAV 头并上传，读取 JSON `text`，再拼接转写结果。转写模型、音频语言、输出格式能力由该接口决定；这里不实现 Realtime、原生 Gemini 音频、Claude 音频、语音合成或任意文件识别。[OpenAI 文件转写 API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)
 
-## 7. 错误、凭据与迁移
+## 7. 错误、凭据与升级
 
 HTTP 3xx 明确提示填写最终地址；401／403 检查密钥、地域和权限；404 检查路由与模型；413 检查内容体积；429 检查限流／额度；5xx 和超时需用户手动重试。客户端不读取并回显任意 HTTP 错误正文。请求连接超时 20 秒、读超时 60 秒、整体上限 240 秒；取消令牌会主动断开连接。回答必须返回 SSE Content-Type，非流式 JSON 不会被误认为成功。
 
@@ -306,12 +308,12 @@ HTTP 3xx 明确提示填写最终地址；401／403 检查密钥、地域和权�
 
 所有正文与事件均有限额：答案文字最多 256 Ki 字符，SSE 单行最多 1 Mi 字符、事件最多 2 Mi 字符、总输入最多 16 Mi 字符；超限报错。当前统一入口接受 PNG／JPEG／WebP Base64 data URL、总长度最多 16 Mi 字符；Gemini 适配器另限制为 12 Mi 字符。尽管适配器可解析更多原生格式，入口约束仍先执行。
 
-新版本配置分别保存服务商实例、接入点、命名凭证、用途模型配置及两个用途的当前绑定。兼容旧版单连接及 v2 连接列表：迁移保留原地址、协议、模型、参数、密钥，以及旧问答和独立转写绑定的实际含义；不按相同名称或相同 Key 字符串自动合并账号。旧配置迁移后仍不代表转写能力已经验证。迁移在加密和校验完成后整体提交，失败保留旧配置。
+本版使用新版服务配置结构，不迁移旧版 v1–v3 的地址、协议、模型、参数、密钥及用途绑定。首次升级显示需要重新配置服务；用户按新的管理页和用途卡片重新选择。历史记录、媒体、提示词与外观设置保留，服务重配不清除这些内容。内部实体与请求快照继续由 `ServiceCatalog` 管理，不能据此恢复旧服务绑定。
 
 密钥不进入公开配置 JSON，也不进入提示词预设。每个命名凭证独立保存由 Android Keystore 支持的 AES-GCM 密文；加密失败时保存失败，不回退明文。配置与密钥变更在同一次偏好提交中完成。普通配置字符串输出隐藏凭据，凭证版本用于使过期操作及能力缓存失效。密钥的服务及接入点范围限制必须匹配，不能因切换用途而把凭证送到另一站点。删除被引用的密钥或接入点会解除受影响的用途绑定，不自动选用其他服务；某个凭证无法解密不应使其他独立凭证不可读。
 
 ## 8. 维护入口
 
-核心代码位于 `apps/android/app/src/main/java/com/alwayside/android/`：`ServiceCatalog` 管理服务、密钥、用途配置及请求快照，`ProviderCapabilities` 执行已知能力限制，`ProviderProtocol` 校验通用选项与地址，`HttpTransport` 负责鉴权和网络边界，四种 Adapter 负责各自格式，`AiProvider.listModels` 负责模型列表，`SettingsStore`／`ServiceCatalogCodec` 负责新配置存储，`ConnectionConfigCodec` 保留旧格式读取以完成迁移。
+核心代码位于 `apps/android/app/src/main/java/com/alwayside/android/`：`ServiceCatalog` 管理服务、密钥、用途配置及请求快照，`ProviderCapabilities` 执行已知能力限制，`ProviderProtocol` 校验通用选项与地址，`HttpTransport` 负责鉴权和网络边界，四种 Adapter 负责各自格式，`AiProvider.listModels` 负责模型列表，`SettingsStore`／`ServiceCatalogCodec` 负责新配置存储，旧格式读取代码若保留，仅供兼容数据识别，不作为本版自动迁移服务配置的入口。
 
 新增参数或扩展模型时，先检查官方协议及模型支持，再同步适配器、能力校验、设置界面与针对该分支的离线测试。测试应使用伪造 Map／SSE／HTTP 数据验证字段、完整性及失败分支。真实服务验证需独立记录日期、地域、具体模型和功能，不能从接口形状、模型名称或模型列表推断“已联调成功”。

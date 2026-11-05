@@ -1,6 +1,6 @@
 package com.alwayside.android
 
-/** Public schema v3. Credential values are supplied separately by encrypted storage. */
+/** Public service schema v4. Credential values are supplied separately by encrypted storage. */
 internal object ServiceCatalogCodec {
     fun encode(c: ServiceCatalog): Map<String, Any?> = linkedMapOf(
         "providers" to c.providers.map { mapOf("id" to it.id, "name" to it.name, "kind" to it.kind.name) },
@@ -9,7 +9,7 @@ internal object ServiceCatalogCodec {
             "apiVersion" to it.apiVersion, "workspaceId" to it.workspaceId) },
         "credentials" to c.credentials.map { mapOf("id" to it.id, "providerId" to it.providerId, "name" to it.name,
             "revision" to it.revision, "endpointIds" to it.endpointIds.toList()) },
-        "profiles" to c.profiles.map { mapOf("id" to it.id, "name" to it.name, "purpose" to it.purpose.name,
+        "profiles" to c.profiles.map { mapOf("id" to it.id, "name" to it.name, "purpose" to it.purpose.name, "providerId" to c.providerIdOf(it),
             "endpointId" to it.endpointId, "credentialId" to it.credentialId, "model" to it.model,
             "options" to options(it.options), "transcriptionPrompt" to it.transcriptionPrompt, "language" to it.language) },
         "activeAnswerId" to c.activeAnswerId, "activeTranscriptionId" to c.activeTranscriptionId)
@@ -37,7 +37,7 @@ internal object ServiceCatalogCodec {
                 ModelProfile(it.text("id"), it.text("name"), ModelPurpose.valueOf(it.text("purpose")), it.nullable("endpointId"),
                     it.nullable("credentialId"), it.text("model"), GenerationOptions((o["maxOutputTokens"] as? Number)?.toInt() ?: 0,
                         o.text("reasoning"), o.text("verbosity"), (o["temperature"] as? Number)?.toDouble(), (o["topP"] as? Number)?.toDouble(), o["webSearch"] == true),
-                    it.text("transcriptionPrompt"), it.text("language"))
+                    it.text("transcriptionPrompt"), it.text("language"), it.text("providerId"))
             } }, activeAnswerId = data.nullable("activeAnswerId"), activeTranscriptionId = data.nullable("activeTranscriptionId"))
         catalog.validate()
         return catalog

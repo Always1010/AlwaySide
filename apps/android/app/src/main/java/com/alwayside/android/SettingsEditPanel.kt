@@ -32,6 +32,7 @@ internal class SettingsEditPanel(
     onDraft: (String) -> Unit,
     private val onRequestClose: () -> Unit,
     onSave: (String, (String) -> Unit) -> Unit,
+    confirmLabel: String = "保存",
 ) : BottomSheetDialog(context) {
     private var closing = false
     private val inputLayout = TextInputLayout(context).apply {
@@ -91,7 +92,7 @@ internal class SettingsEditPanel(
                 setOnClickListener { cancel() }
             }, LinearLayout.LayoutParams(-2, -2))
             addView(MaterialButton(context).apply {
-                text = "保存"; applyActionStyle(true)
+                text = confirmLabel; applyActionStyle(true)
                 setOnClickListener { onSave(field.text?.toString().orEmpty()) { inputLayout.error = it } }
             }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = context.dp(8) })
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = context.dp(16) })

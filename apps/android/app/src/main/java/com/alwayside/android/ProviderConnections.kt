@@ -10,7 +10,7 @@ internal enum class ApiProtocol(val title: String) {
 internal enum class ProviderKind(val title: String, val protocol: ApiProtocol, val baseUrl: String) {
     OPENAI("OpenAI", ApiProtocol.RESPONSES, "https://api.openai.com/v1"),
     DEEPSEEK("DeepSeek", ApiProtocol.RESPONSES, "https://api.deepseek.com"),
-    QWEN("Qwen（千问）", ApiProtocol.CHAT_COMPLETIONS, "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    QWEN("Qwen", ApiProtocol.CHAT_COMPLETIONS, "https://dashscope.aliyuncs.com/compatible-mode/v1"),
     GEMINI("Gemini", ApiProtocol.GEMINI, "https://generativelanguage.googleapis.com/v1beta"),
     CLAUDE("Claude", ApiProtocol.CLAUDE, "https://api.anthropic.com/v1"),
     CUSTOM("自定义兼容服务", ApiProtocol.RESPONSES, "https://api.openai.com/v1");
@@ -62,14 +62,7 @@ internal object ProviderConnections {
     }
 
     fun add(config: AppConfig, kind: ProviderKind): AppConfig {
-        config.serviceCatalog?.let { catalog ->
-            val id = UUID.randomUUID().toString()
-            val extra = ServiceCatalog.migrate(AppConfig(connectionId = id, connectionName = kind.title,
-                providerKind = kind, apiProtocol = kind.protocol, baseUrl = kind.baseUrl, apiKey = "", model = "",
-                transcriptionModel = "", reasoning = "", maxOutputTokens = 0, transcriptionConnectionId = null))
-            return catalog.copy(providers = catalog.providers + extra.providers, endpoints = catalog.endpoints + extra.endpoints,
-                credentials = catalog.credentials + extra.credentials, profiles = catalog.profiles + extra.profiles, activeAnswerId = id).attach(config)
-        }
+        require(config.serviceCatalog == null) { "请在管理 API 服务中添加密钥，再添加用途卡片" }
         require(snapshot(config).size < 20) { "最多保存 20 个连接" }
         val profile = ConnectionProfile(UUID.randomUUID().toString(), kind.title, kind, kind.protocol, kind.baseUrl)
         return profile.applyTo(config).copy(connections = snapshot(config) + profile)

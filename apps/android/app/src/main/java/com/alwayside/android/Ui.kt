@@ -126,3 +126,48 @@ internal fun MaterialToolbar.addIconAction(id:Int,iconRes:Int,label:String,onCli
     setOnMenuItemClickListener{onClick();true}
 }
 internal fun View.accessible(name:String) {contentDescription=name;tooltipText=name}
+
+/** Shared settings rows: used by the existing Settings page and service settings. */
+internal fun Context.settingsListRow(
+    title: String, value: String = "", leading: View? = null, showArrow: Boolean = true,
+    onClick: (() -> Unit)? = null,
+): LinearLayout =
+    LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+        minimumHeight = dp(64); setPadding(dp(16), dp(14), dp(16), dp(14))
+        if (onClick != null) {
+            background = touchFeedback(); isClickable = true; isFocusable = true
+            setOnClickListener { onClick() }
+        }
+        contentDescription = listOf(title, value).filter(String::isNotBlank).joinToString("，")
+        if (leading != null) addView(leading, LinearLayout.LayoutParams(dp(32), dp(32)).apply { rightMargin = dp(8) })
+        addView(LinearLayout(this@settingsListRow).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label(title, 16f))
+            if (value.isNotBlank()) addView(label(value, 14f, true).apply {
+                setPadding(0, dp(4), 0, 0); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
+        if (onClick != null && showArrow) addView(android.widget.ImageView(this@settingsListRow).apply {
+            setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
+            imageTintList = ColorStateList.valueOf(MUTED)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(16), dp(16)))
+    }
+
+internal fun Context.settingsListGroup(content: View) = com.google.android.material.card.MaterialCardView(this).apply {
+    radius = dp(16).toFloat(); cardElevation = 0f; strokeWidth = 0; setCardBackgroundColor(SURFACE)
+    addView(content, android.widget.FrameLayout.LayoutParams(-1, -2))
+}
+
+internal fun Context.settingsSectionHeader(
+    title: String, help: String? = null, onHelp: () -> Unit = {},
+    addDescription: String? = null, onAdd: () -> Unit = {},
+) = LinearLayout(this).apply {
+    gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(dp(16), 0, 0, 0)
+    addView(label(title, 14f, true), LinearLayout.LayoutParams(0, -2, 1f))
+    if (help != null) addView(iconButton(R.drawable.ic_line_info, "查看${title}说明", onHelp).apply {
+        iconTint = ColorStateList.valueOf(MUTED)
+    })
+    if (addDescription != null) addView(iconButton(R.drawable.ic_line_plus, addDescription, onAdd))
+}
