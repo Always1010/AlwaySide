@@ -96,7 +96,8 @@ git push origin v0.6.1
 | --- | --- |
 | 应用页面与导航 | `MainActivity`、`AppNavigation`、`SettingsScreen`、`ChatScreen` |
 | 悬浮交互与采集 | `AssistantService`、`FrameSource`、`PlaybackRecorder` |
-| 请求与会话 | `AiProvider`、`ProviderProtocol`、`ChatSession` |
+| 请求与会话 | `AiProvider`、`HttpTransport`、四种 `ChatAdapter`、`ChatSession` |
+| 服务与协议 | `ProviderConnections`、`ConnectionConfigCodec`、`ProviderCapabilities`；格式详见 [API 服务商与接口格式](../../docs/api-providers.md) |
 | 设置与历史 | `SettingsStore`、`HistoryStore`、`ConversationMediaStore` |
 
 界面维护参考[界面设计说明](../../docs/ui-design.md)，协作和提交遵循 [AGENTS.md](../../AGENTS.md)。本地计划、验收及构建记录统一放在仓库根目录 `.local/`，不随仓库分发。

@@ -34,11 +34,11 @@ AlwaySide 是一款 Android 悬浮 AI 助手。你可以对屏幕内容、应用
 ## 开始使用
 
 1. 从[最新 Release](https://github.com/Always1010/AlwaySide/releases/latest)下载 APK 并安装。
-2. 在「设置 → API 连接」中填写服务地址和密钥，再到「模型与生成参数」中选择模型。服务地址需使用 HTTPS，并以 `/v1` 结尾。
+2. 在「设置 → API 连接」中添加 OpenAI、DeepSeek、通义千问、Gemini、Claude 或自定义连接，填写 HTTPS 基础地址和密钥，再到「模型与生成参数」中选择图文模型；需要音频时独立选择转写连接和模型。
 3. 按需授予悬浮显示、截图或内部录音权限，然后在首页开启悬浮助手。
 4. 点击悬浮球开始截图提问或录音。也可以直接在应用内聊天。
 
-回答问题的服务需要支持 Responses 流式请求；截图提问还需要模型支持图片输入。音频转写需另外配置支持文件转写的服务和模型。仅支持 Chat Completions 的服务不能用于应用内问答。详细配置和操作方法见[使用说明](docs/usage.md)。
+支持 Responses、Chat Completions、Gemini 原生 GenerateContent 和 Claude Messages 流式接口。截图提问需要模型支持图片输入；音频使用独立的 OpenAI 兼容文件转写接口，可以与另一家问答服务组合。各模型的推理、搜索和采样能力不同。配置步骤见[使用说明](docs/usage.md)，协议、请求格式和兼容边界见[API 服务商与接口格式](docs/api-providers.md)。
 
 首次使用可以先在首页选择「开始体验」，练习截图和追问。体验内容使用内置示例，不会调用 API 或产生 Token 费用，也不会测试你配置的服务。
 
