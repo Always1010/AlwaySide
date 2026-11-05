@@ -42,18 +42,23 @@ internal class RequestCancellation {
 internal class ProviderException(message: String) : Exception(message)
 
 internal object ProviderProtocol {
-    fun endpoint(baseUrl: String, route: String): URL {
+    fun endpoint(baseUrl: String, route: String, query: Map<String, String> = emptyMap()): URL {
         val uri = try { URI(baseUrl.trim().trimEnd('/')) } catch (_: Exception) {
-            throw ProviderException("API 地址无效，请使用 HTTPS 且以 /v1 结尾")
+            throw ProviderException("API 地址无效，请使用 HTTPS 基础地址")
         }
         if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.rawUserInfo != null ||
             uri.rawQuery != null || uri.rawFragment != null || uri.port !in -1..65535 ||
             uri.port == 0 || uri.rawPath != uri.path || uri.normalize() != uri ||
-            !uri.path.orEmpty().endsWith("/v1") || uri.path.orEmpty().contains("//") ||
-            route !in setOf("responses", "audio/transcriptions", "models")) {
-            throw ProviderException("API 地址无效，请使用 HTTPS 且以 /v1 结尾，不含账号、查询或片段")
+            uri.path.orEmpty().contains("//") ||
+            !(route in setOf("responses", "chat/completions", "messages", "audio/transcriptions", "models") ||
+                Regex("models/[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}:streamGenerateContent").matches(route)) ||
+            query.any { (key, value) -> key !in setOf("alt", "pageSize", "pageToken", "limit", "after_id") || value.length > 4096 || value.any(Char::isISOControl) } ||
+            (query.containsKey("alt") && query["alt"] != "sse")) {
+            throw ProviderException("API 地址或接口路径无效，请使用不含账号、查询参数或片段的 HTTPS 基础地址")
         }
-        return URL("${uri.toASCIIString()}/$route")
+        val suffix = if (query.isEmpty()) "" else query.entries.joinToString("&", "?") {
+            "${java.net.URLEncoder.encode(it.key, "UTF-8")}=${java.net.URLEncoder.encode(it.value, "UTF-8")}" }
+        return URL("${uri.toASCIIString()}/$route$suffix")
     }
 
     fun validateOptions(config: AppConfig) {

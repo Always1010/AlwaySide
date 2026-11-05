@@ -32,14 +32,19 @@ class ProviderProtocolTest {
         }
     }
 
-    @Test fun onlyCredentialFreeHttpsV1EndpointsAreAllowed() {
+    @Test fun credentialFreeHttpsEndpointsPreserveProviderBasePaths() {
         assertEquals("https://api.openai.com/v1/responses", ProviderProtocol.endpoint("https://api.openai.com/v1/", "responses").toString())
         assertEquals("https://example.com/proxy/v1/audio/transcriptions", ProviderProtocol.endpoint("https://example.com/proxy/v1", "audio/transcriptions").toString())
         listOf(
             "http://example.com/v1", "https://key@example.com/v1", "https://example.com/v1?key=secret",
-            "https://example.com/v1#secret", "https://example.com/v2", "https://example.com/a/../v1",
+            "https://example.com/v1#secret", "https://example.com/a/../v1",
             "https://example.com/%76%31", "https://example.com:0/v1", "https://example.com:99999/v1",
         ).forEach { address -> assertThrows(ProviderException::class.java) { ProviderProtocol.endpoint(address, "responses") } }
+        assertEquals("https://api.deepseek.com/responses", ProviderProtocol.endpoint("https://api.deepseek.com", "responses").toString())
+        assertEquals("https://example.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse",
+            ProviderProtocol.endpoint("https://example.com/v1beta", "models/gemini-test:streamGenerateContent", mapOf("alt" to "sse")).toString())
+        assertThrows(ProviderException::class.java) { ProviderProtocol.endpoint("https://example.com", "models/../evil:streamGenerateContent") }
+        assertThrows(ProviderException::class.java) { ProviderProtocol.endpoint("https://example.com", "models", mapOf("key" to "secret")) }
     }
 
     @Test fun sseAcceptsBomCrLfCommentsMultilineAndIgnoresUnterminatedEvent() {

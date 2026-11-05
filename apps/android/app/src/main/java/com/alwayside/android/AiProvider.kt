@@ -12,9 +12,6 @@ import java.net.SocketTimeoutException
 import java.net.URI
 import java.util.UUID
 import java.util.concurrent.CancellationException
-import java.util.concurrent.ScheduledThreadPoolExecutor
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal interface AiGateway {
     fun respond(config: AppConfig, history: List<ChatMessage>, question: String, imageDataUrl: String?,
@@ -214,55 +211,12 @@ internal class AiProvider : AiGateway {
         method: String = "POST",
         readBody: (HttpURLConnection, Long) -> T,
     ): T {
-        cancellation.throwIfCancelled()
-        val deadline = System.nanoTime() + 240_000_000_000L
-        val connection = ProviderProtocol.endpoint(config.baseUrl, route).openConnection() as HttpURLConnection
-        val timedOut = AtomicBoolean(false)
-        val timeout = timeouts.schedule({
-            timedOut.set(true)
-            connection.disconnect()
-        }, 240, TimeUnit.SECONDS)
-        try {
-            connection.requestMethod = method
-            connection.instanceFollowRedirects = false // Never forward a bearer token to a redirect target.
-            connection.connectTimeout = 20_000
-            connection.readTimeout = 60_000
-            connection.useCaches = false
-            connection.doOutput = method == "POST"
-            connection.setRequestProperty("Authorization", "Bearer ${config.apiKey.trim()}")
-            if (method == "POST") connection.setRequestProperty("Content-Type", contentType)
-            connection.setRequestProperty("Accept", if (route == "responses") "text/event-stream" else "application/json")
-            if (method == "POST") connection.setFixedLengthStreamingMode(contentLength)
-            cancellation.attach(connection)
-            if (method == "POST") connection.outputStream.use { output -> cancellation.throwIfCancelled(); writeBody(output) }
-            cancellation.throwIfCancelled()
-            val status = connection.responseCode
-            if (status !in 200..299) throw ProviderException(statusMessage(status))
-            val result = readBody(connection, deadline)
-            if (timedOut.get()) throw ProviderException("请求超时，请手动重试")
-            return result
-        } catch (error: IOException) {
-            if (timedOut.get()) throw ProviderException("请求超时，请手动重试")
-            throw error
-        } finally {
-            timeout.cancel(false)
-            cancellation.detach(connection)
-            connection.disconnect()
-        }
+        return HttpTransport().request(config, route, contentType, contentLength, cancellation, writeBody,
+            method, streaming = route == "responses", readBody = readBody)
     }
 
-    private fun readBounded(input: InputStream, maxBytes: Int, cancellation: RequestCancellation, deadline: Long): String {
-        val result = java.io.ByteArrayOutputStream()
-        val buffer = ByteArray(8192)
-        while (true) {
-            cancellation.throwIfCancelled()
-            if (System.nanoTime() > deadline) throw ProviderException("请求超时，请手动重试")
-            val count = input.read(buffer)
-            if (count < 0) return result.toString("UTF-8")
-            if (result.size() + count > maxBytes) throw ProviderException("服务返回内容过大")
-            result.write(buffer, 0, count)
-        }
-    }
+    private fun readBounded(input: InputStream, maxBytes: Int, cancellation: RequestCancellation, deadline: Long) =
+        HttpTransport.readBounded(input, maxBytes, cancellation, deadline)
 
     private fun validateConfig(config: AppConfig) {
         if (config.apiKey.isBlank() || config.apiKey.length > 4096 || config.apiKey.any { it.code < 33 || it.code > 126 }) {
@@ -283,16 +237,6 @@ internal class AiProvider : AiGateway {
         if (base64.isEmpty() || base64.length % 4 != 0 || !Regex("[A-Za-z0-9+/]+={0,2}").matches(base64)) throw ProviderException("图片数据无效")
     }
 
-    private fun statusMessage(status: Int): String = when (status) {
-        in 300..399 -> "服务返回重定向（HTTP $status），请直接填写最终 HTTPS API 地址"
-        401, 403 -> "API 认证或访问权限失败（HTTP $status），请检查 Key 与模型权限"
-        408, 504 -> "服务请求超时（HTTP $status），请手动重试"
-        413 -> "请求内容过大（HTTP 413），请缩短音频或缩小图片"
-        429 -> "请求限流或额度不足（HTTP 429），请检查用量后手动重试"
-        in 500..599 -> "服务暂时不可用（HTTP $status），请稍后手动重试"
-        else -> "请求被服务拒绝（HTTP $status），请检查 API 地址与模型配置"
-    }
-
     private fun <T> sanitized(cancellation: RequestCancellation, block: () -> T): T {
         try { cancellation.throwIfCancelled(); return block() }
         catch (error: CancellationException) { throw error }
@@ -305,8 +249,5 @@ internal class AiProvider : AiGateway {
 
     private companion object {
         const val MAX_OUTPUT_CHARS = 256 * 1024
-        val timeouts = ScheduledThreadPoolExecutor(1) { task ->
-            Thread(task, "alwayside-request-timeout").apply { isDaemon = true }
-        }.apply { removeOnCancelPolicy = true }
     }
 }

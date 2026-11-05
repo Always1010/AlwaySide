@@ -18,6 +18,16 @@ internal data class AppConfig(
     val transcriptionPrompt: String = "",
     val audioOutput: String = "interpret",
     val textQuestion: String = "请将选中的文字翻译成中文，并按需要解释语境。",
+    val providerKind: ProviderKind = ProviderKind.CUSTOM,
+    val apiProtocol: ApiProtocol = ApiProtocol.RESPONSES,
+    val apiVersion: String = "2026-10-21",
+    val workspaceId: String = "",
+    val connectionId: String = "legacy",
+    val connectionName: String = "原有连接",
+    val connections: List<ConnectionProfile> = emptyList(),
+    val transcriptionConnectionId: String? = "legacy",
+    val credentialRevision: Long = 0,
+    val continuationMessages: List<Map<String, Any?>> = emptyList(),
 ) {
     override fun toString() = "AppConfig(credentials redacted)"
 }
