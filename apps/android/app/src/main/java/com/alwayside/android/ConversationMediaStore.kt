@@ -20,7 +20,9 @@ internal class ConversationMediaStore(context: Context) {
 
     fun saveImages(id: String, original: Bitmap, current: Bitmap) = synchronized(lock) {
         val first = imageFile(id, original = true)
-        if (!first.exists()) writeImage(first, original)
+        val originalExists = try { AtomicFile(first).openRead().use { true } }
+            catch (_: java.io.FileNotFoundException) { false }
+        if (!originalExists) writeImage(first, original)
         val latest = imageFile(id)
         if (current !== original) writeImage(latest, current)
         else AtomicFile(latest).delete()
@@ -52,11 +54,17 @@ internal class ConversationMediaStore(context: Context) {
     }
 
     private fun readImage(target: File): Bitmap? {
-        if (!target.exists() || target.length() !in 1..MAX_IMAGE_BYTES) return null
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(target.path, bounds)
-        if (bounds.outWidth !in 1..2400 || bounds.outHeight !in 1..2400) return null
-        return BitmapFactory.decodeFile(target.path)
+        val atomic = AtomicFile(target)
+        val input = try { atomic.openRead() } catch (_: java.io.FileNotFoundException) { return null }
+        return input.use {
+            // openRead restores an interrupted write before size checks or decoding (including API 29 .bak files).
+            if (it.channel.size() !in 1..MAX_IMAGE_BYTES) return null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFileDescriptor(it.fd, null, bounds)
+            if (bounds.outWidth !in 1..2400 || bounds.outHeight !in 1..2400) return null
+            it.channel.position(0)
+            BitmapFactory.decodeFileDescriptor(it.fd)
+        }
     }
 
     fun deleteImage(id: String) = synchronized(lock) {
