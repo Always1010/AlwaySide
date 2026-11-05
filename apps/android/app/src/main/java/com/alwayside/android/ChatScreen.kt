@@ -372,7 +372,7 @@ internal class ChatScreen(
         messagesView.addView(block, LinearLayout.LayoutParams(if (isUser) -2 else -1, -2).apply {
             gravity = if (isUser) Gravity.END else Gravity.START
             if (isUser) marginStart = dp(32)
-            topMargin = dp(4); bottomMargin = dp(16)
+            topMargin = dp(4); bottomMargin = dp(if (isUser) 8 else 12)
         })
     }
 

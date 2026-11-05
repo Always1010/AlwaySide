@@ -13,8 +13,11 @@ internal object MarkdownText {
     fun render(source: String): CharSequence {
         val out = SpannableStringBuilder()
         var code = false
+        var firstLine = true
         source.lines().forEach { line ->
             if (line.startsWith("```")) { code = !code; return@forEach }
+            if (!firstLine) out.append('\n')
+            firstLine = false
             val heading = if (!code) Regex("^(#{1,4})\\s+").find(line) else null
             val clean = if (heading != null) line.substring(heading.value.length) else line
             val start = out.length
@@ -39,7 +42,6 @@ internal object MarkdownText {
                 out.setSpan(StyleSpan(Typeface.BOLD), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 out.setSpan(RelativeSizeSpan(1.2f), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            out.append('\n')
         }
         return out
     }
