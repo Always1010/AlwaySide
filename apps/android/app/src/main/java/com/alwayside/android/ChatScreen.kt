@@ -284,7 +284,8 @@ internal class ChatScreen(
     private fun renderWebSearch() {
         val selected = webSearchOverride ?: defaultWebSearch
         val supported = ProviderCapabilities.search(activeConnection)
-        webSearch.isEnabled = !session.busy && (supported || selected)
+        // The screen also renders before a conversation is bound or when its record is unavailable.
+        webSearch.isEnabled = ready && !session.busy && (supported || selected)
         webSearch.tooltipText = if (supported) "允许模型搜索网页" else "当前模型或协议不支持搜索，请关闭已开启的搜索或更换模型"
         webSearch.isChecked = selected
         webSearch.applySearchToggleStyle(selected)
