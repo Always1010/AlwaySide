@@ -153,9 +153,10 @@ internal class HistoryListScreen(
             setCardBackgroundColor(if (checked) TONAL_SURFACE else BACKGROUND)
             strokeWidth = 0
             isCheckable = selecting; isClickable = true; isFocusable = true
-            isChecked = checked
+            // Clear before checking: otherwise an active icon animation would later dereference null.
             // The visible checkbox below supplies the selection indicator.
             checkedIcon = null
+            isChecked = checked
             accessible(if (selecting) "$title，${if (checked) "已选择" else "未选择"}，点按切换选择"
                 else "打开会话：$title；长按选择")
             setOnLongClickListener { selection.select(value.id); changed(); true }
