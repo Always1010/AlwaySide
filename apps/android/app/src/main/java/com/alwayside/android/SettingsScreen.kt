@@ -217,7 +217,11 @@ internal class SettingsScreen(
             ProviderConnections.snapshot(config).forEach { profile ->
                 selectionRow(if (profile.id == config.connectionId) "${profile.name} · 当前使用" else profile.name,
                     "${profile.providerKind.title} · ${profile.model.ifBlank { "未选择模型" }}") {
-                    finishEditing { if (mutateConnection { ProviderConnections.select(it, profile.id) }) showPage(Page.API) }
+                    finishEditing {
+                        if (profile.id != config.connectionId && mutateConnection(successMessage = "图文问答已切换到 ${profile.name}") {
+                            ProviderConnections.select(it, profile.id)
+                        }) showPage(Page.API)
+                    }
                 }
             }
             val controls = LinearLayout(this).apply {
@@ -800,13 +804,16 @@ internal class SettingsScreen(
         update.applyTo(current)
     }
 
-    private fun mutateConnection(onError: (String) -> Unit = ::toast, update: (AppConfig) -> AppConfig): Boolean = try {
+    private fun mutateConnection(onError: (String) -> Unit = ::toast, successMessage: String = "已保存", update: (AppConfig) -> AppConfig): Boolean = try {
         val current = store.load()
         require(current.connectionId == (editorConnectionId ?: renderedConnectionId)) { "当前连接已改变，请重新打开设置页" }
         val next = update(current)
-        SettingsStore.validate(next); store.save(next)
-        cancelDiagnostic(); cancelModelRequest(); status.text = ""
-        toast("已保存"); true
+        if (next != current) {
+            SettingsStore.validate(next); store.save(next)
+            cancelDiagnostic(); cancelModelRequest(); status.text = ""
+            toast(successMessage)
+        }
+        true
     } catch (error: IllegalArgumentException) { onError(error.message ?: "设置无效"); false }
     catch (_: Exception) { onError("保存失败，请检查设备安全存储后重试"); false }
 

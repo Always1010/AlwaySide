@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProviderConnectionsTest {
+    @Test fun selectingCurrentConnectionIsANoOpAndSwitchingKeepsListOrder() {
+        val first = ConnectionConfigCodec.migrateLegacy(AppConfig(apiKey = "fixture"))
+        val second = ProviderConnections.add(first, ProviderKind.OPENAI)
+        assertSame(second, ProviderConnections.select(second, second.connectionId))
+        val order = ProviderConnections.snapshot(second).map { it.id }
+        assertEquals(order, ProviderConnections.snapshot(ProviderConnections.select(second, first.connectionId)).map { it.id })
+    }
+
     @Test fun switchingConnectionsKeepsCredentialsAndGenerationSettingsSeparate() {
         val old = ConnectionConfigCodec.migrateLegacy(AppConfig(apiKey = "first", model = "first-model", webSearch = true))
         val added = ProviderConnections.add(old, ProviderKind.CLAUDE).copy(apiKey = "second", model = "second-model")

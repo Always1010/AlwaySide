@@ -43,10 +43,15 @@ internal data class ConnectionProfile(
 }
 
 internal object ProviderConnections {
-    fun snapshot(config: AppConfig): List<ConnectionProfile> =
-        config.connections.filterNot { it.id == config.connectionId } + ConnectionProfile.capture(config)
+    fun snapshot(config: AppConfig): List<ConnectionProfile> {
+        val active = ConnectionProfile.capture(config)
+        return if (config.connections.any { it.id == active.id })
+            config.connections.map { if (it.id == active.id) active else it }
+        else config.connections + active
+    }
 
     fun select(config: AppConfig, id: String): AppConfig {
+        if (id == config.connectionId) return config
         val profiles = snapshot(config)
         return (profiles.firstOrNull { it.id == id } ?: error("连接不存在")).applyTo(config).copy(connections = profiles)
     }
