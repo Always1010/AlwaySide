@@ -137,6 +137,8 @@ internal class AssistantWindowActions(
 internal class AssistantWindowViews(context: Context, title: String, image: Boolean, actions: AssistantWindowActions) {
     val body = LinearLayout(context).apply {
         orientation=LinearLayout.VERTICAL;setPadding(context.dp(1),context.dp(1),context.dp(1),context.dp(1))
+        // Draw the perimeter after the toolbar so its opaque fill cannot cover the rounded stroke.
+        foreground=context.outlinedCard(Color.TRANSPARENT,15)
     }
     val header = context.materialToolbar(title,null,compact=true).apply {
         setTitleTextAppearance(context,R.style.TextAppearance_AlwaySide_AssistantTitle)
