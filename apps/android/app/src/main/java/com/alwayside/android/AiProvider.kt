@@ -36,8 +36,9 @@ internal class AiProvider : AiGateway {
         validateModel(config.model)
         ProviderProtocol.validateOptions(config)
         ProviderCapabilities.validate(config, imageDataUrl != null)
-        if (question.isBlank() || question.length > 32_768 || config.instructions.length > 32_768)
-            throw ProviderException("问题或 Instructions 为空或过长，请缩短后重试")
+        ChatPrompt.validateAssembled(question)
+        if (config.instructions.length > 32_768)
+            throw ProviderException("Instructions 过长，请缩短后重试")
         imageDataUrl?.let(::validateImage)
         val adapter: ChatAdapter = when (config.apiProtocol) {
             ApiProtocol.RESPONSES -> ResponsesAdapter
@@ -71,7 +72,7 @@ internal class AiProvider : AiGateway {
         validateConnection(target)
         validateModel(target.transcriptionModel)
         if (target.transcriptionPrompt.length > 32000) throw ProviderException("转写提示过长")
-        WavTranscription.transcribe(file, cancellation, MAX_OUTPUT_CHARS) { source, bytes ->
+        WavTranscription.transcribe(file, cancellation, ChatPrompt.MAX_TRANSCRIPT_CHARS) { source, bytes ->
             transcribePart(target, source, bytes, cancellation)
         }
     }
@@ -109,7 +110,7 @@ internal class AiProvider : AiGateway {
             val value = JSONObject(json).opt("text")
             if (value !is String) throw ProviderException("转写接口未返回文字，请检查接口协议与模型")
             val text = value.trim()
-            if (text.length > MAX_OUTPUT_CHARS) throw ProviderException("转写文字过长，请缩短录制")
+            if (text.length > ChatPrompt.MAX_TRANSCRIPT_CHARS) throw ProviderException("转写文字过长，请缩短录制")
             text
         }
     }
@@ -198,9 +199,5 @@ internal class AiProvider : AiGateway {
             val message = error.message.orEmpty()
             throw ProviderException(message.take(180).ifBlank { "请求配置无效，请检查设置" })
         }
-    }
-
-    private companion object {
-        const val MAX_OUTPUT_CHARS = 256 * 1024
     }
 }

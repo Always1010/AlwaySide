@@ -369,6 +369,53 @@ class ChatSessionTest {
         assertFalse(h.session.canRetry)
     }
 
+    @Test fun maximumEvidenceReachesOneAnswerRequestIntactAndCanBeReusedForFollowup() {
+        val h = Harness()
+        val words = "录".repeat(ChatPrompt.MAX_TRANSCRIPT_CHARS)
+        val source = "始" + "\n".repeat(ChatPrompt.MAX_SOURCE_CHARS - 2) + "终"
+        val question = "问".repeat(ChatPrompt.MAX_QUESTION_CHARS)
+        h.gateway.transcription = { words }
+        h.gateway.response = { call ->
+            ChatPrompt.validateAssembled(call.question)
+            assertTrue(call.question.contains("<transcript>\n$words\n</transcript>"))
+            assertTrue(call.question.endsWith("> 始\n" + "> \n".repeat(ChatPrompt.MAX_SOURCE_CHARS - 3) + "> 终\n"))
+            "answer"
+        }
+        h.session.setSourceText(source)
+        h.session.submit(h.config, question, null, "audio", File("old.wav"))
+        h.worker.runNext(); h.drainMain()
+        assertEquals(1, h.gateway.transcribeCount)
+        assertEquals(1, h.gateway.calls.size)
+        assertEquals(question, h.session.messages.first().text)
+        assertEquals(words, h.session.transcript)
+        assertFalse(h.session.canRetry)
+
+        h.session.submit(h.config, "继续解释", null, "text")
+        h.worker.runNext(); h.drainMain()
+        assertEquals(1, h.gateway.transcribeCount)
+        assertEquals(2, h.gateway.calls.size)
+        assertEquals(4, h.session.messages.size)
+        assertFalse(h.session.canRetry)
+    }
+
+    @Test fun promptBudgetsRejectOversizedInputsWithoutTruncation() {
+        val maximum = ChatPrompt.compose("问".repeat(ChatPrompt.MAX_QUESTION_CHARS),
+            "录".repeat(ChatPrompt.MAX_TRANSCRIPT_CHARS), "\n".repeat(ChatPrompt.MAX_SOURCE_CHARS))
+        assertEquals(ChatPrompt.MAX_ASSEMBLED_CHARS, maximum.length)
+        assertThrows(IllegalArgumentException::class.java) {
+            ChatPrompt.compose("问".repeat(ChatPrompt.MAX_QUESTION_CHARS + 1), "", "")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ChatPrompt.compose("问", "", "文".repeat(ChatPrompt.MAX_SOURCE_CHARS + 1))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ChatPrompt.compose("问", "录".repeat(ChatPrompt.MAX_TRANSCRIPT_CHARS + 1), "")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ChatPrompt.validateAssembled("问".repeat(ChatPrompt.MAX_ASSEMBLED_CHARS + 1))
+        }
+    }
+
     private class Harness {
         val config = AppConfig(apiKey = "fixture-key")
         val gateway = FakeGateway()
