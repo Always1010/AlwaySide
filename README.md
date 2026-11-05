@@ -20,6 +20,17 @@ AlwaySide 是一款 Android 悬浮 AI 助手。你可以对屏幕内容、应用
 - **接续对话**：在悬浮窗和应用内聊天之间继续会话，也可以从历史记录中接着提问。
 - **按需调整**：自定义快捷手势、截图和音频提示词、模型及生成参数；悬浮窗支持移动、缩放和固定。
 
+## 界面与使用演示
+
+以下为界面与操作示意，内容为演示样例；录音和回答生成过程经过压缩。点击图片可查看大图。
+
+<p align="center">
+  <a href="docs/images/A01-long-press-followup.gif"><img src="docs/images/A01-long-press-followup.gif" width="300" alt="长按悬浮球截图，翻译对话，再追问 I'm down 在这里为什么表示我可以，并查看完整回答"></a>
+  <a href="docs/images/A02-double-tap-audio.gif"><img src="docs/images/A02-double-tap-audio.gif" width="300" alt="双击悬浮球开始录音，再次双击结束，查看转录原文和中文翻译"></a>
+</p>
+
+**长按截图，翻译后继续追问。** **双击录音，结束后查看原文与翻译。**
+
 ## 开始使用
 
 1. 从[最新 Release](https://github.com/Always1010/AlwaySide/releases/latest)下载 APK 并安装。
