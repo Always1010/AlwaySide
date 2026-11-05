@@ -124,6 +124,8 @@ class AssistantService : Service() {
         var audioApproval: View? = null
         var imageMode = 0
         var searchDefault = false
+        var apiSnapshot: AppConfig? = null
+        val suggestionViews = mutableMapOf<String, android.webkit.WebView>()
         var webSearchOverride: Boolean? = null
         var draft = ""
         var composerExpanded = false
@@ -156,7 +158,8 @@ class AssistantService : Service() {
             chat = ChatSession(this@AssistantService) { refresh(this) }
             chat.newConversation(kind = kind)
             pinned = config.defaultPinned
-            searchDefault = runCatching { SettingsStore(this@AssistantService).load().webSearch }.getOrDefault(false)
+            apiSnapshot = runCatching { SettingsStore(this@AssistantService).load() }.getOrNull()
+            searchDefault = apiSnapshot?.webSearch ?: false
             webSearchOverride = config.menuWebSearch
             imageMode = if (kind == "photo" && runCatching { SettingsStore(this@AssistantService).load().autoUpdateImage }.getOrDefault(false)) 1 else if (kind == "audio") 2 else 0
         }
@@ -417,9 +420,11 @@ class AssistantService : Service() {
             setOnClickListener { removeMenu() }
         }
         installOverlayBack(body,::removeMenu)
-        val defaultSearch=runCatching { SettingsStore(this).load().webSearch }.getOrDefault(false)
+        val menuApi=runCatching { SettingsStore(this).load() }.getOrNull()
+        val defaultSearch=menuApi?.webSearch ?: false
         val presentation = AssistantMenuViews(uiContext,recorder != null,nodes["audio"]?.clip != null,
             webSearch=config.menuWebSearch ?: defaultSearch,useDefaultQuestion=config.useDefaultQuestion,
+            webSearchAvailable=menuApi?.let(ProviderCapabilities::search) ?: false,
             onWebSearchChanged={saveMenuConfig(config.copy(menuWebSearch=it))},
             onDefaultQuestionChanged={saveMenuConfig(config.copy(useDefaultQuestion=it))}) { action ->
             removeMenu()
@@ -487,6 +492,7 @@ class AssistantService : Service() {
     private fun hideUnpinned(except: FloatingConversation?=null) { nodes.values.filter { it!==except && !it.pinned }.forEach { hideWindow(it) } }
     private fun hideWindow(node: FloatingConversation, stopAudio: Boolean = true) {
         node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);remove(it) }
+        node.suggestionViews.values.forEach { (it.parent as? ViewGroup)?.removeView(it); it.destroy() };node.suggestionViews.clear()
         node.root=null;node.layout=null;node.response=null;node.status=null;node.source=null;node.sourceImage=null;node.transcript=null
         node.transcriptCopy=null
         node.audioApproval=null
@@ -663,7 +669,9 @@ class AssistantService : Service() {
         node.search?.apply {
             val selected=node.webSearchOverride ?: node.searchDefault
             applySearchToggleStyle(selected)
-            isEnabled=!node.chat.busy&&!gathering&&recorder==null
+            val supported=node.apiSnapshot?.let(ProviderCapabilities::search) ?: false
+            isEnabled=!node.chat.busy&&!gathering&&recorder==null&&(supported||selected)
+            tooltipText=if(supported)"允许模型搜索网页" else "当前模型或协议不支持搜索"
             accessible(if(selected)"联网搜索已开启，点击关闭" else "联网搜索已关闭，点击开启")
         }
     }
@@ -688,20 +696,22 @@ class AssistantService : Service() {
         updateTranscriptCopy(node)
         val messages=buildList {
             node.chat.messages.withIndex().toList().takeLast(12).forEach { (index,message) ->
-                if(!(node.automaticFirstQuestion&&index==0&&message.role=="user")) add((message.role=="user") to message.text)
+                if(!(node.automaticFirstQuestion&&index==0&&message.role=="user")) add(Triple(message.role=="user",message.text,message.searchSuggestions))
             }
-            if(node.chat.question.isNotBlank()&&!(node.automaticFirstQuestion&&node.chat.messages.isEmpty())) add(true to node.chat.question)
-            if(node.chat.partial.isNotBlank()) add(false to node.chat.partial)
+            if(node.chat.question.isNotBlank()&&!(node.automaticFirstQuestion&&node.chat.messages.isEmpty())) add(Triple(true,node.chat.question,""))
+            if(node.chat.partial.isNotBlank()) add(Triple(false,node.chat.partial,""))
         }
         val text=messages.joinToString("\n\n") { it.second }.takeLast(100000)
         val scroll=node.scroll;val nearBottom=scroll==null||(scroll.scrollY+scroll.height>=(node.content?.height ?: 0)-dp(48))
         renderFloatingMessages(node,messages)
         node.status?.text=if(node.awaitingAudioApproval)"已达录音上限，录音已停止，尚未上传。请选择转写或丢弃。" else if(text.isBlank()&&!node.chat.busy)"${when(node.kind){"photo"->"截图";"audio"->"录音";else->"原文"}}已就绪，输入问题后发送" else node.chat.status
+        node.apiSnapshot?.let { api -> node.status?.text = (if(node.chat.busy || node.chat.question.isNotBlank())node.chat.requestProviderLabel else ProviderCapabilities.label(api)) + "\n" + node.status?.text?.toString().orEmpty() }
         node.audioApproval?.visibility=if(node.awaitingAudioApproval)View.VISIBLE else View.GONE
         node.composerToggle?.isEnabled=!node.awaitingAudioApproval
         node.send?.isEnabled=!node.awaitingAudioApproval&&!node.chat.busy&&!gathering&&recorder==null
         node.cancel?.visibility=if(node.chat.busy)View.VISIBLE else View.GONE
         node.retry?.visibility=if(node.chat.canRetry&&!gathering)View.VISIBLE else View.GONE
+        node.retry?.accessible(node.chat.retryLabel)
         node.copy?.visibility=if(text.isNotBlank())View.VISIBLE else View.GONE
         node.imageChoice?.isEnabled=!node.chat.busy&&!gathering
         node.imageChoice?.alpha=if(node.imageChoice?.isEnabled==false).55f else 1f
@@ -711,13 +721,14 @@ class AssistantService : Service() {
         else if(!node.chat.busy&&node.chat.status!=lastFinished){lastFinished=node.chat.status;ProbeState.lastEvent=node.chat.status}
     }
     /** Keep message views stable while a streaming reply grows and only update changed text. */
-    private fun renderFloatingMessages(node:FloatingConversation,messages:List<Pair<Boolean,String>>) {
+    private fun renderFloatingMessages(node:FloatingConversation,messages:List<Triple<Boolean,String,String>>) {
         val container=node.response ?: return
         var remaining=100000
-        val visible=messages.asReversed().mapNotNull { (user,text) ->
-            if(remaining<=0) null else (user to text.takeLast(remaining)).also { remaining-=it.second.length }
+        val visible=messages.asReversed().mapNotNull { (user,text,suggestions) ->
+            if(remaining<=0) null else Triple(user,text.takeLast(remaining),suggestions).also { remaining-=it.second.length }
         }.asReversed()
-        visible.forEachIndexed { index,(user,value) ->
+        val visibleSuggestionKeys=mutableSetOf<String>()
+        visible.forEachIndexed { index,(user,value,suggestions) ->
             var row=container.getChildAt(index)
             if(row==null || row.tag!=user) {
                 if(row!=null)container.removeViewAt(index)
@@ -730,6 +741,19 @@ class AssistantService : Service() {
                 message.text=if(node.chat.busy)value else MarkdownText.render(value)
                 message.tag=presentation
             }
+            if(!user && suggestions.isNotBlank() && suggestions.length<=32768) {
+                val widgetKey="$index:$suggestions"
+                visibleSuggestionKeys.add(widgetKey)
+                val widget=node.suggestionViews.getOrPut(widgetKey) { uiContext.searchSuggestionsView(suggestions) as android.webkit.WebView }
+                if(widget.parent!==row) {
+                    (widget.parent as? ViewGroup)?.removeView(widget)
+                    while(row.childCount>1)row.removeViewAt(1)
+                    row.addView(widget)
+                }
+            } else while(row.childCount>1)row.removeViewAt(1)
+        }
+        node.suggestionViews.keys.filterNot { it in visibleSuggestionKeys }.toList().forEach { key ->
+            node.suggestionViews.remove(key)?.let { (it.parent as? ViewGroup)?.removeView(it); it.destroy() }
         }
         while(container.childCount>visible.size)container.removeViewAt(container.childCount-1)
     }
@@ -790,9 +814,11 @@ class AssistantService : Service() {
         if(node.chat.busy||gathering||recorder!=null){toast("请先结束当前采集或请求");return}
         if(text.isBlank()){toast("请输入问题");return}
         val base=frozen?:readApiConfig()?:return
+        if(node.apiSnapshot?.connectionId != base.connectionId)node.webSearchOverride=null
+        node.apiSnapshot=base
         node.searchDefault=base.webSearch
+        node.status?.tooltipText=ProviderCapabilities.label(base)
         val c=base.copy(webSearch=node.webSearchOverride ?: base.webSearch)
-        if(c.apiKey.isBlank()){toast("请在设置 → API 连接中填写密钥");return}
         if(node.kind=="audio"&&node.clip!=null&&node.clip!!.peak<.0001){toast("录音没有有效音量，请重新采集");return}
         val submit=submit@{
             if(node.detached||nodes[node.kind]!==node)return@submit

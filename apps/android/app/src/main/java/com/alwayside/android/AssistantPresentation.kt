@@ -59,7 +59,7 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
 internal enum class AssistantMenuAction { SCREEN, AUDIO, CANCEL_AUDIO, CROP, LAST, PLAY, HISTORY, SETTINGS, STOP }
 
 internal class AssistantMenuViews(context: Context, recording: Boolean = false, hasClip: Boolean = false,
-    webSearch: Boolean = false, useDefaultQuestion: Boolean = true,
+    webSearch: Boolean = false, useDefaultQuestion: Boolean = true, webSearchAvailable: Boolean = true,
     onWebSearchChanged: (Boolean) -> Unit = {}, onDefaultQuestionChanged: (Boolean) -> Unit = {},
     onAction: (AssistantMenuAction) -> Unit) {
     val view = LinearLayout(context).apply {
@@ -92,19 +92,19 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
         view.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)).apply {
             setMargins(dp(8),dp(4),dp(8),dp(4))
         })
-        fun option(title:String,checked:Boolean,description:String,changed:(Boolean)->Unit) {
+        fun option(title:String,checked:Boolean,description:String,enabled:Boolean=true,changed:(Boolean)->Unit) {
             val check=MaterialCheckBox(this).apply {
                 text=title;isChecked=checked;textSize=13f;setTextColor(INK)
                 minHeight=dp(38);minimumHeight=dp(38);minWidth=0;minimumWidth=0
                 setPadding(dp(8),0,dp(8),0);compoundDrawablePadding=dp(4)
                 buttonTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(ACCENT,MUTED))
-                accessible(title);tooltipText=description
-                setOnCheckedChangeListener { _,selected -> changed(selected) }
+                accessible(title);tooltipText=description;isEnabled=enabled||checked
+                setOnCheckedChangeListener { _,selected -> isEnabled=enabled||selected;changed(selected) }
             }
             view.addView(check,LinearLayout.LayoutParams(-1,-2))
         }
-        option("联网搜索",webSearch,"允许新悬浮会话搜索网页；关闭后仍需联网调用模型",onWebSearchChanged)
-        option("使用默认提问方式",useDefaultQuestion,"关闭后展开输入框，补充问题再发送",onDefaultQuestionChanged)
+        option("联网搜索",webSearch,if(webSearchAvailable)"允许新悬浮会话搜索网页；关闭后仍需联网调用模型" else "当前模型或协议不支持搜索，可关闭已有选择",webSearchAvailable,onWebSearchChanged)
+        option("使用默认提问方式",useDefaultQuestion,"关闭后展开输入框，补充问题再发送",changed=onDefaultQuestionChanged)
         view.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)).apply {
             setMargins(dp(8),dp(4),dp(8),dp(4))
         })
@@ -217,7 +217,7 @@ internal fun Context.assistantMessageRow(user: Boolean): ViewGroup {
     }
     return (if(user)MaterialCardView(this).apply {
         setCardBackgroundColor(TONAL_SURFACE);strokeWidth=0;cardElevation=0f;radius=dp(16).toFloat();addView(message)
-    } else FrameLayout(this).apply { addView(message) }).apply {
+    } else LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;addView(message) }).apply {
         tag=user;layoutParams=LinearLayout.LayoutParams(if(user)-2 else -1,-2).apply {
             gravity=if(user)Gravity.END else Gravity.START;if(user)marginStart=dp(24);bottomMargin=dp(12)
         }

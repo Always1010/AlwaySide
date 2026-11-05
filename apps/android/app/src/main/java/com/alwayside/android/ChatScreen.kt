@@ -53,7 +53,10 @@ internal class ChatScreen(
     private lateinit var contextTools: LinearLayout
     private var webSearchOverride: Boolean? = retained?.webSearchOverride
         ?: savedState?.takeIf { it.containsKey("webSearchOverride") }?.getBoolean("webSearchOverride")
-    private var defaultWebSearch = runCatching { SettingsStore(this).load().webSearch }.getOrDefault(false)
+    private val suggestionViews = mutableMapOf<String, android.webkit.WebView>()
+    private val visibleSuggestionKeys = mutableSetOf<String>()
+    private var activeConnection = runCatching { SettingsStore(this).load() }.getOrDefault(AppConfig())
+    private var defaultWebSearch = activeConnection.webSearch
     private var image: Bitmap? = null
     private var originalImage: Bitmap? = null
     private var ready = false
@@ -144,8 +147,11 @@ internal class ChatScreen(
             addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
                     // The existing chat view is reattached when returning from Settings.
-                    defaultWebSearch = runCatching { SettingsStore(this@ChatScreen).load().webSearch }.getOrDefault(defaultWebSearch)
-                    renderWebSearch()
+                    runCatching { SettingsStore(this@ChatScreen).load() }.getOrNull()?.let { fresh ->
+                        if (fresh.connectionId != activeConnection.connectionId) webSearchOverride = null
+                        activeConnection = fresh; defaultWebSearch = fresh.webSearch
+                    }
+                    if (ready) render() else renderWebSearch()
                 }
                 override fun onViewDetachedFromWindow(view: View) { playback?.dismiss(); playback = null }
             })
@@ -233,10 +239,13 @@ internal class ChatScreen(
         toolbar.title = conversationTitle
         toolbar.menu.findItem(3)?.isVisible = availableAudio() != null
         val hasPending = session.question.isNotBlank()
-        statusView.text = if (restoredStatus.isNotBlank()) "上次状态：$restoredStatus" else session.status
+        val providerLabel = if (session.busy || session.question.isNotBlank()) session.requestProviderLabel else ProviderCapabilities.label(activeConnection)
+        statusView.text = providerLabel + "\n" +
+            (if (restoredStatus.isNotBlank()) "上次状态：$restoredStatus" else session.status)
         statusView.visibility = if (statusView.text.isNullOrBlank()) View.GONE else View.VISIBLE
         renderEvidence()
         val atBottom = scroll.getChildAt(0)?.let { it.height - scroll.height - scroll.scrollY <= dp(72) } ?: true
+        visibleSuggestionKeys.clear()
         messagesView.removeAllViews()
         originalImage?.let { addImagePreview("会话原图", it) }
         image?.takeIf { it !== originalImage }?.let { addImagePreview("当前追问图片", it) }
@@ -251,14 +260,18 @@ internal class ChatScreen(
                 setPadding(0, dp(12), 0, dp(12))
             })
         }
-        session.messages.forEach { message -> addMessage(message.role, message.text, message.evidence) }
+        session.messages.forEachIndexed { index, message -> addMessage(message.role, message.text, message.evidence, message.searchSuggestions, index) }
         if (hasPending) {
             addMessage("user", session.question, session.evidence)
             if (session.partial.isNotBlank()) addMessage("assistant", session.partial, if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文")
         }
+        suggestionViews.keys.filterNot { it in visibleSuggestionKeys }.toList().forEach { key ->
+            suggestionViews.remove(key)?.let { (it.parent as? android.view.ViewGroup)?.removeView(it); it.destroy() }
+        }
         send.icon = prototypeIcon(if (session.busy) android.R.drawable.ic_menu_close_clear_cancel else android.R.drawable.ic_menu_send)
         send.accessible(if (session.busy) "取消当前请求" else "发送问题")
         retry.visibility = if (session.canRetry) View.VISIBLE else View.GONE
+        retry.accessible(session.retryLabel)
         transcript.visibility = if (session.transcript.isNotBlank()) View.VISIBLE else View.GONE
         reuse.isEnabled = image != null && !session.busy
         webSearch.isEnabled = !session.busy
@@ -270,6 +283,9 @@ internal class ChatScreen(
 
     private fun renderWebSearch() {
         val selected = webSearchOverride ?: defaultWebSearch
+        val supported = ProviderCapabilities.search(activeConnection)
+        webSearch.isEnabled = !session.busy && (supported || selected)
+        webSearch.tooltipText = if (supported) "允许模型搜索网页" else "当前模型或协议不支持搜索，请关闭已开启的搜索或更换模型"
         webSearch.isChecked = selected
         webSearch.applySearchToggleStyle(selected)
         webSearch.accessible(if (selected) "联网搜索：开启，点按关闭" else "联网搜索：关闭，点按开启")
@@ -330,7 +346,7 @@ internal class ChatScreen(
         if (image == null) reuse.isChecked = false
     }
 
-    private fun addMessage(role: String, value: String, evidence: String) {
+    private fun addMessage(role: String, value: String, evidence: String, suggestions: String = "", messageIndex: Int = -1) {
         val isUser = role == "user"
         val block = column().apply {
             setPadding(if (isUser) dp(10) else 0, if (isUser) dp(7) else 0,
@@ -343,6 +359,13 @@ internal class ChatScreen(
                 setLineSpacing(dp(4).toFloat(), 1f)
                 if (isUser) { maxWidth = dp(320); setTextColor(ON_TONAL_SURFACE) }
             })
+            if (!isUser && suggestions.isNotBlank() && suggestions.length <= 32768) {
+                val widgetKey = "$messageIndex:$suggestions"
+                visibleSuggestionKeys.add(widgetKey)
+                val widget = suggestionViews.getOrPut(widgetKey) { this@ChatScreen.searchSuggestionsView(suggestions) as android.webkit.WebView }
+                (widget.parent as? android.view.ViewGroup)?.removeView(widget)
+                addView(widget)
+            }
             if (!isUser && evidence.contains("未完成")) addView(label(evidence, 10f, true).apply { setPadding(0, dp(6), 0, 0) })
         }
         messagesView.addView(block, LinearLayout.LayoutParams(if (isUser) -2 else -1, -2).apply {
@@ -358,6 +381,8 @@ internal class ChatScreen(
         if (text.isBlank()) { composerLayout.error = "请输入问题"; return }
         try {
             val defaults = SettingsStore(this).load()
+            if (defaults.connectionId != activeConnection.connectionId) webSearchOverride = null
+            activeConnection = defaults
             defaultWebSearch = defaults.webSearch
             val config = defaults.copy(webSearch = webSearchOverride ?: defaults.webSearch)
             SettingsStore.validate(config)
@@ -454,6 +479,8 @@ internal class ChatScreen(
     }
 
     fun dispose(retaining: Boolean = false) {
+        suggestionViews.values.forEach { (it.parent as? android.view.ViewGroup)?.removeView(it); it.destroy() }
+        suggestionViews.clear()
         if (closing) return
         closing = true
         playback?.dismiss(); playback = null

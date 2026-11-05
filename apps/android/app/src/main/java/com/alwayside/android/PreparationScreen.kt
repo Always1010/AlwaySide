@@ -57,7 +57,7 @@ internal class PreparationScreen(
 
     private fun showHelp() {
         MaterialAlertDialogBuilder(activity).setTitle("连接 AI 服务")
-            .setMessage("从服务提供方获取服务地址、API 密钥和支持图片的模型名称。密钥是调用凭证，请只连接你信任的服务。\n\n服务需要兼容 Responses 接口和图片输入。保存配置不会测试；主动读取模型列表会联网，真实提问可能按服务规则收费。\n\n悬浮与截图权限会在实际需要时申请。新手引导始终使用本地示例，不消耗 Token。")
+            .setMessage("从服务提供方获取服务地址、API 密钥和支持图片的模型名称。密钥是调用凭证，请只连接你信任的服务。\n\n支持 OpenAI、DeepSeek、通义千问、Gemini 和 Claude。请选择对应服务商和接口协议；截图需要模型支持图片。音频转写连接可独立配置。保存配置不会测试；主动读取模型列表会联网，真实提问可能按服务规则收费。\n\n悬浮与截图权限会在实际需要时申请。新手引导始终使用本地示例，不消耗 Token。")
             .setPositiveButton("知道了",null).show()
     }
 }

@@ -9,6 +9,11 @@ import com.google.android.material.slider.Slider
 import android.content.ContextWrapper
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -72,6 +77,11 @@ internal class SettingsScreen(
     private var currentRoot: View? = null
     private val dialogs = mutableSetOf<AlertDialog>()
     private var disposed = false
+    private var renderedConnectionId: String? = null
+    private var editorConnectionId: String? = null
+    private var editorTranscriptionId: String? = null
+    private var diagnosticRequest: RequestCancellation? = null
+    private var diagnosticProgress: AlertDialog? = null
 
     init {
         store = SettingsStore(this)
@@ -119,6 +129,7 @@ internal class SettingsScreen(
     private fun showPage(next: Page) {
         if (disposed) return
         cancelModelRequest()
+        cancelDiagnostic()
         dismissDialogs()
         clearDraft()
         page = next; generation++; group = null
@@ -149,6 +160,7 @@ internal class SettingsScreen(
         val config = if(next == Page.HELP) AppConfig().also { readable = true }
             else try { store.load().also { readable = true } } catch (_: Exception) { readable = false; AppConfig() }
         val interaction = interactionStore.load()
+        renderedConnectionId = config.connectionId
         if (!readable) status.text = "无法读取配置或解密密钥。请到 API 连接移除密钥；仍失败时可重置连接与模型配置。不会使用明文备用密钥。"
         when (next) {
             Page.HOME -> Page.entries.filter { it != Page.HOME }.forEach { category(it) }
@@ -200,11 +212,42 @@ internal class SettingsScreen(
 
     private fun apiPage(config: AppConfig) {
         savedCredential = readable && config.apiKey.isNotBlank()
+        section("已保存连接", "每个连接分别保存服务地址、协议、模型、生成参数与密钥。切换连接不会把另一家服务的密钥带过来。")
+        if (readable) {
+            ProviderConnections.snapshot(config).forEach { profile ->
+                selectionRow(if (profile.id == config.connectionId) "${profile.name} · 当前使用" else profile.name,
+                    "${profile.providerKind.title} · ${profile.model.ifBlank { "未选择模型" }}") {
+                    finishEditing { if (mutateConnection { ProviderConnections.select(it, profile.id) }) showPage(Page.API) }
+                }
+            }
+            val controls = LinearLayout(this).apply {
+                gravity = Gravity.END
+                addView(iconButton(R.drawable.ic_line_plus, "添加服务连接") { finishEditing { addConnection() } })
+                addView(iconButton(R.drawable.ic_line_trash, "删除当前连接") { finishEditing { deleteConnection(config) } })
+            }
+            addRow(controls)
+        }
         section("连接信息", "密钥会发送到此地址，请只连接可信服务。\n\n密钥加密保存在本机；编辑时输入新密钥。\n\n查看模型列表会联网，但不上传聊天或媒体。")
+        note(ProviderCapabilities.label(config))
+        input("connectionName", "连接名称", "为此连接取一个容易区分的名称", config.connectionName)
         input("baseUrl", "服务地址", "示例：https://api.openai.com/v1", config.baseUrl)
-        note("使用 HTTPS，以 /v1 结尾。")
+        note(when (config.providerKind) {
+            ProviderKind.QWEN -> "百炼地址需与 API Key 所属地域、工作空间一致。北京默认地址为 https://dashscope.aliyuncs.com/compatible-mode/v1；国际与其他地域请复制控制台对应的基础地址。更换域名会清空当前密钥。"
+            ProviderKind.GEMINI -> "原生接口使用 https://generativelanguage.googleapis.com/v1beta；Chat 兼容接口使用其 /openai 地址。"
+            ProviderKind.CLAUDE -> "Claude 官方基础地址：https://api.anthropic.com/v1。"
+            ProviderKind.DEEPSEEK -> "DeepSeek 官方基础地址：https://api.deepseek.com。"
+            else -> "填写 HTTPS 基础地址，通常以 /v1 结尾；不要附加 /responses 或 /chat/completions。"
+        })
         input("apiKey", "API 密钥", "请输入密钥", secret = true)
+        section("接口协议", "协议决定应用如何与服务交换问题、图片和回答。相同的服务可能提供多种协议；按服务文档选择，不会自动尝试其他接口。")
+        selectionRow("当前协议", "${config.apiProtocol.title}\n${protocolDescription(config.apiProtocol)}") { finishEditing { selectProtocol(config) } }
+        if (config.apiProtocol == ApiProtocol.CLAUDE) {
+            input("apiVersion", "Claude API 版本", "YYYY-MM-DD，例如 2026-10-21", config.apiVersion)
+            input("workspaceId", "Claude Workspace ID（可选）", "留空使用密钥默认工作空间", config.workspaceId)
+        }
         action("查看可用模型") { fetchModels() }
+        action("测试当前连接") { finishEditing { chooseDiagnostic() } }
+        note("模型列表只证明列表接口可访问。文字、图片、搜索需分别测试；测试使用本机生成的示例，不读取屏幕，也不写入聊天历史。")
         action("移除密钥") { finishEditing { clearCredential() } }.destructive()
         if (!readable) action("重置连接配置") {
             MaterialAlertDialogBuilder(this).setTitle("重置无法读取的配置？")
@@ -223,21 +266,135 @@ internal class SettingsScreen(
         note("选择后立即应用。")
     }
 
+    private fun selectionRow(title: String, value: String, run: () -> Unit) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64); setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = touchFeedback(); isClickable = true; isFocusable = true
+            contentDescription = "$title，$value"
+            addView(column().apply {
+                addView(label(title, 16f))
+                addView(label(value, 14f, true).apply { setPadding(0, dp(4), 0, 0) })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(android.widget.ImageView(this@SettingsScreen).apply {
+                setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
+                imageTintList = ColorStateList.valueOf(MUTED)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(16), dp(16)))
+            setOnClickListener { run() }
+        }
+        addRow(row)
+    }
+
+    private fun addConnection() {
+        val providers = ProviderKind.entries
+        MaterialAlertDialogBuilder(this).setTitle("添加服务连接")
+            .setItems(providers.map { it.title }.toTypedArray()) { _, index ->
+                if (mutateConnection { ProviderConnections.add(it, providers[index]) }) showPage(Page.API)
+            }.setNegativeButton("取消", null).showTracked()
+    }
+
+    private fun deleteConnection(config: AppConfig) {
+        MaterialAlertDialogBuilder(this).setTitle("删除“${config.connectionName}”？")
+            .setMessage("删除这个连接的地址、模型、生成参数及本机密钥；使用它的转写绑定会解除。历史记录保留。至少需要保留一个连接。")
+            .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
+                if (mutateConnection { ProviderConnections.remove(it, config.connectionId) }) showPage(Page.API)
+            }.showTracked()
+    }
+
+    private fun protocolDescription(protocol: ApiProtocol): String = when (protocol) {
+        ApiProtocol.RESPONSES -> "以统一输入发送文字与图片，接收回答、工具执行结果和引用。"
+        ApiProtocol.CHAT_COMPLETIONS -> "使用对话消息与图片内容，适合提供 OpenAI 兼容接口的服务；扩展功能按供应商支持。"
+        ApiProtocol.GEMINI -> "使用 Google 的原生文字、图片内容与系统说明，联网搜索使用 Google Search。"
+        ApiProtocol.CLAUDE -> "使用 Anthropic 的系统说明与内容块，图片、搜索引用和暂停续接遵循 Claude 格式。"
+    }
+
+    private fun selectProtocol(config: AppConfig) {
+        val protocols = when (config.providerKind) {
+            ProviderKind.DEEPSEEK -> listOf(ApiProtocol.RESPONSES)
+            ProviderKind.GEMINI -> listOf(ApiProtocol.GEMINI, ApiProtocol.CHAT_COMPLETIONS)
+            ProviderKind.CLAUDE -> listOf(ApiProtocol.CLAUDE)
+            else -> listOf(ApiProtocol.RESPONSES, ApiProtocol.CHAT_COMPLETIONS)
+        }
+        MaterialAlertDialogBuilder(this).setTitle("选择接口协议")
+            .setSingleChoiceItems(protocols.map { "${it.title}\n${protocolDescription(it)}" }.toTypedArray(), protocols.indexOf(config.apiProtocol)) { dialog, index ->
+                val selected = protocols[index]
+                if (selected == config.apiProtocol) { dialog.dismiss(); return@setSingleChoiceItems }
+                dialog.dismiss()
+                MaterialAlertDialogBuilder(this).setTitle("切换到 ${selected.title}？")
+                    .setMessage("保留此连接的密钥和模型，清空推理、详细程度、采样、输出上限与搜索设置。Gemini 官方地址会随协议调整；自定义地址需按服务说明自行核对。")
+                    .setNegativeButton("取消", null).setPositiveButton("切换") { _, _ ->
+                        if (mutateConnection { current ->
+                            val officialGemini = current.providerKind == ProviderKind.GEMINI && current.baseUrl.trimEnd('/') in setOf(
+                                "https://generativelanguage.googleapis.com/v1beta", "https://generativelanguage.googleapis.com/v1beta/openai")
+                            current.copy(apiProtocol = selected, credentialRevision = current.credentialRevision + 1,
+                                baseUrl = if (officialGemini) "https://generativelanguage.googleapis.com/v1beta" + (if (selected == ApiProtocol.CHAT_COMPLETIONS) "/openai" else "") else current.baseUrl,
+                                maxOutputTokens = 0, reasoning = "", verbosity = "", temperature = null, topP = null, webSearch = false,
+                                continuationMessages = emptyList())
+                        }) showPage(Page.API)
+                    }.showTracked()
+            }.setNegativeButton("取消", null).showTracked()
+    }
+
+    private fun selectTranscriber(config: AppConfig) {
+        val profiles = ProviderConnections.snapshot(config).filter { it.apiProtocol in setOf(ApiProtocol.RESPONSES, ApiProtocol.CHAT_COMPLETIONS) }
+        val ids = listOf<String?>(null) + profiles.map { it.id }
+        val labels = listOf("不绑定（暂停音频转写）") + profiles.map { "${it.name} · ${it.providerKind.title}\n${it.transcriptionModel.ifBlank { "未选择转写模型" }}" }
+        MaterialAlertDialogBuilder(this).setTitle("音频转写连接")
+            .setSingleChoiceItems(labels.toTypedArray(), ids.indexOf(config.transcriptionConnectionId)) { dialog, index ->
+                if (mutateConnection { it.copy(transcriptionConnectionId = ids[index]) }) {
+                    dialog.dismiss(); showPage(Page.MODELS)
+                }
+            }.setNegativeButton("取消", null).showTracked()
+    }
+
+    /** Reuse each codec's local validation so model-specific option lists cannot drift from requests. */
+    private fun reasoningOptions(config: AppConfig): Map<String, String> {
+        val options = linkedMapOf("" to "不设置（模型默认）")
+        val adapter: ChatAdapter = when (config.apiProtocol) {
+            ApiProtocol.RESPONSES -> ResponsesAdapter
+            ApiProtocol.CHAT_COMPLETIONS -> ChatCompletionsAdapter
+            ApiProtocol.GEMINI -> GeminiAdapter
+            ApiProtocol.CLAUDE -> ClaudeMessagesAdapter()
+        }
+        listOf("none", "minimal", "low", "medium", "high", "xhigh", "max").forEach { value ->
+            val candidate = config.copy(reasoning = value, maxOutputTokens = 0, verbosity = "", temperature = null, topP = null, webSearch = false, continuationMessages = emptyList())
+            if (runCatching { adapter.request(candidate, emptyList(), "参数检查", null) }.isSuccess) options[value] = value
+        }
+        return options
+    }
+
     private fun modelPage(config: AppConfig) {
+        note(ProviderCapabilities.label(config))
         section("模型", "列表使用已保存的连接。请按服务说明选择图文和转写模型，列表中的模型不一定支持两种用途。")
         input("model", "图文模型", "请输入模型 ID", config.model)
         action("从列表选择图文模型") { fetchModels("model") }
-        input("transcriptionModel", "转写模型", "请输入转写模型 ID", config.transcriptionModel)
-        action("从列表选择转写模型") { fetchModels("transcriptionModel") }
+        val transcriber = runCatching { ProviderConnections.transcription(config) }.getOrNull()
+        selectionRow("音频转写连接", transcriber?.connectionName ?: "未选择") { finishEditing { selectTranscriber(config) } }
+        note("转写使用单独绑定的文件转写接口；音频转成文字后，由当前图文连接回答。Gemini 和 Claude 原生接口不接收此文件转写请求。")
+        if (transcriber != null) {
+            input("transcriptionModel", "转写模型", "请输入所选转写连接支持的模型 ID", transcriber.transcriptionModel)
+            action("从列表选择转写模型") { fetchModels("transcriptionModel") }
+        }
         section("生成参数", "留空或不设置时使用模型默认值，部分参数需服务支持。\n\n输出上限受模型限制；问答窗口可单独切换联网搜索。")
-        choice("reasoning", "推理程度", config.reasoning, linkedMapOf("" to "不设置（模型默认）", "none" to "none", "minimal" to "minimal", "low" to "low", "medium" to "medium", "high" to "high", "xhigh" to "xhigh", "max" to "max"))
-        choice("verbosity", "回答详细程度", config.verbosity, linkedMapOf("" to "不设置（模型默认）", "low" to "low · 简短", "medium" to "medium · 适中", "high" to "high · 详细"))
-        input("maxOutputTokens", "输出上限（tokens）", "16–131072；留空或 0 使用模型默认", config.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty(), numeric = true)
-        check("webSearch", "默认联网搜索", config.webSearch)
-        note("联网搜索需服务支持，可能增加费用。")
+        choice("reasoning", "推理程度", config.reasoning, reasoningOptions(config))
+        note(when (config.apiProtocol) {
+            ApiProtocol.CLAUDE -> "Claude 的 effort 控制总体推理投入；none 表示关闭思考，部分新模型不允许关闭。4.6 不支持 xhigh，4.5 系列也不通用支持 effort；不确定时选不设置。"
+            ApiProtocol.GEMINI -> "Gemini 可用思考档位随模型变化；none 与 minimal 不等价，Pro 模型可能无法关闭思考。未知模型请选择不设置。"
+            else -> if (config.providerKind == ProviderKind.QWEN) "千问的推理开关与 effort 按模型提供；旧混合模型通常仅支持 none 关闭。未知模型请选择不设置。" else "推理档位需模型明确支持；不确定时选不设置。"
+        })
+        if (ProviderCapabilities.verbosity(config) || config.verbosity.isNotBlank()) {
+            choice("verbosity", "回答详细程度", config.verbosity, if (ProviderCapabilities.verbosity(config)) linkedMapOf("" to "不设置（模型默认）", "low" to "low · 简短", "medium" to "medium · 适中", "high" to "high · 详细") else linkedMapOf("" to "不设置（清除不支持的值）"))
+        }
+        input("maxOutputTokens", "输出上限（tokens）", "16–131072；留空使用模型默认，Claude 留空使用 8192", config.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty(), numeric = true)
+        if (ProviderCapabilities.search(config) || config.webSearch) check("webSearch", "默认联网搜索", config.webSearch)
+        note(if (ProviderCapabilities.search(config)) "联网搜索需服务与模型支持，可能增加费用。请求完成不一定表示实际执行了搜索。" else "当前协议或模型不支持联网搜索；已保存的开关可在此关闭。")
+        action("分别测试文字、图片与搜索") { finishEditing { chooseDiagnostic() } }
         section("采样参数", "一般留空；需要时只调整一项。\n\nTemperature 越低越稳定；Top P 越小，用词范围越窄。部分模型不支持。")
-        input("temperature", "Temperature", "0–2，留空使用默认值", config.temperature?.toString().orEmpty(), decimal = true)
-        input("topP", "Top P", "0–1，留空使用默认值", config.topP?.toString().orEmpty(), decimal = true)
+        if (ProviderCapabilities.sampling(config) || config.temperature != null || config.topP != null) {
+            input("temperature", "Temperature", if (ProviderCapabilities.sampling(config)) "0–2；Claude 为 0–1，留空使用默认值" else "当前版本不支持，请清空", config.temperature?.toString().orEmpty(), decimal = true)
+            input("topP", "Top P", if (ProviderCapabilities.sampling(config)) "0–1，留空使用默认值" else "当前版本不支持，请清空", config.topP?.toString().orEmpty(), decimal = true)
+        } else note("当前 Claude API 版本已移除采样参数。")
     }
 
     private fun promptPage(config: AppConfig) {
@@ -394,9 +551,15 @@ internal class SettingsScreen(
         }
         val open = {
             finishEditing {
-                val start = if (secret) "" else try {
+                val start = try {
                     if (name == "recordingMaxMinutes") interactionStore.load().recordingMaxMinutes.toString()
-                    else SettingsUpdate.TextField.valueOf(name).read(store.load())
+                    else {
+                        val current = store.load()
+                        require(current.connectionId == renderedConnectionId) { "当前连接已改变，请重新打开设置页" }
+                        editorConnectionId = current.connectionId
+                        editorTranscriptionId = current.transcriptionConnectionId
+                        if (secret) "" else SettingsUpdate.TextField.valueOf(name).read(current)
+                    }
                 } catch (_: Exception) {
                     toast("无法读取配置，请先修复 API 连接")
                     return@finishEditing
@@ -408,7 +571,7 @@ internal class SettingsScreen(
                     onRequestClose = { finishEditing {} },
                     onSave = { draft, error -> saveText(name, draft, secret, valueView, error) })
                 closeEditor = {
-                    activeEdit = null; closeEditor = null
+                    activeEdit = null; closeEditor = null; editorConnectionId = null; editorTranscriptionId = null
                     panel.close()
                 }
                 panel.show()
@@ -445,13 +608,18 @@ internal class SettingsScreen(
                 if (name == "temperature") valueViews["topP"]?.text = try { store.load().topP?.toString() ?: "未设置" } catch (_: Exception) { "未设置" }
                 if (name == "topP") valueViews["temperature"]?.text = try { store.load().temperature?.toString() ?: "未设置" } catch (_: Exception) { "未设置" }
                 closeEditor?.invoke()
+                showPage(page)
             }
         }
         try {
             val current = store.load()
+            require(current.connectionId == editorConnectionId) { "当前连接已改变，请关闭编辑后重试" }
+            if (name == "transcriptionModel") require(current.transcriptionConnectionId == editorTranscriptionId) { "转写连接已改变，请关闭编辑后重试" }
             // Validate input before asking to replace the other sampling parameter.
             val candidate = update.copy(replaceSampling = true).applyTo(current)
             SettingsStore.validate(candidate)
+            if (name in setOf("temperature", "topP") && draft.isNotBlank())
+                require(ProviderCapabilities.sampling(candidate)) { "当前 API 版本不支持采样参数，请清空" }
             val conflict = draft.isNotBlank() && ((name == "temperature" && current.topP != null) || (name == "topP" && current.temperature != null))
             if (conflict) MaterialAlertDialogBuilder(this).setTitle("替换另一项采样参数？")
                 .setMessage("Temperature 与 Top P 只设置一项。保存会清空另一项。")
@@ -474,7 +642,9 @@ internal class SettingsScreen(
             setOnCheckedChangeListener { button, value ->
                 if (restoring) return@setOnCheckedChangeListener
                 val ok = when (name) {
-                    "webSearch" -> persist(SettingsUpdate.Toggle(webSearch = value))
+                    "webSearch" -> if (value && !runCatching { ProviderCapabilities.search(store.load()) }.getOrDefault(false)) {
+                        toast("当前协议或模型不支持联网搜索"); false
+                    } else persist(SettingsUpdate.Toggle(webSearch = value))
                     "autoUpdateImage" -> persist(SettingsUpdate.Toggle(autoUpdateImage = value))
                     else -> persistInteraction { when (name) {
                         "collapseFollowUpByDefault" -> it.copy(collapseFollowUpByDefault = value)
@@ -624,9 +794,18 @@ internal class SettingsScreen(
         }
     }
 
-    private fun persist(update: SettingsUpdate, onError: (String) -> Unit = ::toast): Boolean = try {
-        val next = update.applyTo(store.load())
+    private fun persist(update: SettingsUpdate, onError: (String) -> Unit = ::toast): Boolean = mutateConnection(onError) { current ->
+        if (update is SettingsUpdate.Text && update.field == SettingsUpdate.TextField.transcriptionModel)
+            require(current.transcriptionConnectionId == editorTranscriptionId) { "转写连接已改变，请重新打开编辑" }
+        update.applyTo(current)
+    }
+
+    private fun mutateConnection(onError: (String) -> Unit = ::toast, update: (AppConfig) -> AppConfig): Boolean = try {
+        val current = store.load()
+        require(current.connectionId == (editorConnectionId ?: renderedConnectionId)) { "当前连接已改变，请重新打开设置页" }
+        val next = update(current)
         SettingsStore.validate(next); store.save(next)
+        cancelDiagnostic(); cancelModelRequest(); status.text = ""
         toast("已保存"); true
     } catch (error: IllegalArgumentException) { onError(error.message ?: "设置无效"); false }
     catch (_: Exception) { onError("保存失败，请检查设备安全存储后重试"); false }
@@ -650,27 +829,36 @@ internal class SettingsScreen(
         val config = try {
             check(readable)
             val stored = store.load()
-            stored.also {
+            require(stored.connectionId == renderedConnectionId) { "当前连接已改变，请重新打开设置页" }
+            (if (target == "transcriptionModel") ProviderConnections.transcription(stored) else stored).also {
                 SettingsStore.validate(it); require(it.apiKey.isNotBlank()) { "请先保存 API 密钥" }
             }
         } catch (error: IllegalArgumentException) { toast(error.message ?: "API 配置无效"); return }
         catch (_: Exception) { toast("无法读取连接配置，请先修复 API 连接"); return }
         val token = RequestCancellation(); modelRequest = token
         val currentGeneration = generation
+        val ownerId = renderedConnectionId
         modelProgress = MaterialAlertDialogBuilder(this).setTitle("正在读取模型")
-            .setMessage("仅请求当前 API 地址的 /models，不会发送媒体。")
+            .setMessage("${config.connectionName}\n仅请求此连接的模型列表，不会发送聊天或媒体，也不代表模型支持图片或搜索。")
             .setNegativeButton("取消") { _, _ -> cancelModelRequest() }.setOnCancelListener { cancelModelRequest() }.showTracked()
         Thread({
             try {
                 val models = AiProvider().listModels(config, token)
                 activity.runOnUiThread {
                     if (disposed || activity.isFinishing || activity.isDestroyed || generation != currentGeneration || modelRequest !== token) return@runOnUiThread
+                    val saved = runCatching { store.load() }.getOrNull()
+                    if (saved == null || saved.connectionId != ownerId || !profileStillCurrent(config, saved, target == "transcriptionModel")) {
+                        cancelModelRequest(); status.text = "连接或模型设置已改变，请重新读取模型列表"; return@runOnUiThread
+                    }
                     modelRequest = null; modelProgress?.dismiss(); modelProgress = null
                     if (models.isEmpty()) { toast("服务未返回可用模型，可手动填写模型 ID"); return@runOnUiThread }
                     if (target != null) {
                         MaterialAlertDialogBuilder(this).setTitle(if (target == "model") "选择图文模型 ID" else "选择转写模型 ID")
                             .setItems(models.toTypedArray()) { _, index -> finishEditing {
-                                if (persist(SettingsUpdate.Text(SettingsUpdate.TextField.valueOf(target), models[index]))) showPage(page)
+                                if (mutateConnection { latest ->
+                                    require(profileStillCurrent(config, latest, target == "transcriptionModel")) { "读取列表后连接已改变，请重新读取" }
+                                    SettingsUpdate.Text(SettingsUpdate.TextField.valueOf(target), models[index]).applyTo(latest)
+                                }) showPage(page)
                             } }
                             .setNegativeButton("取消", null).showTracked()
                     } else {
@@ -697,11 +885,115 @@ internal class SettingsScreen(
         modelProgress?.dismiss(); modelProgress = null
     }
 
+    private fun profileStillCurrent(request: AppConfig, saved: AppConfig, transcription: Boolean = false): Boolean {
+        val selected = if (transcription) runCatching { ProviderConnections.transcription(saved) }.getOrNull() else saved
+        return selected != null && ConnectionProfile.capture(request) == ConnectionProfile.capture(selected)
+    }
+
+    private fun chooseDiagnostic() {
+        if (!readable) { toast("请先修复连接配置"); return }
+        MaterialAlertDialogBuilder(this).setTitle("测试当前连接")
+            .setItems(arrayOf("文字：发送一句固定示例", "图片：发送本机生成的红色色块", "搜索：请求查询当前信息")) { _, index ->
+                val kind = listOf("text", "image", "search")[index]
+                val description = when (kind) {
+                    "image" -> "会将本机生成的白底红色色块图片发送给当前模型，不读取屏幕。"
+                    "search" -> "会发送一次联网搜索请求；只有收到服务的搜索执行信息才会显示已验证。"
+                    else -> "会发送一句固定测试问题，检查当前模型能否完整回答。"
+                }
+                MaterialAlertDialogBuilder(this).setTitle("运行${if (kind == "image") "图片" else if (kind == "search") "搜索" else "文字"}测试？")
+                    .setMessage("$description\n\n使用当前已保存的连接与模型，可能产生调用费用；不写入聊天历史。")
+                    .setNegativeButton("取消", null).setPositiveButton("开始测试") { _, _ -> runDiagnostic(kind) }.showTracked()
+            }.setNegativeButton("取消", null).showTracked()
+    }
+
+    private fun runDiagnostic(kind: String) {
+        cancelDiagnostic()
+        val saved = try {
+            store.load().also {
+                require(it.connectionId == renderedConnectionId) { "当前连接已改变，请重新打开设置页" }
+                SettingsStore.validate(it)
+                require(it.apiKey.isNotBlank() && it.model.isNotBlank()) { "请先保存当前连接的密钥和图文模型" }
+                if (kind == "search") require(ProviderCapabilities.search(it)) { "当前协议或模型不支持搜索测试" }
+            }
+        } catch (error: Exception) { toast(error.message ?: "无法读取连接"); return }
+        val config = saved.copy(webSearch = kind == "search", instructions = "请按测试问题直接回答。", continuationMessages = emptyList())
+        val title = when (kind) { "image" -> "图片测试"; "search" -> "搜索测试"; else -> "文字测试" }
+        val currentGeneration = generation
+        val token = RequestCancellation(); diagnosticRequest = token
+        diagnosticProgress = MaterialAlertDialogBuilder(this).setTitle(title)
+            .setMessage("${ProviderCapabilities.label(saved)}\n正在调用服务…")
+            .setNegativeButton("取消") { _, _ -> cancelDiagnostic() }.setOnCancelListener { cancelDiagnostic() }.showTracked()
+        Thread({
+            try {
+                val prompt = when (kind) {
+                    "image" -> "图片中央色块是什么颜色？只回复中文颜色名称。"
+                    "search" -> "请实际使用联网搜索工具，查找今天的一则科技新闻，并给出新闻日期与来源链接。"
+                    else -> "请只回复 ALWAY_SIDE_OK"
+                }
+                val provider = AiProvider()
+                val result = provider.respond(config, emptyList(), prompt, if (kind == "image") diagnosticImage() else null, token) {}
+                val verdict = when (kind) {
+                    "search" -> if (provider.lastSearchUsed) "已验证：服务返回了实际搜索执行信息。" else "请求已完成，搜索尚未验证：服务没有返回可核实的执行信息。模型自行声称搜索或提供链接不作为验证依据。"
+                    "image" -> if (result.contains("红") || result.contains("red", ignoreCase = true)) "已验证：模型正确识别本机示例图片的红色色块。" else "请求已完成，图片识别未通过：回答未识别示例中的红色色块。"
+                    else -> if (result.trim() == "ALWAY_SIDE_OK") "已验证：当前模型完整返回了指定文字。" else "文字请求已完成，但回答未遵循固定测试要求；可检查下方返回内容。"
+                }
+                activity.runOnUiThread {
+                    if (!diagnosticCurrent(token, currentGeneration, saved)) return@runOnUiThread
+                    diagnosticRequest = null; diagnosticProgress?.dismiss(); diagnosticProgress = null
+                    status.text = "$title · ${ProviderCapabilities.label(saved)}\n$verdict"
+                    MaterialAlertDialogBuilder(this).setTitle("${title}结果")
+                        .setMessage("${ProviderCapabilities.label(saved)}\n$verdict\n\n${result.take(1600)}\n\n结果仅适用于本次连接、模型与参数；修改配置后需要重新测试。")
+                        .setPositiveButton("完成", null).showTracked()
+                }
+            } catch (_: CancellationException) { /* Page changes and explicit cancellation discard results. */ }
+            catch (error: Exception) {
+                activity.runOnUiThread {
+                    if (!diagnosticCurrent(token, currentGeneration, saved)) return@runOnUiThread
+                    diagnosticRequest = null; diagnosticProgress?.dismiss(); diagnosticProgress = null
+                    status.text = "${title}未通过 · ${ProviderCapabilities.label(saved)}\n${if (error is ProviderPausedException) "搜索暂停，未完成验证；可在聊天中使用继续生成。" else if (error is ProviderException) error.message else "测试失败，请检查连接、模型与参数。"}"
+                }
+            }
+        }, "alwayside-connection-diagnostic").start()
+    }
+
+    private fun diagnosticCurrent(token: RequestCancellation, expectedGeneration: Int, config: AppConfig): Boolean {
+        if (disposed || activity.isFinishing || activity.isDestroyed || generation != expectedGeneration || diagnosticRequest !== token) return false
+        val saved = runCatching { store.load() }.getOrNull()
+        if (saved == null || !profileStillCurrent(config, saved)) {
+            cancelDiagnostic(); status.text = "连接、模型或参数已改变，本次测试结果已丢弃"; return false
+        }
+        return true
+    }
+
+    private fun diagnosticImage(): String {
+        val bitmap = Bitmap.createBitmap(160, 100, Bitmap.Config.ARGB_8888)
+        return try {
+            Canvas(bitmap).apply {
+                drawColor(Color.WHITE)
+                drawRect(40f, 20f, 120f, 80f, Paint().apply { color = Color.RED })
+            }
+            val bytes = ByteArrayOutputStream().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                output.toByteArray()
+            }
+            "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+        } finally { bitmap.recycle() }
+    }
+
+    private fun cancelDiagnostic() {
+        diagnosticRequest?.cancel(); diagnosticRequest = null
+        diagnosticProgress?.dismiss(); diagnosticProgress = null
+    }
+
     private fun clearCredential() {
         MaterialAlertDialogBuilder(this).setTitle("移除本机 API Key？")
             .setMessage("立即移除已保存的加密密钥。其他已存配置和历史保留；之后需重新填写 Key 才能调用服务。")
             .setNegativeButton("取消", null).setPositiveButton("移除") { _, _ ->
-                try { store.clearCredential(); showPage(Page.API); toast("已移除本机密钥") }
+                try {
+                    if (readable) require(store.load().connectionId == renderedConnectionId) { "当前连接已改变" }
+                    cancelDiagnostic(); cancelModelRequest()
+                    store.clearCredential(); showPage(Page.API); toast("已移除本机密钥")
+                }
                 catch (_: Exception) { toast("移除失败，请检查本机存储") }
             }.showTracked()
     }
@@ -834,7 +1126,7 @@ internal class SettingsScreen(
         dialogs += this
         setOnDismissListener { dialogs.remove(this) }
         show()
-        if (getButton(AlertDialog.BUTTON_POSITIVE)?.text?.toString() in setOf("移除", "重置", "覆盖", "放弃并返回", "放弃并离开")) {
+        if (getButton(AlertDialog.BUTTON_POSITIVE)?.text?.toString() in setOf("移除", "删除", "重置", "覆盖", "放弃并返回", "放弃并离开")) {
             getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(dangerColor)
         }
         return this
@@ -852,6 +1144,7 @@ internal class SettingsScreen(
         disposed = true
         generation++
         cancelModelRequest()
+        cancelDiagnostic()
         dismissDialogs()
         clearDraft()
         body.removeAllViews()
