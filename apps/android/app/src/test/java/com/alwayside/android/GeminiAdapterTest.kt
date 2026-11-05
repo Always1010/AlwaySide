@@ -80,6 +80,7 @@ class GeminiAdapterTest {
         decoder.accept("message", mapOf("usageMetadata" to mapOf("totalTokenCount" to 10)), { emitted.append(it); Unit })
         assertEquals("Hello world", decoder.finish({ emitted.append(it); Unit }))
         assertTrue(decoder.complete)
+        assertFalse(decoder.searchUsed)
         assertEquals("Hello world", decoder.finish({ emitted.append(it); Unit }))
     }
 
@@ -91,6 +92,42 @@ class GeminiAdapterTest {
             mapOf("web" to mapOf("uri" to "javascript:alert(1)", "title" to "Bad")))
         decoder.accept("message", mapOf("candidates" to listOf(mapOf("groundingMetadata" to mapOf("groundingChunks" to sources))))) {}
         assertEquals("Answer\n\n来源：\n- [Source](https://example.com/source)", decoder.finish {})
+        assertTrue(decoder.searchUsed)
+    }
+
+    @Test fun searchDiagnosticRequiresGroundingMetadataRatherThanAnswerClaims() {
+        val plain = GeminiAdapter.decoder(config)
+        plain.accept("message", chunk("I searched the web: https://example.com", "STOP")) {}
+        plain.finish {}
+        assertFalse(plain.searchUsed)
+        val grounded = GeminiAdapter.decoder(config)
+        grounded.accept("message", mapOf("candidates" to listOf(mapOf("content" to mapOf("parts" to listOf(mapOf("text" to "Answer"))),
+            "finishReason" to "STOP", "groundingMetadata" to mapOf("webSearchQueries" to listOf("example query")))))) {}
+        grounded.finish {}
+        assertTrue(grounded.searchUsed)
+    }
+
+    @Test fun searchSuggestionsAreSeparateMetadataAndMayArriveAfterStop() {
+        val decoder = GeminiAdapter.decoder(config)
+        assertEquals("", decoder.searchSuggestions)
+        decoder.accept("message", chunk("Answer", "STOP")) {}
+        val html = "<style>.suggestion{color:blue}</style><a href=\"https://www.google.com/search?q=example\">Example</a>"
+        decoder.accept("message", groundingSuggestions(html)) {}
+        decoder.accept("message", mapOf("usageMetadata" to mapOf("totalTokenCount" to 1))) {}
+        assertEquals(html, decoder.searchSuggestions)
+        assertFalse(decoder.complete)
+        assertEquals("Answer", decoder.finish {})
+        assertEquals(html, decoder.searchSuggestions)
+    }
+
+    @Test fun searchSuggestionsHaveBoundedSizeAndUseGenerateContentMetadataOnly() {
+        val decoder = GeminiAdapter.decoder(config)
+        val interactionResult = mapOf("type" to "google_search_result", "result" to listOf(mapOf("search_suggestions" to "ignored")))
+        decoder.accept("message", mapOf("steps" to listOf(interactionResult))) {}
+        assertEquals("", decoder.searchSuggestions)
+        decoder.accept("message", groundingSuggestions("x".repeat(32768))) {}
+        assertEquals(32768, decoder.searchSuggestions.length)
+        assertThrows(ProviderException::class.java) { decoder.accept("message", groundingSuggestions("x".repeat(32769))) {} }
     }
 
     @Test fun truncationBlockedPromptAndProviderErrorsAreRejected() {
@@ -113,6 +150,8 @@ class GeminiAdapterTest {
     }
 
     private fun request(value: AppConfig, image: String? = null) = GeminiAdapter.request(value, emptyList(), "Question", image).body
+    private fun groundingSuggestions(html: String): Map<String, Any?> = mapOf("candidates" to listOf(mapOf(
+        "groundingMetadata" to mapOf("searchEntryPoint" to mapOf("renderedContent" to html)))))
     private fun thinking(model: String, effort: String) = request(config.copy(model = model, reasoning = effort)).obj("generationConfig").obj("thinkingConfig")
     private fun chunk(text: String = "", reason: String = "", parts: List<Map<String, Any?>> = listOf(mapOf("text" to text))): Map<String, Any?> =
         mapOf("candidates" to listOf(mapOf("index" to 0, "content" to mapOf("parts" to parts), "finishReason" to reason)))

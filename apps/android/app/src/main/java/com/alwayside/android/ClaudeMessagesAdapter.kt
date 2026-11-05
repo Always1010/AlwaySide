@@ -95,6 +95,8 @@ private class ClaudeDecoder(
     private var finished: String? = null
     override var complete = false
         private set
+    override var searchUsed = false
+        private set
 
     override fun accept(eventName: String, data: Map<String, Any?>, onDelta: (String) -> Unit) {
         val type = data.text("type").ifBlank { eventName }
@@ -195,6 +197,7 @@ private class ClaudeDecoder(
             val result = block.obj("content")
             if (result.text("type").endsWith("_error") || result.text("error_code").isNotBlank()) fail("Claude 搜索工具执行失败")
             if (block.items("content").any { it.wireObject().text("type").endsWith("_error") }) fail("Claude 搜索工具执行失败")
+            if (block.text("type") == "web_search_tool_result" && block["content"] is List<*>) searchUsed = true
         }
         if (block.text("type") == "text") {
             answer.append(block.text("text"), emit)

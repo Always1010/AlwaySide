@@ -56,7 +56,7 @@ internal class HistoryStore(context: Context) {
             bounded(StoredConversation(entry.getString("id"), entry.getLong("updatedAt"),
                 entry.getString("title"), (0 until minOf(messages.length(), MAX_MESSAGES)).map { position ->
                     val message = messages.getJSONObject(position)
-                    ChatMessage(message.getString("role"), message.getString("text"),message.optString("evidence"))
+                    ChatMessage(message.getString("role"), message.getString("text"),message.optString("evidence"), message.optString("searchSuggestions"))
                 }, entry.optString("evidence"), entry.optString("transcript"), entry.optString("kind", "text"), entry.optString("status", "已完成"), entry.optString("sourceText")))
         }.sortedByDescending { it.updatedAt }
     }
@@ -65,7 +65,12 @@ internal class HistoryStore(context: Context) {
         var budget = 120000
         val messages = value.messages.takeLast(MAX_MESSAGES).asReversed().mapNotNull { message ->
             if (budget <= 0 || message.role !in setOf("user", "assistant", "system")) null
-            else message.copy(text = message.text.take(minOf(20000, budget)),evidence=message.evidence.take(1000)).also { budget -= it.text.length }
+            else {
+                val text = message.text.take(minOf(20000, budget))
+                val suggestions = message.searchSuggestions.takeIf { it.length <= minOf(32768, budget - text.length) }.orEmpty()
+                message.copy(text = text, evidence = message.evidence.take(1000), searchSuggestions = suggestions)
+                    .also { budget -= it.text.length + it.searchSuggestions.length }
+            }
         }.asReversed()
         return value.copy(id = value.id.take(128), title = ConversationTitle.resolve(value.title, messages).take(160), messages = messages,
             evidence = value.evidence.take(2000), transcript = value.transcript.take(32000),
@@ -77,7 +82,7 @@ internal class HistoryStore(context: Context) {
         val entries = JSONArray()
         values.forEach { value ->
             val messages = JSONArray()
-            value.messages.forEach { messages.put(JSONObject().put("role", it.role).put("text", it.text).put("evidence",it.evidence)) }
+            value.messages.forEach { messages.put(JSONObject().put("role", it.role).put("text", it.text).put("evidence",it.evidence).put("searchSuggestions", it.searchSuggestions)) }
             entries.put(JSONObject().put("id", value.id).put("updatedAt", value.updatedAt)
                 .put("title", value.title).put("messages", messages)
                 .put("evidence", value.evidence).put("transcript", value.transcript).put("kind", value.kind).put("status", value.status)

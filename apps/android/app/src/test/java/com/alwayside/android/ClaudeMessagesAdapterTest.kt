@@ -112,6 +112,7 @@ class ClaudeMessagesAdapterTest {
             block(failed, 0, m("type" to "web_search_tool_result", "tool_use_id" to "id", "content" to m("type" to "web_search_tool_result_error", "error_code" to "max_uses_exceeded")))
         }
         assertFalse(failed.complete)
+        assertFalse(failed.searchUsed)
         assertThrows(ProviderException::class.java) { failed.finish {} }
     }
 
@@ -129,6 +130,7 @@ class ClaudeMessagesAdapterTest {
         delta(decoder, 1, m("type" to "input_json_delta", "partial_json" to "\"news\"}")); close(decoder, 1)
         val results = m("type" to "web_search_tool_result", "tool_use_id" to "search1", "content" to listOf(m("type" to "web_search_result", "url" to "https://example.com", "encrypted_content" to "opaque")))
         block(decoder, 2, results); close(decoder, 2)
+        assertTrue(decoder.searchUsed)
         block(decoder, 3, m("type" to "redacted_thinking", "data" to "secret")); close(decoder, 3)
         stop(decoder, "pause_turn")
         val paused = assertThrows(ProviderPausedException::class.java) { decoder.finish {} }

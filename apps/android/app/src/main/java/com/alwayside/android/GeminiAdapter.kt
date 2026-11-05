@@ -90,6 +90,10 @@ private class GeminiDecoder : AnswerDecoder {
     private var sawCandidate = false
     private var stopped = false
     private var result: String? = null
+    override var searchUsed = false
+        private set
+    override var searchSuggestions = ""
+        private set
     // Google can deliver grounding and usage metadata after the candidate's STOP chunk.
     override val complete: Boolean get() = result != null
 
@@ -122,8 +126,15 @@ private class GeminiDecoder : AnswerDecoder {
                     answer.append(text, onDelta)
                 }
             }
-            candidate.obj("groundingMetadata").items("groundingChunks").forEach { chunk ->
+            val grounding = candidate.obj("groundingMetadata")
+            val suggestions = grounding.obj("searchEntryPoint").text("renderedContent")
+            if (suggestions.length > 32768) throw ProviderException("Gemini 搜索建议内容过大")
+            if (suggestions.isNotBlank()) searchSuggestions = suggestions
+            if (grounding.items("webSearchQueries").any { it is String && it.isNotBlank() }) searchUsed = true
+            grounding.items("groundingChunks").forEach { chunk ->
                 val web = chunk.wireObject().obj("web")
+                val uri = runCatching { java.net.URI(web.text("uri")) }.getOrNull()
+                if (uri != null && uri.scheme in setOf("https", "http") && !uri.host.isNullOrBlank() && uri.rawUserInfo == null) searchUsed = true
                 answer.citation(web.text("uri"), web.text("title"))
             }
             candidate.obj("citationMetadata").items("citationSources").forEach { source ->
