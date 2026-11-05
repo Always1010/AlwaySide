@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RecordingCompletionTest {
+    @Test fun captureFailureNeverProcessesOrRetainsPartialAudio() {
+        RecordingLimitAction.entries.forEach { action ->
+            listOf(false, true).forEach { reachedLimit ->
+                listOf(false, true).forEach { auto ->
+                    assertEquals(RecordingDisposition.FAILED, recordingDisposition(reachedLimit, action, auto,
+                        manualQuestion = false, captureFailed = true))
+                    assertEquals(RecordingDisposition.FAILED, recordingDisposition(reachedLimit, action, auto,
+                        manualQuestion = true, useDefaultQuestion = false, captureFailed = true))
+                }
+            }
+        }
+    }
+
     @Test fun menuManualModeRequiresAQuestionEvenWhenTheLimitPolicyWouldProcessAutomatically() {
         assertEquals(RecordingDisposition.READY, recordingDisposition(false, RecordingLimitAction.PROCESS, true, false, false))
         assertEquals(RecordingDisposition.READY, recordingDisposition(true, RecordingLimitAction.PROCESS, true, false, false))
