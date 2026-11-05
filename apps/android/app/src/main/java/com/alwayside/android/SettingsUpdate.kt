@@ -24,8 +24,8 @@ internal sealed interface SettingsUpdate {
     data class Text(val field: TextField, val value: String, val replaceSampling: Boolean = false) : SettingsUpdate {
         override fun toString() = "SettingsUpdate.Text(field=$field, value redacted)"
         override fun applyTo(current: AppConfig): AppConfig = when (field) {
-            TextField.baseUrl -> current.copy(baseUrl = value.trim())
-            TextField.apiKey -> current.copy(apiKey = value.trim().also { require(it.isNotBlank()) { "密钥不能为空；移除请使用移除密钥" } })
+            TextField.baseUrl -> ProviderConnections.addressChanged(current, value)
+            TextField.apiKey -> current.copy(credentialRevision = current.credentialRevision + 1, apiKey = value.trim().also { require(it.isNotBlank()) { "密钥不能为空；移除请使用移除密钥" } })
             TextField.model -> current.copy(model = value.trim())
             TextField.transcriptionModel -> current.copy(transcriptionModel = value.trim())
             TextField.instructions -> current.copy(instructions = value)

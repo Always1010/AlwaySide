@@ -21,13 +21,21 @@ internal class SettingsStore(context: Context) {
     /** Preparation reads presence and public fields only, never decrypts a credential or connects. */
     fun connectionPreparation(): ConnectionPreparation = synchronized(lock) {
         val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
-        ConnectionPreparation(data.optString("baseUrl").isNotBlank(), prefs.contains("credential"), data.optString("model").isNotBlank())
+        if (data.optInt("schemaVersion", 1) == 2) {
+            val active = data.optString("activeConnectionId")
+            val profiles = data.optJSONArray("connections")
+            val profile = (0 until (profiles?.length() ?: 0)).mapNotNull { profiles?.optJSONObject(it) }
+                .firstOrNull { it.optString("id") == active }
+            ConnectionPreparation(profile?.optString("baseUrl").orEmpty().isNotBlank(),
+                prefs.contains("credential.$active"), profile?.optString("model").orEmpty().isNotBlank())
+        } else ConnectionPreparation(data.optString("baseUrl").isNotBlank(), prefs.contains("credential"), data.optString("model").isNotBlank())
     }
 
     fun load(): AppConfig = synchronized(lock) {
         val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
+        require(data.optInt("schemaVersion", 1) in 1..2) { "不支持的配置版本" }
         val defaults = AppConfig()
-        AppConfig(
+        val legacy = AppConfig(
             apiKey = prefs.getString("credential", null)?.let(::decrypt).orEmpty(),
             baseUrl = data.optString("baseUrl", defaults.baseUrl),
             model = data.optString("model", defaults.model),
@@ -46,13 +54,34 @@ internal class SettingsStore(context: Context) {
             audioOutput = data.optString("audioOutput", defaults.audioOutput),
             textQuestion = data.optString("textQuestion", defaults.textQuestion),
         )
+        if (data.optInt("schemaVersion", 1) != 2) return@synchronized ConnectionConfigCodec.migrateLegacy(legacy)
+        val records = data.getJSONArray("connections")
+        require(records.length() in 1..20) { "连接数量无效" }
+        val profiles = (0 until records.length()).map { index ->
+            val item = records.getJSONObject(index)
+            val id = item.getString("id")
+            ConnectionConfigCodec.decode(WireJson.decode(item.toString()), prefs.getString("credential.$id", null)?.let(::decrypt).orEmpty())
+        }
+        require(profiles.map { it.id }.distinct().size == profiles.size) { "连接 ID 重复" }
+        val active = profiles.firstOrNull { it.id == data.getString("activeConnectionId") } ?: error("当前连接不存在")
+        active.applyTo(legacy).copy(connections = profiles,
+            transcriptionConnectionId = data.optionalPresetString("transcriptionConnectionId"))
     }
 
     fun save(config: AppConfig) = synchronized(lock) {
         validate(config)
         // Encrypt before touching preferences: a KeyStore failure must not write plaintext.
-        val encrypted = config.apiKey.takeIf { it.isNotBlank() }?.let(::encrypt)
+        val profiles = ProviderConnections.snapshot(config)
+        require(profiles.size in 1..20)
+        profiles.forEach { validate(it.applyTo(config)) }
+        val encrypted = profiles.associate { it.id to it.apiKey.takeIf(String::isNotBlank)?.let(::encrypt) }
         val data = JSONObject().apply {
+            put("schemaVersion", 2)
+            put("activeConnectionId", config.connectionId)
+            put("transcriptionConnectionId", config.transcriptionConnectionId ?: JSONObject.NULL)
+            put("connections", org.json.JSONArray().apply {
+                profiles.forEach { put(JSONObject(WireJson.encode(ConnectionConfigCodec.encode(it)))) }
+            })
             put("baseUrl", config.baseUrl.trim().trimEnd('/'))
             put("model", config.model.trim())
             put("transcriptionModel", config.transcriptionModel.trim())
@@ -71,17 +100,30 @@ internal class SettingsStore(context: Context) {
             put("textQuestion", config.textQuestion)
         }
         val edit = prefs.edit().putString("config", data.toString())
-        if (encrypted == null) edit.remove("credential") else edit.putString("credential", encrypted)
+        // Config, credential slots and removal of the legacy slot are one atomic preference commit.
+        prefs.all.keys.filter { it == "credential" || it.startsWith("credential.") }.forEach { edit.remove(it) }
+        encrypted.forEach { (id, value) -> if (value != null) edit.putString("credential.$id", value) }
         check(edit.commit()) { "Settings write failed" }
     }
 
     fun clearCredential() = synchronized(lock) {
-        check(prefs.edit().remove("credential").commit()) { "Credential removal failed" }
-        deleteCredentialKey()
+        val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
+        if (data.optInt("schemaVersion", 1) == 2) {
+            val id = data.getString("activeConnectionId")
+            val profiles = data.getJSONArray("connections")
+            for (i in 0 until profiles.length()) {
+                val profile = profiles.getJSONObject(i)
+                if (profile.optString("id") == id) profile.put("credentialRevision", profile.optLong("credentialRevision") + 1)
+            }
+            check(prefs.edit().putString("config", data.toString()).remove("credential.$id").commit())
+        } else check(prefs.edit().remove("credential").commit())
+        // Other connections may still use the encryption key; never delete it here.
     }
 
     fun resetConfiguration() = synchronized(lock) {
-        check(prefs.edit().remove("config").remove("credential").commit()) { "Settings reset failed" }
+        val edit = prefs.edit().remove("config").remove("credential")
+        prefs.all.keys.filter { it.startsWith("credential.") }.forEach { edit.remove(it) }
+        check(edit.commit()) { "Settings reset failed" }
         deleteCredentialKey()
     }
 
@@ -149,10 +191,13 @@ internal class SettingsStore(context: Context) {
         private const val KEY_ALIAS = "alwayside_api_key_v1"
         fun validate(config: AppConfig) {
             require(runCatching { ProviderProtocol.endpoint(config.baseUrl, "responses") }.isSuccess) {
-                "请输入以 /v1 结尾的 HTTPS Base URL，不含用户名、查询参数或片段"
+                "请输入 HTTPS 基础地址，不含用户名、查询参数或片段"
             }
-            require(config.model.isNotBlank() && config.transcriptionModel.isNotBlank()) { "模型名称不能为空" }
             require(config.model.length <= 200 && config.transcriptionModel.length <= 200) { "模型名称过长" }
+            require(config.connectionName.length in 1..80) { "连接名称请填写 1 至 80 个字符" }
+            require(Regex("[A-Za-z0-9-]{1,80}").matches(config.connectionId)) { "连接 ID 无效" }
+            require(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(config.apiVersion)) { "API 版本请使用 YYYY-MM-DD" }
+            require(config.workspaceId.length <= 200 && config.workspaceId.none { it.code < 33 || it.code > 126 }) { "Workspace ID 无效" }
             ProviderProtocol.validateOptions(config)
             require(listOf(config.instructions, config.defaultQuestion, config.audioQuestion, config.transcriptionPrompt, config.textQuestion).all { it.length <= 32000 }) { "单项提示词不能超过 32000 字符" }
             require(config.apiKey.length <= 8192 && config.apiKey.none { it.isWhitespace() }) { "API Key 不能包含空白字符" }
