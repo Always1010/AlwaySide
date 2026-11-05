@@ -120,6 +120,8 @@ class AssistantService : Service() {
         var sourceSize: Pair<Int, Int>? = null
         var rotation: Int? = null
         var clip: AudioClip? = null
+        var awaitingAudioApproval = false
+        var audioApproval: View? = null
         var imageMode = 0
         var searchDefault = false
         var webSearchOverride: Boolean? = null
@@ -474,6 +476,7 @@ class AssistantService : Service() {
         node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);remove(it) }
         node.root=null;node.layout=null;node.response=null;node.status=null;node.source=null;node.sourceImage=null;node.transcript=null
         node.transcriptCopy=null
+        node.audioApproval=null
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
         node.composer=null;node.composerToggle=null
         if (stopAudio) stopPlayback()
@@ -513,6 +516,13 @@ class AssistantService : Service() {
         node.cancel=presentation.cancel;node.retry=presentation.retry;node.copy=presentation.copy
         node.imageChoice=presentation.imageChoice;node.search=presentation.search;node.send=presentation.send
         val resize=presentation.resize
+        if(node.awaitingAudioApproval) {
+            node.audioApproval=LinearLayout(uiContext).apply {
+                gravity=Gravity.CENTER_VERTICAL
+                action("转写",true) { approvePendingAudio(node) }.apply { accessible("确认转写本段录音，按音频默认输出处理") }
+                action("丢弃") { discardPendingAudio(node) }.apply { accessible("丢弃本段录音，不发起转写") }
+            }.also { sourceContent.addView(it) }
+        }
         node.source=uiContext.label("",11f,true).apply { minHeight=dp(28); gravity=Gravity.CENTER_VERTICAL;isClickable=true;accessible(when(node.kind){"photo"->"展开本次截图";"audio"->"展开转写原文";else->"展开所选原文"});setOnClickListener {
             if(node.kind=="photo")node.sourceImage?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE}
             else if(node.kind=="text") {node.originalExpanded=!node.originalExpanded;node.transcript?.apply{maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}}
@@ -553,7 +563,7 @@ class AssistantService : Service() {
             })
         }
         root.addView(body,FrameLayout.LayoutParams(-1,-1))
-        setComposerExpanded(node,node.composerExpanded)
+        setComposerExpanded(node,node.composerExpanded&&!node.awaitingAudioApproval)
         installDrag(node,header,root,layout,false);installDrag(node,resize,root,layout,true)
         if(Build.VERSION.SDK_INT>=30)root.setOnApplyWindowInsetsListener{_,insets->
             val ime=insets.getInsets(WindowInsets.Type.ime()).bottom
@@ -612,6 +622,7 @@ class AssistantService : Service() {
     }}
     private fun openConversationInApp(node:FloatingConversation){
         if(!alive||gathering||node.detached||node.openingInApp)return
+        if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
         node.openingInApp=true
         // Keep the visible overlay until startActivity so the user-initiated launch is allowed.
         try {
@@ -656,8 +667,10 @@ class AssistantService : Service() {
         val text=messages.joinToString("\n\n") { it.second }.takeLast(100000)
         val scroll=node.scroll;val nearBottom=scroll==null||(scroll.scrollY+scroll.height>=(node.content?.height ?: 0)-dp(48))
         renderFloatingMessages(node,messages)
-        node.status?.text=if(text.isBlank()&&!node.chat.busy)"${when(node.kind){"photo"->"截图";"audio"->"录音";else->"原文"}}已就绪，输入问题后发送" else node.chat.status
-        node.send?.isEnabled=!node.chat.busy&&!gathering&&recorder==null
+        node.status?.text=if(node.awaitingAudioApproval)"已达录音上限，录音已停止，尚未上传。请选择转写或丢弃。" else if(text.isBlank()&&!node.chat.busy)"${when(node.kind){"photo"->"截图";"audio"->"录音";else->"原文"}}已就绪，输入问题后发送" else node.chat.status
+        node.audioApproval?.visibility=if(node.awaitingAudioApproval)View.VISIBLE else View.GONE
+        node.composerToggle?.isEnabled=!node.awaitingAudioApproval
+        node.send?.isEnabled=!node.awaitingAudioApproval&&!node.chat.busy&&!gathering&&recorder==null
         node.cancel?.visibility=if(node.chat.busy)View.VISIBLE else View.GONE
         node.retry?.visibility=if(node.chat.canRetry&&!gathering)View.VISIBLE else View.GONE
         node.copy?.visibility=if(text.isNotBlank())View.VISIBLE else View.GONE
@@ -665,7 +678,8 @@ class AssistantService : Service() {
         node.imageChoice?.alpha=if(node.imageChoice?.isEnabled==false).55f else 1f
         updateSearch(node)
         if(nearBottom)scroll?.post{if(node.scroll===scroll)scroll.fullScroll(View.FOCUS_DOWN)}
-        if(!node.chat.busy&&node.chat.status!=lastFinished){lastFinished=node.chat.status;ProbeState.lastEvent=node.chat.status}
+        if(node.awaitingAudioApproval)ProbeState.lastEvent="已达录音上限，等待确认；尚未上传"
+        else if(!node.chat.busy&&node.chat.status!=lastFinished){lastFinished=node.chat.status;ProbeState.lastEvent=node.chat.status}
     }
     /** Keep message views stable while a streaming reply grows and only update changed text. */
     private fun renderFloatingMessages(node:FloatingConversation,messages:List<Pair<Boolean,String>>) {
@@ -739,6 +753,7 @@ class AssistantService : Service() {
     private fun submitDefault(node:FloatingConversation){val c=readApiConfig()?:return;node.automaticFirstQuestion=true;sendQuestion(node,when(node.kind){"photo"->c.defaultQuestion;"audio"->c.audioQuestion;else->c.textQuestion},c)}
     private fun readApiConfig():AppConfig?=try{SettingsStore(this).load()}catch(_:Exception){toast("无法读取 API 配置，请在设置中重新保存密钥");null}
     private fun sendQuestion(node:FloatingConversation,text:String,frozen:AppConfig?=null){
+        if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
         if(node.chat.busy||gathering||recorder!=null){toast("请先结束当前采集或请求");return}
         if(text.isBlank()){toast("请输入问题");return}
         val base=frozen?:readApiConfig()?:return
@@ -835,20 +850,47 @@ class AssistantService : Service() {
     }
     private fun startRecording(){
         if(recorder!=null||finishingAudio||gathering)return
+        nodes["audio"]?.takeIf{it.awaitingAudioApproval}?.let {
+            showWindow(it);toast("上一段录音已达上限，请先选择转写或丢弃");return
+        }
         if(projection==null || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestCaptureConsent(AssistantActions.AUDIO);return}
         val source=projection?:return
         if(nodes["audio"]?.chat?.busy==true){toast("请先等待或取消当前音频回答");showWindow(nodes.getValue("audio"));return}
         removeMenu();hideUnpinned();stopPlayback();audioManual=false
+        val recordingConfig=config
         val token=recordingGate.begin();val next=PlaybackRecorder(this,main);recorder=next
-        try{next.start(source, config.recordingMaxMinutes){result->
+        try{next.start(source, recordingConfig.recordingMaxMinutes){result->
             if(!alive||recorder!==next||!recordingGate.complete(token)){result?.file?.delete();return@start}
             recorder=null;finishingAudio=false;ProbeState.recording=false
             if(result==null){toast("未保存有效录音，请检查权限和音源");return@start}
-            val node=fresh("audio");node.clip=result;node.imageMode=2;archivePrepared(node);showWindow(node)
+            val disposition=recordingDisposition(result.reachedLimit,recordingConfig.recordingLimitAction,config.autoAskAudio,audioManual)
+            if(disposition==RecordingDisposition.DISCARD){
+                val deleted=result.file.delete()
+                ProbeState.lastEvent=if(deleted)"已达录音上限，本段录音已丢弃，未发起转写" else "已达录音上限，未发起转写；录音文件清理失败"
+                toast(ProbeState.lastEvent);showBubble();return@start
+            }
+            val node=fresh("audio");node.clip=result;node.imageMode=2
+            node.awaitingAudioApproval=disposition==RecordingDisposition.PROMPT
+            if(!node.awaitingAudioApproval)archivePrepared(node)
+            showWindow(node)
+            if(node.awaitingAudioApproval){toast("已达录音上限，录音已停止，等待确认转写");return@start}
             if(result.peak<.0001)toast("未检测到有效声音，音源可能不允许采集")
-            else if(config.autoAskAudio&&!audioManual)submitDefault(node)
+            else if(disposition==RecordingDisposition.PROCESS)submitDefault(node)
         };ProbeState.recording=true;ProbeState.lastEvent="内部音频录制已开始";showBubble()}
         catch(e:Exception){recordingGate.cancel();recorder=null;next.stop(true);finishingAudio=false;ProbeState.recording=false;toast(e.message?:"无法开始内部录音")}
+    }
+    private fun approvePendingAudio(node:FloatingConversation){
+        if(!node.awaitingAudioApproval||nodes[node.kind]!==node)return
+        node.awaitingAudioApproval=false
+        archivePrepared(node);showWindow(node);submitDefault(node)
+    }
+    private fun discardPendingAudio(node:FloatingConversation){
+        if(!node.awaitingAudioApproval||nodes[node.kind]!==node)return
+        node.awaitingAudioApproval=false
+        hideWindow(node);nodes.remove(node.kind);node.chat.close()
+        val deleted=node.clip?.file?.delete()==true
+        ProbeState.lastEvent=if(deleted)"本段录音已丢弃，未发起转写" else "未发起转写；录音文件清理失败"
+        toast(ProbeState.lastEvent);showBubble()
     }
     private fun finishRecording(manual:Boolean){val current=recorder?:return;if(finishingAudio)return;audioManual=manual;finishingAudio=true;current.stop(false)}
     private fun cancelRecording(notify:Boolean){

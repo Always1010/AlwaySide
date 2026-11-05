@@ -11,10 +11,9 @@ import android.os.Process
 import android.os.SystemClock
 import java.io.File
 import java.io.RandomAccessFile
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
 
-internal data class AudioClip(val file: File,val seconds: Float,val peak: Double,val error: String?)
+internal data class AudioClip(val file: File,val seconds: Float,val peak: Double,val error: String?,val reachedLimit: Boolean=false)
 
 /** Capture the playback source only. Permission does not select a microphone source. */
 internal class PlaybackRecorder(private val context: Context,private val main: Handler) {
@@ -22,8 +21,7 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
         private set
     @Volatile var level=0.0
         private set
-    private val stopping=AtomicBoolean(false)
-    private val discard=AtomicBoolean(false)
+    private val completion=RecordingCompletion()
     private var record: AudioRecord?=null
     private var thread: Thread?=null
 
@@ -59,10 +57,10 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
                     val data=ShortArray(4096)
                     val encoded=ByteArray(data.size*2)
                     val startedAt=SystemClock.elapsedRealtime()
-                    while (!stopping.get() && bytes<maxBytes && SystemClock.elapsedRealtime()-startedAt<maxMillis) {
+                    while (!completion.shouldStop(bytes,SystemClock.elapsedRealtime()-startedAt,maxBytes,maxMillis)) {
                         val count=audio.read(data,0,minOf(data.size,(maxBytes-bytes)/2),AudioRecord.READ_NON_BLOCKING)
                         if (count<0) {
-                            if (!stopping.get()) failure="音频读取中断（$count）"
+                            if (completion.reason==null) failure="音频读取中断（$count）"
                             break
                         }
                         if (count==0) { Thread.sleep(10); continue }
@@ -84,15 +82,14 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
             finally {
                 runCatching { audio.stop() }; audio.release()
             }
-            val clip=if (discard.get() || bytes==0 || failure?.startsWith("录音未完成")==true) {
+            val clip=if (completion.reason==RecordingEndReason.CANCELLED || bytes==0 || failure?.startsWith("录音未完成")==true) {
                 file.delete(); null
-            } else AudioClip(file,seconds,peak,failure)
+            } else AudioClip(file,seconds,peak,failure,completion.reason==RecordingEndReason.LIMIT)
             main.post { record=null; thread=null; onDone(clip) }
         },"playback-capture").apply { start() }
     }
     fun stop(discardClip: Boolean=false) {
-        if (discardClip) discard.set(true)
-        stopping.set(true)
+        completion.stop(discardClip)
         // release() remains owned by the recording thread.
         runCatching { record?.stop() }
     }

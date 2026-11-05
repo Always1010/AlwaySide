@@ -40,6 +40,7 @@ internal data class InteractionConfig(
     val recordingMaxMinutes: Int = RecordingLimits.DEFAULT_MINUTES,
     val collapseFollowUpByDefault: Boolean = true,
     val saveHistoryAudio: Boolean = true,
+    val recordingLimitAction: RecordingLimitAction = RecordingLimitAction.DISCARD,
 ) {
     fun action(taps: Int, recording: Boolean): String = when {
         recording && taps == 1 -> recordingSingleAction
@@ -80,6 +81,7 @@ internal class InteractionPreferences(private val context: Context) {
             prefs.getInt("recordingMaxMinutes", d.recordingMaxMinutes).coerceIn(0, RecordingLimits.MAX_MINUTES),
             prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
             prefs.getBoolean("saveHistoryAudio", d.saveHistoryAudio),
+            RecordingLimitAction.from(prefs.getString("recordingLimitAction", null)),
         )
         if (version >= InteractionDefaults.VERSION) return loaded
         val upgraded = InteractionDefaults.upgrade(loaded)
@@ -106,6 +108,7 @@ internal class InteractionPreferences(private val context: Context) {
             .putBoolean("rememberWindowSize", value.rememberWindowSize).putBoolean("defaultPinned", value.defaultPinned)
             .putBoolean("saveHistoryImages", value.saveHistoryImages).putBoolean("autoAskText", value.autoAskText)
             .putInt("recordingMaxMinutes", value.recordingMaxMinutes)
+            .putString("recordingLimitAction", value.recordingLimitAction.value)
             .putBoolean("collapseFollowUpByDefault", value.collapseFollowUpByDefault)
             .putBoolean("saveHistoryAudio", value.saveHistoryAudio).commit()) { "无法保存交互设置" }
     }
