@@ -55,6 +55,7 @@ internal class ChatScreen(
         ?: savedState?.takeIf { it.containsKey("webSearchOverride") }?.getBoolean("webSearchOverride")
     private val suggestionViews = mutableMapOf<String, SearchSuggestionsView>()
     private val visibleSuggestionKeys = mutableSetOf<String>()
+    private val renderedMessages = mutableMapOf<ChatMessage, CharSequence>()
     private var activeConnection = runCatching { SettingsStore(this).load() }.getOrDefault(AppConfig())
     private var defaultWebSearch = activeConnection.webSearch
     private var image: Bitmap? = null
@@ -260,10 +261,15 @@ internal class ChatScreen(
                 setPadding(0, dp(12), 0, dp(12))
             })
         }
-        session.messages.forEachIndexed { index, message -> addMessage(message.role, message.text, message.evidence, message.searchSuggestions, index) }
+        renderedMessages.keys.retainAll(session.messages.toSet())
+        session.messages.forEachIndexed { index, message ->
+            val rendered = renderedMessages.getOrPut(message) { MarkdownText.render(message.text) }
+            addMessage(message.role, message.text, message.evidence, message.searchSuggestions, index, rendered)
+        }
         if (hasPending) {
             addMessage("user", session.question, session.evidence)
-            if (session.partial.isNotBlank()) addMessage("assistant", session.partial, if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文")
+            if (session.partial.isNotBlank()) addMessage("assistant", session.partial, if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文",
+                presentation = if (session.busy) session.partial else MarkdownText.render(session.partial))
         }
         suggestionViews.keys.filterNot { it in visibleSuggestionKeys }.toList().forEach { key ->
             suggestionViews.remove(key)?.let { (it.parent as? android.view.ViewGroup)?.removeView(it); it.destroy() }
@@ -347,7 +353,8 @@ internal class ChatScreen(
         if (image == null) reuse.isChecked = false
     }
 
-    private fun addMessage(role: String, value: String, evidence: String, suggestions: String = "", messageIndex: Int = -1) {
+    private fun addMessage(role: String, value: String, evidence: String, suggestions: String = "", messageIndex: Int = -1,
+                           presentation: CharSequence? = null) {
         val isUser = role == "user"
         val block = column().apply {
             setPadding(if (isUser) dp(10) else 0, if (isUser) dp(7) else 0,
@@ -356,7 +363,7 @@ internal class ChatScreen(
             if (role != "assistant" && role != "user") addView(label("上下文", 10f, true))
             addView(label("", if (isUser) 12f else 13f).apply {
                 setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
-                text = MarkdownText.render(value); setTextIsSelectable(true)
+                text = presentation ?: MarkdownText.render(value); setTextIsSelectable(true)
                 setLineSpacing(dp(4).toFloat(), 1f)
                 if (isUser) { maxWidth = dp(320); setTextColor(ON_TONAL_SURFACE) }
             })
@@ -480,6 +487,7 @@ internal class ChatScreen(
     }
 
     fun dispose(retaining: Boolean = false) {
+        renderedMessages.clear()
         suggestionViews.values.forEach { (it.parent as? android.view.ViewGroup)?.removeView(it); it.destroy() }
         suggestionViews.clear()
         if (closing) return

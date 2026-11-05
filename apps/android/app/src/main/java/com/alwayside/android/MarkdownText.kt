@@ -25,18 +25,17 @@ internal object MarkdownText {
                 out.append(clean)
                 out.setSpan(TypefaceSpan("monospace"), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             } else {
-                val pattern = Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`|\\[([^]]+)]\\((https://[^\\s)]+)\\)")
-                var cursor = 0
-                pattern.findAll(clean).forEach { match ->
-                    out.append(clean.substring(cursor, match.range.first))
+                MarkdownInline.parse(clean).forEach { part ->
                     val begin = out.length
-                    val group = when { match.groups[1] != null -> 1; match.groups[2] != null -> 2; else -> 3 }
-                    out.append(match.groupValues[group])
-                    val span = when (group) { 1 -> StyleSpan(Typeface.BOLD); 2 -> TypefaceSpan("monospace"); else -> URLSpan(match.groupValues[4]) }
-                    out.setSpan(span, begin, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    cursor = match.range.last + 1
+                    out.append(part.text)
+                    val span = when (part.style) {
+                        MarkdownInline.Style.PLAIN -> null
+                        MarkdownInline.Style.BOLD -> StyleSpan(Typeface.BOLD)
+                        MarkdownInline.Style.CODE -> TypefaceSpan("monospace")
+                        MarkdownInline.Style.LINK -> URLSpan(part.url)
+                    }
+                    if (span != null) out.setSpan(span, begin, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 }
-                out.append(clean.substring(cursor))
             }
             if (heading != null) {
                 out.setSpan(StyleSpan(Typeface.BOLD), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
