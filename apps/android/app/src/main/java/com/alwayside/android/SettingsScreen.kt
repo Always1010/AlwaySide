@@ -58,7 +58,7 @@ internal class SettingsScreen(
     private val audioOutputOptions = linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 中文翻译", "interpret" to "原文 + 按音频问题回答")
     private var page = Page.HOME
     private var readable = true
-    private var ballSize = 28
+    private var ballSize = 36
     private var ballOpacity = 55
     private var ballColor = InteractionConfig().ballColor
     private var colorPalette: LinearLayout? = null

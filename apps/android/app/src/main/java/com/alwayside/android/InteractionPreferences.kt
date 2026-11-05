@@ -19,9 +19,9 @@ internal object AssistantActions {
 }
 
 internal data class InteractionConfig(
-    val ballSize: Int = 28,
+    val ballSize: Int = 36,
     val ballOpacity: Int = 55,
-    val ballColor: Int = 0xFF72968E.toInt(),
+    val ballColor: Int = 0xFFCC5C74.toInt(),
     val singleAction: String = AssistantActions.MENU,
     val doubleAction: String = AssistantActions.AUDIO,
     val tripleAction: String = AssistantActions.NONE,

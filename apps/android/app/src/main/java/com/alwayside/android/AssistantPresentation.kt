@@ -23,8 +23,8 @@ import kotlin.math.sin
 
 /** Shared presentation only: no preferences, services, capture, providers or navigation. */
 @SuppressLint("ViewConstructor")
-internal class AssistantBubbleView(context: Context, private val size: Int = 28,
-    private val opacity: Int = 55, private val color: Int = 0xFF72968E.toInt()) : View(context) {
+internal class AssistantBubbleView(context: Context, private val size: Int = 36,
+    private val opacity: Int = 55, private val color: Int = 0xFFCC5C74.toInt()) : View(context) {
     var recording = false
     var working = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
