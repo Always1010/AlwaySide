@@ -90,7 +90,16 @@ jobs:
           fi
 
       - name: Ensure Android SDK packages
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        run: |
+          sdk="${ANDROID_HOME:?ANDROID_HOME is not set}"
+          if [[ -f "$sdk/platforms/android-36/android.jar" && \
+                -x "$sdk/build-tools/36.0.0/apksigner" && \
+                -x "$sdk/build-tools/36.0.0/aapt" ]]; then
+            echo 'Required Android SDK packages are already installed.'
+          else
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" \
+              'platforms;android-36' 'build-tools;36.0.0'
+          fi
 
       - name: Lint and build signed release APK
         working-directory: apps/android
