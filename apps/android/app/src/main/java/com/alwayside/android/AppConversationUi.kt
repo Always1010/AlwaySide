@@ -173,6 +173,7 @@ internal class HistoryListScreen(
             override fun onDrawerClosed(drawerView: View) { onSelectionChanged() }
         })
         drawerLayout = this
+        setDrawerLockMode(if (selecting) DrawerLayout.LOCK_MODE_LOCKED_CLOSED else DrawerLayout.LOCK_MODE_UNLOCKED)
         renderDrawer()
     }
 
