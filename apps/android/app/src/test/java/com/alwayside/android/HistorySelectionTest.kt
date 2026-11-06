@@ -13,7 +13,7 @@ class HistorySelectionTest {
         assertTrue(selection.selecting)
     }
 
-    @Test fun cancelAndDeselectingLastItemExitSelection() {
+    @Test fun deselectingLastItemKeepsSelectionUntilExplicitCancel() {
         val selection = HistorySelection()
         selection.select("a")
         assertTrue(selection.cancel())
@@ -21,6 +21,8 @@ class HistorySelectionTest {
         assertTrue(selection.snapshot().isEmpty())
         selection.select("b")
         selection.toggle("b")
+        assertTrue(selection.selecting)
+        assertTrue(selection.cancel())
         assertFalse(selection.selecting)
     }
 
@@ -29,7 +31,20 @@ class HistorySelectionTest {
         selection.retain(listOf("b", "c"))
         assertEquals(listOf("b"), selection.snapshot())
         selection.retain(emptyList())
-        assertFalse(selection.selecting)
+        assertTrue(selection.selecting)
+        assertTrue(selection.snapshot().isEmpty())
+    }
+
+    @Test fun selectAllUsesOnlyFilteredIdsAndEmptyModeCanBeRestored() {
+        val selection = HistorySelection(active = true)
+        assertTrue(selection.selecting)
+        assertFalse(selection.allSelected(emptyList()))
+        selection.toggleAll(listOf("match-a", "match-b", "match-a"))
+        assertEquals(listOf("match-a", "match-b"), selection.snapshot())
+        assertTrue(selection.allSelected(listOf("match-a", "match-b")))
+        selection.toggleAll(listOf("match-a", "match-b"))
+        assertTrue(selection.snapshot().isEmpty())
+        assertTrue(HistorySelection(selection.snapshot(), selection.selecting).selecting)
     }
 
     @Test fun confirmationDeletesOnlyItsSelectedSnapshot() {

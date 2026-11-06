@@ -44,6 +44,7 @@ class MainActivity : ThemedActivity() {
     private var historyView: View? = null
     private var historyPermission: View? = null
     private var restoredHistorySelection = emptyList<String>()
+    private var restoredHistorySelecting = false
     private var restoredHistoryBrowse = HistoryBrowse()
     private var backCallback: android.window.OnBackInvokedCallback? = null
     private var retainedChatOffered = false
@@ -60,7 +61,7 @@ class MainActivity : ThemedActivity() {
     private data class RetainedApp(
         val pages: List<String>, val chat: ChatScreen.RetainedConversation?,
         val settingsPage: String?, val historyY: Int, val historySelection: List<String>,
-        val historyBrowse: HistoryBrowse,
+        val historyBrowse: HistoryBrowse, val historySelecting: Boolean,
         val previewOwner: Any, val slideLesson: LongPressSlideLesson?,
     )
 
@@ -85,10 +86,13 @@ class MainActivity : ThemedActivity() {
         historyY = savedInstanceState?.getInt("history_y") ?: retained?.historyY ?: 0
         restoredHistorySelection = savedInstanceState?.getStringArrayList("history_selection")
             ?: retained?.historySelection.orEmpty()
+        restoredHistorySelecting = savedInstanceState?.getBoolean("history_selecting", restoredHistorySelection.isNotEmpty())
+            ?: retained?.historySelecting ?: restoredHistorySelection.isNotEmpty()
         restoredHistoryBrowse = if (savedInstanceState != null) HistoryBrowse(
             savedInstanceState.getBoolean("history_favorites"), savedInstanceState.getString("history_tag"),
             savedInstanceState.getBoolean("history_untagged"), savedInstanceState.getString("history_query").orEmpty(),
             HistoryDateRange.restore(savedInstanceState.getString("history_date_start"), savedInstanceState.getString("history_date_end")),
+            savedInstanceState.getInt("history_page"),
         ) else retained?.historyBrowse ?: HistoryBrowse()
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
@@ -346,8 +350,10 @@ class MainActivity : ThemedActivity() {
             val history = HistoryListScreen(this, onOpen = { openChat(it) }, onSettings = ::openSettings,
                 onToggleAssistant = ::toggleAssistant,
                 onSelectionChanged = ::historySelectionChanged, initialSelection = restoredHistorySelection,
+                initialSelecting = restoredHistorySelecting,
                 onIntro = ::showGuideInvitation, browse = restoredHistoryBrowse)
             restoredHistorySelection = emptyList()
+            restoredHistorySelecting = false
             historyScreen = history
             historyScroll = history.scrollView
             root = history.wrap(LinearLayout(this).apply {
@@ -359,6 +365,7 @@ class MainActivity : ThemedActivity() {
                     action("准备实际使用", true, ::openPreparation)
                 }.also { addView(it) }
                 addView(history.scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
+                addView(history.selectionActions, LinearLayout.LayoutParams(-1, -2))
             })
             historyView = root
             history.restoreScroll(historyY)
@@ -471,7 +478,9 @@ class MainActivity : ThemedActivity() {
         outState.putString("preparation_settings_page",preparationSettings?.pageName() ?: preparationSettingsPage)
         outState.putInt("history_y",historyScroll?.scrollY ?: historyY)
         outState.putStringArrayList("history_selection", ArrayList(historyScreen?.selectedIds() ?: restoredHistorySelection))
+        outState.putBoolean("history_selecting", historyScreen?.selecting ?: restoredHistorySelecting)
         val browse = historyScreen?.browse ?: restoredHistoryBrowse
+        outState.putInt("history_page", browse.page)
         outState.putBoolean("history_favorites", browse.favorites)
         outState.putString("history_tag", browse.tag)
         outState.putBoolean("history_untagged", browse.untagged)
@@ -490,7 +499,8 @@ class MainActivity : ThemedActivity() {
     override fun onRetainNonConfigurationInstance(): Any {
         val retained=chatScreen?.retain() ?: pendingRetainedChat;retainedChatOffered=retained!=null
         return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName() ?: restoredSettingsPage,historyScroll?.scrollY ?: historyY,
-            historyScreen?.selectedIds() ?: restoredHistorySelection, historyScreen?.browse ?: restoredHistoryBrowse,previewOwner,slideLesson)
+            historyScreen?.selectedIds() ?: restoredHistorySelection, historyScreen?.browse ?: restoredHistoryBrowse,
+            historyScreen?.selecting ?: restoredHistorySelecting,previewOwner,slideLesson)
     }
 
     override fun onDestroy() {
