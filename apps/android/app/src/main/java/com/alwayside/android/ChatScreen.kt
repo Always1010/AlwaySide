@@ -144,7 +144,7 @@ internal class ChatScreen(
             session.messages.isNotEmpty() || session.question.isNotBlank()) return
         try {
             composer.setText(SettingsStore(this).load().textQuestion.ifBlank { "请将选中文字翻译成中文，并按需要解释。" })
-            if (InteractionPreferences(this).load().autoAskText) submit()
+            if (InteractionPreferences(this).load().autoAsk("text")) submit()
         } catch (error: Exception) {
             toast(error.message?.take(160) ?: "无法读取默认提问，请输入问题后发送")
         }
