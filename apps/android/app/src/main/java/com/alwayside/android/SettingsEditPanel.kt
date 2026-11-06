@@ -102,6 +102,7 @@ internal class SettingsEditPanel(
             addView(ScrollView(context).apply { isFillViewport = true; addView(content) }, LinearLayout.LayoutParams(-1, -2))
         }
         setContentView(layout)
+        if (secret) window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         setOnShowListener {
             behavior.skipCollapsed = true
