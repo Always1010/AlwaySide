@@ -9,6 +9,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 
+internal fun android.content.Context.bubbleSlideThreshold(config: InteractionConfig): Float =
+    maxOf(dp(config.slideDistanceDp).toFloat(), ViewConfiguration.get(this).scaledTouchSlop * 1.5f)
+
 /** Owns one pointer stream. Both the real bubble and practice use these exact decisions. */
 internal class BubbleTouchController(
     private val view: View,
@@ -19,7 +22,9 @@ internal class BubbleTouchController(
     private val onMove: (dx: Float, dy: Float) -> Unit = { _, _ -> },
     private val onMoveEnd: () -> Unit = {},
     private val onArmedChanged: (Boolean) -> Unit = {},
-    private val onPreview: (dx: Float, dy: Float) -> Unit = { _, _ -> },
+    private val onPreview: (BubbleGestureStateMachine.Preview) -> Unit = {},
+    private val canSelect: (BubbleGesture) -> Boolean = { true },
+    private val onCenterCancelled: () -> Unit = {},
     private val onCancel: () -> Unit = {},
     private val hapticFeedback: () -> Unit = { BubbleHaptics.longPress(view) },
 ) : View.OnTouchListener, View.OnAttachStateChangeListener {
@@ -63,9 +68,8 @@ internal class BubbleTouchController(
                 val systemHold = ViewConfiguration.getLongPressTimeout().toLong()
                 machine = BubbleGestureStateMachine(snapshot.longPressSlide,
                     if (snapshot.longPressSlide) maxOf(snapshot.longPressMillis.toLong(), systemHold) else systemHold,
-                    snapshot.slideWindowMillis.toLong(),
                     ViewConfiguration.get(view.context).scaledTouchSlop.toFloat(),
-                    maxOf(view.context.dp(32).toFloat(), ViewConfiguration.get(view.context).scaledTouchSlop * 2f), onLeft()).apply {
+                    view.context.bubbleSlideThreshold(snapshot), onLeft()).apply {
                     down(event.rawX, event.rawY, event.eventTime)
                 }
                 view.isPressed = true
@@ -94,12 +98,14 @@ internal class BubbleTouchController(
                 processMove(state, event.rawX, event.rawY, event.eventTime)
                 if (!tracking) return true
                 val moved = state.phase == BubbleGestureStateMachine.Phase.MOVING
+                val cancelledRelease = state.phase == BubbleGestureStateMachine.Phase.ARMED && state.returnedToCenter
                 val previous = state.phase
                 val gesture = state.up(event.eventTime)
                 notifyReachedArm(state, previous, event.eventTime)
                 finish()
                 if (moved) onMoveEnd()
                 else gesture?.let(onGesture)
+                if (cancelledRelease) onCenterCancelled()
             }
             MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> cancel()
         }
@@ -108,6 +114,7 @@ internal class BubbleTouchController(
 
     private fun processMove(state: BubbleGestureStateMachine, x: Float, y: Float, now: Long) {
         val previous = state.phase
+        val previousSelection = state.selected
         val gesture = state.move(x, y, now)
         notifyReachedArm(state, previous, now)
         if (state.phase == BubbleGestureStateMachine.Phase.MOVING) {
@@ -115,7 +122,12 @@ internal class BubbleTouchController(
             onMove(state.dx, state.dy)
         } else {
             updateFeedback(now)
-            if (tracking && state.phase == BubbleGestureStateMachine.Phase.ARMED) onPreview(state.dx, state.dy)
+            if (tracking && state.phase == BubbleGestureStateMachine.Phase.ARMED) {
+                onPreview(state.preview)
+                state.selected?.takeIf { it != previousSelection && canSelect(it) }?.let {
+                    BubbleHaptics.selection(view)
+                }
+            }
         }
         if (state.phase == BubbleGestureStateMachine.Phase.FINISHED) {
             finish()
@@ -140,11 +152,12 @@ internal class BubbleTouchController(
         if (state.phase == BubbleGestureStateMachine.Phase.ARMED && !armed) {
             setArmed(true)
         }
-        visual.setGestureFeedback(state.phase, state.progress(now), state.dx, state.dy, state.slideEnabled)
+        visual.setGestureFeedback(state.phase, state.progress(now), state.dx, state.dy, state.slideEnabled, state.cancelled)
         handler.removeCallbacks(deadline)
         state.nextDeadline?.let { handler.postAtTime(deadline, it) }
         if (ValueAnimator.areAnimatorsEnabled() && !framePending &&
-            (state.phase == BubbleGestureStateMachine.Phase.PRESSING || state.phase == BubbleGestureStateMachine.Phase.ARMED)) {
+            (state.phase == BubbleGestureStateMachine.Phase.PRESSING ||
+                (state.phase == BubbleGestureStateMachine.Phase.ARMED && now < state.armedAt + 180))) {
             framePending = true
             view.postOnAnimation(frame)
         }

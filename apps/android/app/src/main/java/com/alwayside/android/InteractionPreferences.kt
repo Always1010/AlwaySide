@@ -36,7 +36,8 @@ internal data class InteractionConfig(
     val menuWebSearch: Boolean? = null,
     val longPressSlide: Boolean = false,
     val longPressMillis: Int = 600,
-    val slideWindowMillis: Int = 1500,
+    val slideDistanceDp: Int = 24,
+    val actionCircleSizeDp: Int = 32,
     val bindings: List<GestureBinding>? = null,
 ) {
     fun resolvedBindings() = bindings ?: GestureBindings.defaults()
@@ -86,17 +87,21 @@ internal class InteractionPreferences(private val context: Context) {
             menuWebSearch = if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
             longPressSlide = prefs.getBoolean("longPressSlide", false),
             longPressMillis = prefs.getInt("longPressMillis", 600).coerceIn(400, 1500),
-            slideWindowMillis = prefs.getInt("slideWindowMillis", 1500).coerceIn(500, 3000),
+            slideDistanceDp = prefs.getInt("slideDistanceDp", d.slideDistanceDp).coerceIn(16, 40).let { it / 4 * 4 },
+            actionCircleSizeDp = prefs.getInt("actionCircleSizeDp", d.actionCircleSizeDp).coerceIn(28, 40).let { it / 4 * 4 },
             bindings = savedBindings.takeIf(GestureBindings::valid) ?: GestureBindings.defaults(),
         )
     }
     fun save(value: InteractionConfig) {
         require(value.ballSize in 18..48 && value.ballOpacity in 15..100)
         require(value.recordingMaxMinutes in 0..RecordingLimits.MAX_MINUTES)
-        require(value.longPressMillis in 400..1500 && value.slideWindowMillis in 500..3000)
+        require(value.longPressMillis in 400..1500)
+        require(value.slideDistanceDp in 16..40 && value.slideDistanceDp % 4 == 0)
+        require(value.actionCircleSizeDp in 28..40 && value.actionCircleSizeDp % 4 == 0)
         require(GestureBindings.valid(value.resolvedBindings()))
         val edit=prefs.edit().putInt("gestureBindingsVersion", 2).putBoolean("longPressSlide", value.longPressSlide)
-            .putInt("longPressMillis", value.longPressMillis).putInt("slideWindowMillis", value.slideWindowMillis)
+            .putInt("longPressMillis", value.longPressMillis).remove("slideWindowMillis")
+            .putInt("slideDistanceDp", value.slideDistanceDp).putInt("actionCircleSizeDp", value.actionCircleSizeDp)
             .putInt("ballSize", value.ballSize).putInt("ballOpacity", value.ballOpacity)
             .putInt("ballColor", value.ballColor).putBoolean("autoAskImage", value.autoAskImage)
             .putBoolean("autoAskAudio", value.autoAskAudio).putBoolean("rememberWindowPosition", value.rememberWindowPosition)

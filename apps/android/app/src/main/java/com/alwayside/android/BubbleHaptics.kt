@@ -13,6 +13,14 @@ import android.view.View
 
 /** Touch feedback shared by the overlay and its practice controller. */
 internal object BubbleHaptics {
+    fun selection(view: View) {
+        try {
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        } catch (_: RuntimeException) {
+            // Optional selection feedback must never interrupt release or cancellation.
+        }
+    }
+
     fun longPress(view: View) = perform(
         standardFeedback = { view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) },
         fallbackAllowed = {

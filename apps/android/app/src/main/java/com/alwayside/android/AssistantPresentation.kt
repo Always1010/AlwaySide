@@ -32,18 +32,21 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
     var working = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sparkle = context.prototypeIcon(R.drawable.ic_line_sparkles).apply { setTint(Color.WHITE) }
+    private val cancelIcon = context.prototypeIcon(R.drawable.ic_line_close).apply { setTint(Color.WHITE) }
     private var gesturePhase = BubbleGestureStateMachine.Phase.IDLE
     private var gestureProgress = 0f
     private var gestureDx = 0f
     private var gestureDy = 0f
     private var gestureSlide = false
+    private var gestureCancelled = false
     private var phaseStartedAt = 0L
 
     fun setGestureFeedback(phase: BubbleGestureStateMachine.Phase, progress: Float,
-        dx: Float = 0f, dy: Float = 0f, slideEnabled: Boolean = true) {
+        dx: Float = 0f, dy: Float = 0f, slideEnabled: Boolean = true, cancelled: Boolean = false) {
         if (phase != gesturePhase) phaseStartedAt = SystemClock.uptimeMillis()
         gesturePhase = phase; gestureProgress = progress.coerceIn(0f, 1f)
         gestureDx = dx; gestureDy = dy; gestureSlide = slideEnabled
+        gestureCancelled = cancelled
         invalidate()
     }
 
@@ -60,11 +63,10 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
         val elapsed = (SystemClock.uptimeMillis() - phaseStartedAt).coerceAtLeast(0)
         val pressFraction = if (animated) (elapsed / 100f).coerceAtMost(1f) else 1f
         val scale = when {
-            pressing -> 1f - .06f * pressFraction
+            pressing -> 1f - .04f * pressFraction
             armed && animated -> {
                 val t = (elapsed / 150f).coerceAtMost(1f)
-                if (t < .5f) .94f + .10f * sin(t * Math.PI).toFloat()
-                else 1f + .04f * sin(t * Math.PI).toFloat()
+                1f + .04f * sin(t * Math.PI).toFloat() - .04f * (1f-t)
             }
             else -> 1f
         }
@@ -81,7 +83,11 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
         paint.alpha = if (feedback) (normalAlpha + (255 - normalAlpha) * if (pressing) pressFraction else 1f).toInt() else normalAlpha
         paint.style = Paint.Style.FILL; canvas.drawCircle(x,y,radius,paint)
         paint.color = Color.WHITE; paint.alpha = if(recording || feedback)255 else (opacity * 2.55f).toInt()
-        if(recording) {
+        if (armed && gestureCancelled) {
+            val r = radius * .48f
+            cancelIcon.setBounds((x-r).toInt(),(y-r).toInt(),(x+r).toInt(),(y+r).toInt())
+            cancelIcon.draw(canvas)
+        } else if(recording) {
             val phase = SystemClock.uptimeMillis() / 180.0
             for(i in -1..1) {
                 val h = radius * (.35 + .55 * abs(sin(phase+i))).toFloat()
@@ -98,7 +104,7 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
             }
         }
         canvas.restoreToCount(save)
-        if (feedback && gestureSlide) {
+        if (pressing && gestureSlide) {
             // Keep the progress ring inside the 48dp touch target, including the largest ball.
             val ringRadius = (radius + context.dp(3)).coerceAtMost(minOf(width, height) / 2f - context.dp(1))
             paint.style = Paint.Style.STROKE; paint.strokeWidth = context.dp(1).coerceAtLeast(1).toFloat()

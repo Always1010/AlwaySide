@@ -300,29 +300,60 @@ class AssistantService : Service() {
     }
     private fun cancelGestures() { main.removeCallbacks(settleTaps); taps.cancel(); bubbleTouch?.cancel(); removeGestureHints() }
 
-    private fun removeGestureHints() { remove(gestureHints); gestureHints = null }
+    private fun removeGestureHints(animated: Boolean = false) {
+        val hints = gestureHints ?: return
+        if (animated) hints.hideAnimated {
+            if (gestureHints === hints) { remove(hints); gestureHints = null }
+        } else { remove(hints); gestureHints = null }
+    }
+
+    private fun constrainBubbleY(y: Int, height: Int): Int {
+        val maxTop = (height - dp(48)).coerceAtLeast(0)
+        if (!config.longPressSlide) {
+            val minimum = dp(8).coerceAtMost(maxTop)
+            return y.coerceIn(minimum, (height-dp(100)).coerceIn(minimum, maxTop))
+        }
+        // Leave room for the same physical up/down directions, even with the largest bubble.
+        val inset = dp(config.actionCircleDistanceDp + 28) - dp(24)
+        val minimum = inset.coerceIn(0, maxTop / 2)
+        val maximum = (maxTop - inset).coerceIn(minimum, maxTop)
+        return y.coerceIn(minimum, maximum)
+    }
+
+    private fun directionHint(snapshot: InteractionConfig, gesture: BubbleGesture, recording: Boolean): BubbleGestureHint {
+        val action = snapshot.gestureAction(gesture, recording)
+        val other = snapshot.gestureAction(gesture, !recording)
+        val shown = if (action == AssistantActions.NONE) other else action
+        val icon = when (shown) {
+            AssistantActions.SCREEN -> R.drawable.ic_line_scan
+            AssistantActions.CROP -> R.drawable.ic_line_crop
+            AssistantActions.START_AUDIO -> R.drawable.ic_line_audio
+            AssistantActions.END_AUDIO -> R.drawable.ic_line_stop
+            AssistantActions.CANCEL_AUDIO -> R.drawable.ic_line_trash
+            AssistantActions.MENU -> R.drawable.ic_line_menu
+            else -> null
+        }
+        val reason = if (action != AssistantActions.NONE || icon == null) null
+            else if (recording) "录音中不可用" else "当前未录音"
+        return BubbleGestureHint(if (icon == null) "未设置" else GestureBindings.title(shown), icon, reason)
+    }
 
     private fun showGestureHints(snapshot: InteractionConfig, recording: Boolean) {
         removeGestureHints()
         val ball = bubbleLayout ?: return
         val size = screenSize()
         val left = ball.x + ball.width / 2 < size.first / 2
-        fun title(gesture: BubbleGesture): String {
-            val action = snapshot.gestureAction(gesture, recording)
-            return if (action == AssistantActions.NONE) "未分配"
-                else if (recording && action in setOf(AssistantActions.SCREEN, AssistantActions.CROP)) "结束录音后可用"
-                else GestureBindings.title(action)
-        }
         val hints = BubbleGestureHintsView(uiContext,
-            listOf(BubbleGesture.UP, BubbleGesture.DOWN, BubbleGesture.INWARD).associateWith(::title), left, title(BubbleGesture.HOLD))
+            listOf(BubbleGesture.UP, BubbleGesture.DOWN, BubbleGesture.INWARD).associateWith { directionHint(snapshot, it, recording) },
+            left, GestureBindings.title(snapshot.gestureAction(BubbleGesture.HOLD, recording)), snapshot)
         hints.measure(View.MeasureSpec.makeMeasureSpec((size.first - dp(16)).coerceAtLeast(dp(48)), View.MeasureSpec.AT_MOST),
             View.MeasureSpec.makeMeasureSpec((size.second - dp(16)).coerceAtLeast(dp(48)), View.MeasureSpec.AT_MOST))
         val layout = params(hints.measuredWidth, hints.measuredHeight, false).apply {
             flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-            alpha = .8f
             x = (ball.x + ball.width / 2 - hints.anchorX).coerceIn(0, (size.first - width).coerceAtLeast(0))
             y = (ball.y + ball.height / 2 - hints.anchorY).coerceIn(0, (size.second - height).coerceAtLeast(0))
         }
+        hints.alignAnchor(ball.x + ball.width / 2 - layout.x, ball.y + ball.height / 2 - layout.y)
         try { windows.addView(hints, layout); gestureHints = hints; hints.showAnimated() }
         catch (_: RuntimeException) { remove(hints) }
     }
@@ -366,7 +397,7 @@ class AssistantService : Service() {
         lastKind = recentKind
         showBubble()
         if (ball != null) bubble?.let { view ->
-            bubbleLayout?.let { layout -> layout.x = ball.x; layout.y = ball.y; runCatching { windows.updateViewLayout(view, layout) } }
+            bubbleLayout?.let { layout -> layout.x = ball.x; layout.y = constrainBubbleY(ball.y, screenSize().second); runCatching { windows.updateViewLayout(view, layout) } }
         }
         if (hadMenu) showMenu(preserveWindows = true)
     }
@@ -379,7 +410,7 @@ class AssistantService : Service() {
         val glyph = AssistantBubbleView(uiContext,config.ballSize,config.ballOpacity,config.ballColor).also { view.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         val layout = params(dp(48), dp(48), false).apply {
             x = if (position.first) 0 else (size.first - dp(48)).coerceAtLeast(0)
-            y = (position.second * size.second).toInt().coerceIn(dp(8), (size.second - dp(100)).coerceAtLeast(dp(8)))
+            y = constrainBubbleY((position.second * size.second).toInt(), size.second)
         }
         var startX = layout.x; var startY = layout.y
         var touchRecording = recorder != null
@@ -406,15 +437,14 @@ class AssistantService : Service() {
                 } else {
                     cancelGestures()
                     val action = touchConfig.gestureAction(gesture, touchRecording)
-                    if (gesture.directional && action == AssistantActions.NONE) toast("此方向未绑定功能")
-                    else dispatchAction(action)
+                    if (action != AssistantActions.NONE) dispatchAction(action)
                 }
             }
         }, onMove = { dx, dy ->
             main.removeCallbacks(settleTaps); taps.cancel(); removeMenu()
             if (bubble === view) {
                 layout.x = (startX + dx).toInt().coerceIn(0, (size.first - layout.width).coerceAtLeast(0))
-                layout.y = (startY + dy).toInt().coerceIn(dp(8), (size.second - dp(100)).coerceAtLeast(dp(8)))
+                layout.y = constrainBubbleY((startY + dy).toInt(), size.second)
                 runCatching { windows.updateViewLayout(view, layout) }
             }
         }, onMoveEnd = {
@@ -423,8 +453,9 @@ class AssistantService : Service() {
             if (bubble === view) runCatching { windows.updateViewLayout(view, layout) }
         }, onArmedChanged = { armed ->
             if (armed) { main.removeCallbacks(settleTaps); taps.cancel(); showGestureHints(touchConfig, touchRecording) }
-            else removeGestureHints()
-        }, onPreview = { dx, dy -> gestureHints?.preview(dx, dy) }, onCancel = {
+            else removeGestureHints(animated = true)
+        }, onPreview = { preview -> gestureHints?.preview(preview) },
+            canSelect = { directionHint(touchConfig, it, touchRecording).available }, onCancel = {
             main.removeCallbacks(settleTaps); taps.cancel(); removeGestureHints()
         })
         try { windows.addView(view, layout); bubble = view; bubbleVisual = glyph; bubbleLayout = layout }

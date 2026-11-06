@@ -5,9 +5,9 @@ import org.junit.Test
 
 class BubbleGestureTest {
     private fun machine(enabled: Boolean = true, left: Boolean = false) =
-        BubbleGestureStateMachine(enabled, 600, 1500, 8f, 24f, left).apply { down(0f, 0f, 1000) }
+        BubbleGestureStateMachine(enabled, 600, 8f, 24f, left).apply { down(0f, 0f, 1000) }
 
-    @Test fun releaseAndTimeoutConfirmOnlyOnceAfterArming() {
+    @Test fun releaseConfirmsOnceAndHoldingNeverExecutesAutomatically() {
         val release = machine()
         assertNull(release.advance(1599))
         assertEquals(BubbleGestureStateMachine.Phase.PRESSING, release.phase)
@@ -15,22 +15,58 @@ class BubbleGestureTest {
         assertEquals(BubbleGestureStateMachine.Phase.ARMED, release.phase)
         assertEquals(BubbleGesture.HOLD, release.up(1700))
         assertNull(release.advance(5000))
-        val timeout = machine()
-        assertNull(timeout.advance(3099))
-        assertEquals(BubbleGesture.HOLD, timeout.advance(3100))
-        assertNull(timeout.move(0f, -40f, 3200))
-        assertNull(timeout.up(3300))
+        val waiting = machine()
+        assertNull(waiting.advance(100000))
+        assertEquals(BubbleGestureStateMachine.Phase.ARMED, waiting.phase)
+        assertNull(waiting.nextDeadline)
+        assertEquals(1f, waiting.progress(100000))
+        assertEquals(BubbleGesture.HOLD, waiting.up(100001))
     }
 
-    @Test fun directionExecutesImmediatelyAndCancelsLongPressTimeout() {
+    @Test fun shortDirectionOnlyPreselectsAndReleaseExecutesExactlyOnce() {
         for ((dx, dy, expected) in listOf(Triple(0f, -24f, BubbleGesture.UP),
             Triple(0f, 24f, BubbleGesture.DOWN), Triple(-24f, 0f, BubbleGesture.INWARD))) {
             val gesture = machine()
-            assertEquals(expected, gesture.move(dx, dy, 1700))
+            assertNull(gesture.move(dx, dy, 1700))
+            assertEquals(expected, gesture.selected)
             assertNull(gesture.advance(4000))
-            assertNull(gesture.up(4100))
+            assertEquals(expected, gesture.up(4100))
+            assertNull(gesture.up(4200))
         }
-        assertEquals(BubbleGesture.INWARD, machine(left = true).move(24f, 0f, 1700))
+        val mirrored = machine(left = true)
+        assertNull(mirrored.move(24f, 0f, 1700))
+        assertEquals(BubbleGesture.INWARD, mirrored.up(1800))
+    }
+
+    @Test fun selectionCanChangeAndReturningToCenterCancelsInsteadOfTakingScreenshot() {
+        val gesture = machine()
+        gesture.move(0f, -24f, 1700)
+        gesture.move(-30f, 0f, 1800)
+        assertEquals(BubbleGesture.INWARD, gesture.selected)
+        gesture.move(0f, 0f, 1900)
+        assertTrue(gesture.cancelled)
+        assertTrue(gesture.returnedToCenter)
+        assertNull(gesture.up(2000))
+        val reselected = machine()
+        reselected.move(0f, -24f, 1700)
+        reselected.move(0f, 0f, 1800)
+        reselected.move(0f, 24f, 1900)
+        assertFalse(reselected.cancelled)
+        assertEquals(BubbleGesture.DOWN, reselected.up(2000))
+    }
+
+    @Test fun directionAndCenterHaveHysteresisWithoutMakingTheStrokeLonger() {
+        val gesture = machine()
+        gesture.move(0f, -24f, 1700)
+        gesture.move(-25f, -24f, 1750)
+        assertEquals(BubbleGesture.UP, gesture.selected)
+        gesture.move(-31f, -24f, 1800)
+        assertEquals(BubbleGesture.INWARD, gesture.selected)
+        gesture.move(-18f, 0f, 1850)
+        assertEquals(BubbleGesture.INWARD, gesture.selected)
+        gesture.move(-12f, 0f, 1900)
+        assertNull(gesture.selected)
+        assertTrue(gesture.cancelled)
     }
 
     @Test fun ordinaryDragStaysDragEvenAfterStoppingAndHolding() {
@@ -56,7 +92,9 @@ class BubbleGestureTest {
         assertNull(cancelled.advance(4000)); assertNull(cancelled.up(4100))
         val outward = machine()
         assertNull(outward.move(30f, 0f, 1700))
-        assertEquals(BubbleGestureStateMachine.Phase.FINISHED, outward.phase)
+        assertEquals(BubbleGestureStateMachine.Phase.ARMED, outward.phase)
+        assertTrue(outward.cancelled)
+        assertFalse(outward.returnedToCenter)
         assertNull(outward.up(1800))
     }
 
@@ -119,17 +157,17 @@ class BubbleGestureTest {
         assertEquals(AssistantActions.SCREEN, config.copy(longPressSlide = true).gestureAction(BubbleGesture.INWARD, false))
     }
 
-    @Test fun practiceRequiresTheRightGestureAndDistinguishesReleaseFromTimeout() {
+    @Test fun practiceRequiresDirectionReleaseAndExplicitCancellation() {
         val lesson = LongPressSlideLesson()
         lesson.next(); assertEquals(0, lesson.index)
-        assertFalse(lesson.accept(BubbleGesture.HOLD, true))
-        assertTrue(lesson.accept(BubbleGesture.HOLD, false)); lesson.next()
+        assertFalse(lesson.accept(null))
+        assertTrue(lesson.accept(BubbleGesture.HOLD)); lesson.next()
         for (direction in listOf(BubbleGesture.UP, BubbleGesture.DOWN, BubbleGesture.INWARD)) {
-            assertFalse(lesson.accept(BubbleGesture.HOLD, false))
-            assertTrue(lesson.accept(direction, false)); lesson.next()
+            assertFalse(lesson.accept(BubbleGesture.HOLD))
+            assertTrue(lesson.accept(direction)); lesson.next()
         }
-        assertFalse(lesson.accept(BubbleGesture.HOLD, false))
-        assertTrue(lesson.accept(BubbleGesture.HOLD, true)); lesson.next()
+        assertFalse(lesson.accept(BubbleGesture.HOLD))
+        assertTrue(lesson.accept(null)); lesson.next()
         assertTrue(lesson.complete)
     }
 }

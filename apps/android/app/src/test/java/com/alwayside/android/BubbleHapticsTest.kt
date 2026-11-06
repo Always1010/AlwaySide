@@ -20,7 +20,7 @@ class BubbleHapticsTest {
 
     @Test fun eachHoldConfirmsOnceWhileEarlyCancellationAndDraggingStaySilent() {
         for (slide in listOf(false, true)) {
-            val machine = BubbleGestureStateMachine(slide, 600, 1500, 8f, 24f, false)
+            val machine = BubbleGestureStateMachine(slide, 600, 8f, 24f, false)
             var confirmations = 0
             fun step(now: Long, action: () -> Unit) {
                 val previous = machine.phase
@@ -53,7 +53,7 @@ class BubbleHapticsTest {
             assertEquals(0, confirmations)
 
             machine.down(0f, 0f, 1000)
-            // Delayed scheduling may jump straight from PRESSING to timeout/release.
+            // A delayed frame can jump straight from PRESSING to arming/release.
             step(4000) { machine.advance(4000) }
             step(4100) { machine.up(4100) }
             assertEquals(1, confirmations)

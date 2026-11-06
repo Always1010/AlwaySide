@@ -31,7 +31,7 @@ internal class GestureSettingsUi(
         extension.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(8), dp(8), dp(8))
             addView(label("长按滑动", 16f), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(iconButton(R.drawable.ic_line_help, "长按滑动说明与体验", ::showHelp))
+            addView(iconButton(R.drawable.ic_line_info, "长按滑动说明与体验", ::showHelp))
             addView(MaterialSwitch(this@with).apply {
                 isChecked = config.longPressSlide; contentDescription = "长按滑动"
                 var restoring = false
@@ -47,10 +47,16 @@ internal class GestureSettingsUi(
         })
         if (config.longPressSlide) {
             extension.addView(settingsListRow("长按等待", seconds(config.longPressMillis)) {
-                showTiming("长按等待", 400..1500, config.longPressMillis, true)
+                showOption("长按等待", (400..1500 step 100).toList(), 600, InteractionConfig::longPressMillis,
+                    { value, selected -> value.copy(longPressMillis = selected) }, ::seconds)
             })
-            extension.addView(settingsListRow("滑动选择时间", seconds(config.slideWindowMillis)) {
-                showTiming("滑动选择时间", 500..3000, config.slideWindowMillis, false)
+            extension.addView(settingsListRow("滑动距离", "${config.slideDistanceDp} dp") {
+                showOption("滑动距离", (16..40 step 4).toList(), 24, InteractionConfig::slideDistanceDp,
+                    { value, selected -> value.copy(slideDistanceDp = selected) }, ::distance)
+            })
+            extension.addView(settingsListRow("动作圆大小", "${config.actionCircleSizeDp} dp") {
+                showOption("动作圆大小", (28..40 step 4).toList(), 32, InteractionConfig::actionCircleSizeDp,
+                    { value, selected -> value.copy(actionCircleSizeDp = selected) }, ::distance)
             })
         }
         addGroup(extension)
@@ -89,20 +95,27 @@ internal class GestureSettingsUi(
 
     private fun showHelp() {
         val dialog = showDialog(MaterialAlertDialogBuilder(context).setTitle("长按滑动")
-            .setMessage("开启后，按住悬浮球等待提示，可向上、向下或向屏幕内侧滑动。方向位移成立立即执行；原地松手或持续不动直到选择时间结束，执行长按动作。普通拖动仍用于移动悬浮球。\n\n长按等待决定何时进入选择；滑动选择时间决定可选择多久。系统无障碍长按时间更长时，以系统设置为准。\n\n方向手势默认未分配，开启不会自动绑定。关闭后保留已有绑定，重新开启即可使用。")
+            .setMessage("开启后，按住悬浮球等待动作圆展开，向上、向下或向屏幕内侧滑动预选，松手执行。未滑出时原地松手执行长按；滑出后回到中心松手取消。持续按住不会自动执行。普通拖动仍用于移动悬浮球。\n\n滑动距离决定预选门槛，不必拖到动作圆中心。动作圆大小独立于悬浮球大小。系统无障碍长按时间更长时，以系统设置为准。\n\n方向默认未分配，松手不执行；开启不会自动绑定。关闭后保留已有绑定。")
             .setNegativeButton("关闭", null).setPositiveButton("体验", null))
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { dialog.dismiss(); onTutorial() }
     }
 
-    private fun showTiming(title: String, range: IntRange, initial: Int, hold: Boolean) {
-        val values = range.step(100).toList()
+    private fun showOption(
+        title: String,
+        values: List<Int>,
+        default: Int,
+        selected: (InteractionConfig) -> Int,
+        update: (InteractionConfig, Int) -> InteractionConfig,
+        format: (Int) -> String,
+    ) {
         showDialog(MaterialAlertDialogBuilder(context).setTitle(title)
-            .setSingleChoiceItems(values.map(::seconds).toTypedArray(), values.indexOf(initial)) { dialog, index ->
-                if (save { if (hold) it.copy(longPressMillis = values[index]) else it.copy(slideWindowMillis = values[index]) }) {
+            .setSingleChoiceItems(values.map { format(it) + if (it == default) "（默认）" else "" }.toTypedArray(),
+                values.indexOf(selected(config))) { dialog, index ->
+                if (save { update(it, values[index]) }) {
                     dialog.dismiss(); refresh()
                 } else {
                     val actual = runCatching { load() }.getOrDefault(config)
-                    val savedIndex = values.indexOf(if (hold) actual.longPressMillis else actual.slideWindowMillis)
+                    val savedIndex = values.indexOf(selected(actual))
                     (dialog as? AlertDialog)?.listView?.apply {
                         clearChoices(); if (savedIndex >= 0) setItemChecked(savedIndex, true)
                     }
@@ -192,7 +205,7 @@ internal class GestureSettingsUi(
 
     private fun confirmReset() {
         val dialog = showDialog(MaterialAlertDialogBuilder(context).setTitle("恢复默认绑定？")
-            .setMessage("恢复基础手势绑定，方向手势恢复为未分配。长按滑动开关与时间保持不变。")
+            .setMessage("恢复基础手势绑定，方向手势恢复为未分配。长按滑动开关、等待、距离与动作圆大小保持不变。")
             .setNegativeButton("取消", null).setPositiveButton("恢复默认", null))
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             if (save { it.copy(bindings = GestureBindings.defaults()) }) {
@@ -215,4 +228,5 @@ internal class GestureSettingsUi(
     }
 
     private fun seconds(millis: Int) = "${millis / 1000}.${millis % 1000 / 100} 秒"
+    private fun distance(dp: Int) = "$dp dp"
 }
