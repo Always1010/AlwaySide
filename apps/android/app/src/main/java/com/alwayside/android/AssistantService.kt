@@ -748,10 +748,9 @@ class AssistantService : Service() {
                 container.addView(row,index)
             }
             val message=(row as ViewGroup).getChildAt(0) as TextView
-            val presentation=value to node.chat.busy
-            if(message.tag!=presentation) {
-                message.text=if(node.chat.busy)value else MarkdownText.render(value)
-                message.tag=presentation
+            if(message.tag!=value) {
+                message.text=MarkdownText.render(value)
+                message.tag=value
             }
             if(!user && suggestions.isNotBlank() && suggestions.length<=32768) {
                 val widgetKey="$index:$suggestions"

@@ -272,7 +272,7 @@ internal class ChatScreen(
         if (hasPending) {
             addMessage("user", session.question, session.evidence)
             if (session.partial.isNotBlank()) addMessage("assistant", session.partial, if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文",
-                presentation = if (session.busy) session.partial else MarkdownText.render(session.partial))
+                presentation = MarkdownText.render(session.partial))
         }
         suggestionViews.keys.filterNot { it in visibleSuggestionKeys }.toList().forEach { key ->
             suggestionViews.remove(key)?.let { (it.parent as? android.view.ViewGroup)?.removeView(it); it.destroy() }
