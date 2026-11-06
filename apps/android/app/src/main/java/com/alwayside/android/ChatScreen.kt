@@ -13,6 +13,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.ScrollView
@@ -24,6 +25,7 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import java.util.IdentityHashMap
 
 /** Full-screen in-app conversation. Capture remains exclusively user-started through the assistant. */
 internal class ChatScreen(
@@ -52,9 +54,23 @@ internal class ChatScreen(
     private lateinit var contextTools: LinearLayout
     private var webSearchOverride: Boolean? = retained?.webSearchOverride
         ?: savedState?.takeIf { it.containsKey("webSearchOverride") }?.getBoolean("webSearchOverride")
-    private val suggestionViews = mutableMapOf<String, SearchSuggestionsView>()
-    private val visibleSuggestionKeys = mutableSetOf<String>()
-    private val renderedMessages = mutableMapOf<ChatMessage, CharSequence>()
+    private class MessageRow(val role: String, val block: LinearLayout, val text: TextView, val notice: TextView) {
+        var value: String? = null
+        var suggestions = ""
+        var suggestionView: SearchSuggestionsView? = null
+        fun dispose() { suggestionView?.destroy(); suggestionView = null }
+    }
+    private data class EvidencePreview(val value: Any, val view: View)
+    private val evidencePreviews = linkedMapOf<String, EvidencePreview>()
+    private var messageRows = IdentityHashMap<ChatMessage, MessageRow>()
+    private var historyRows = emptyList<MessageRow>()
+    private var renderedHistorySize = -1
+    private var renderedHistoryFirst: ChatMessage? = null
+    private var renderedHistoryLast: ChatMessage? = null
+    private var renderedConversationId: String? = null
+    private var pendingQuestionRow: MessageRow? = null
+    private var partialAnswerRow: MessageRow? = null
+    private var emptyMessageView: TextView? = null
     private var activeConnection = runCatching { SettingsStore(this).load() }.getOrDefault(AppConfig())
     private var defaultWebSearch = activeConnection.webSearch
     private var image: Bitmap? = null
@@ -268,35 +284,7 @@ internal class ChatScreen(
             (if (restoredStatus.isNotBlank()) "上次状态：$restoredStatus" else session.status)
         statusView.visibility = if (statusView.text.isNullOrBlank()) View.GONE else View.VISIBLE
         renderEvidence()
-        val atBottom = scroll.getChildAt(0)?.let { it.height - scroll.height - scroll.scrollY <= dp(72) } ?: true
-        visibleSuggestionKeys.clear()
-        messagesView.removeAllViews()
-        originalImage?.let { addImagePreview("会话原图", it) }
-        image?.takeIf { it !== originalImage }?.let { addImagePreview("当前追问图片", it) }
-        if (session.sourceText.isNotBlank()) {
-            addEvidencePreview("选中文字", session.sourceText) { showSourceText() }
-        }
-        if (session.transcript.isNotBlank()) {
-            addEvidencePreview("音频转写", session.transcript) { showTranscript() }
-        }
-        if (session.messages.isEmpty() && !hasPending) {
-            messagesView.addView(label(if (session.transcript.isNotBlank()) "原始转写已恢复，可以继续询问这段内容。" else "输入问题，开始对话。", 12f, true).apply {
-                setPadding(0, dp(12), 0, dp(12))
-            })
-        }
-        renderedMessages.keys.retainAll(session.messages.toSet())
-        session.messages.forEachIndexed { index, message ->
-            val rendered = renderedMessages.getOrPut(message) { MarkdownText.render(message.text) }
-            addMessage(message.role, message.text, message.evidence, message.searchSuggestions, index, rendered)
-        }
-        if (hasPending) {
-            addMessage("user", session.question, session.evidence)
-            if (session.partial.isNotBlank()) addMessage("assistant", session.partial, if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文",
-                presentation = MarkdownText.render(session.partial))
-        }
-        suggestionViews.keys.filterNot { it in visibleSuggestionKeys }.toList().forEach { key ->
-            suggestionViews.remove(key)?.let { (it.parent as? android.view.ViewGroup)?.removeView(it); it.destroy() }
-        }
+        renderMessages(hasPending)
         send.icon = prototypeIcon(if (session.busy) android.R.drawable.ic_menu_close_clear_cancel else android.R.drawable.ic_menu_send)
         send.accessible(if (session.busy) "取消当前请求" else "发送问题")
         retry.visibility = if (session.canRetry) View.VISIBLE else View.GONE
@@ -307,7 +295,141 @@ internal class ChatScreen(
         renderWebSearch()
         composerLayout.isEnabled = !session.busy
         composerLayout.hint = if (session.messages.isEmpty() && !hasPending) "想了解什么？" else "继续追问…"
-        if (atBottom) scroll.post { if (!closing) scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    /** Stream ticks update only the pending rows; completed text and WebViews remain attached. */
+    private fun renderMessages(hasPending: Boolean) {
+        val atBottom = messagesView.height - scroll.height - scroll.scrollY <= dp(72)
+        var structureChanged = renderedConversationId != session.conversationId
+        if (structureChanged) {
+            disposeMessageRows()
+            evidencePreviews.clear()
+            emptyMessageView = null
+            renderedHistorySize = -1
+            renderedConversationId = session.conversationId
+        }
+        val previews = ArrayList<View>(4)
+        val previewKeys = mutableSetOf<String>()
+        fun preview(key: String, value: Any, create: () -> View) {
+            previewKeys.add(key)
+            var cached = evidencePreviews[key]
+            if (cached == null || cached.value != value) {
+                cached = EvidencePreview(value, create())
+                evidencePreviews[key] = cached
+                structureChanged = true
+            }
+            previews.add(cached.view)
+        }
+        originalImage?.let { bitmap -> preview("original", bitmap) { createImagePreview("会话原图", bitmap) } }
+        image?.takeIf { it !== originalImage }?.let { bitmap ->
+            preview("image", bitmap) { createImagePreview("当前追问图片", bitmap) }
+        }
+        if (session.sourceText.isNotBlank()) preview("source", session.sourceText) {
+            createEvidencePreview("选中文字", session.sourceText) { showSourceText() }
+        }
+        if (session.transcript.isNotBlank()) preview("transcript", session.transcript) {
+            createEvidencePreview("音频转写", session.transcript) { showTranscript() }
+        }
+        if (evidencePreviews.keys.retainAll(previewKeys)) structureChanged = true
+
+        // ChatSession appends immutable messages or replaces the history on restoration. Checking
+        // its boundaries avoids walking an unbounded history for every 80 ms streaming update.
+        val messages = session.messages
+        val historyChanged = messages.size != renderedHistorySize ||
+            messages.firstOrNull() !== renderedHistoryFirst || messages.lastOrNull() !== renderedHistoryLast
+        var contentChanged = false
+        if (historyChanged) {
+            val previousRows = messageRows.values.toSet() + listOfNotNull(pendingQuestionRow, partialAnswerRow)
+            val nextRows = IdentityHashMap<ChatMessage, MessageRow>()
+            val committedQuestion = !hasPending && pendingQuestionRow != null && messages.size >= 2 &&
+                messages[messages.lastIndex - 1].let { it.role == "user" && it.text == pendingQuestionRow?.value }
+            historyRows = messages.mapIndexed { index, message ->
+                val existing = messageRows[message]
+                val row = existing ?: when {
+                    committedQuestion && index == messages.lastIndex - 1 -> pendingQuestionRow
+                    committedQuestion && index == messages.lastIndex && message.role == "assistant" -> partialAnswerRow
+                    else -> null
+                } ?: createMessageRow(message.role)
+                if (existing == null) updateMessageRow(row, message.text, message.evidence, message.searchSuggestions)
+                nextRows[message] = row
+                row
+            }
+            messageRows = nextRows
+            if (!hasPending) { pendingQuestionRow = null; partialAnswerRow = null }
+            val retainedRows = historyRows.toSet() + listOfNotNull(pendingQuestionRow, partialAnswerRow)
+            previousRows.filterNot { it in retainedRows }.forEach { it.dispose() }
+            renderedHistorySize = messages.size
+            renderedHistoryFirst = messages.firstOrNull()
+            renderedHistoryLast = messages.lastOrNull()
+            structureChanged = true
+        }
+        if (hasPending) {
+            if (pendingQuestionRow == null) {
+                pendingQuestionRow = createMessageRow("user")
+                structureChanged = true
+            }
+            contentChanged = updateMessageRow(pendingQuestionRow!!, session.question, session.evidence) || contentChanged
+        } else if (pendingQuestionRow != null) {
+            pendingQuestionRow?.dispose(); pendingQuestionRow = null
+            structureChanged = true
+        }
+        if (hasPending && session.partial.isNotBlank()) {
+            if (partialAnswerRow == null) {
+                partialAnswerRow = createMessageRow("assistant")
+                structureChanged = true
+            }
+            contentChanged = updateMessageRow(partialAnswerRow!!, session.partial,
+                if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文") || contentChanged
+        } else if (partialAnswerRow != null) {
+            partialAnswerRow?.dispose(); partialAnswerRow = null
+            structureChanged = true
+        }
+        val showEmpty = messages.isEmpty() && !hasPending
+        if (showEmpty) {
+            if (emptyMessageView == null) {
+                emptyMessageView = label("", 12f, true).apply { setPadding(0, dp(12), 0, dp(12)) }
+                structureChanged = true
+            }
+            val text = if (session.transcript.isNotBlank()) "原始转写已恢复，可以继续询问这段内容。" else "输入问题，开始对话。"
+            if (emptyMessageView?.text != text) { emptyMessageView?.text = text; contentChanged = true }
+        } else if (emptyMessageView != null) { emptyMessageView = null; structureChanged = true }
+
+        var anchor: View? = null
+        var anchorOffset = 0
+        if (structureChanged) {
+            val desired = previews + historyRows.map { it.block } + listOfNotNull(
+                emptyMessageView, pendingQuestionRow?.block, partialAnswerRow?.block)
+            val retained = desired.toSet()
+            if (!atBottom) {
+                anchor = (0 until messagesView.childCount).asSequence().map { messagesView.getChildAt(it) }
+                    .firstOrNull { it.bottom > scroll.scrollY && it in retained }
+                anchorOffset = scroll.scrollY - (anchor?.top ?: 0)
+            }
+            // Remove obsolete rows first so inserting evidence or trimming history never detaches
+            // unchanged selectable text or a retained search WebView just to shift its position.
+            for (index in messagesView.childCount - 1 downTo 0) {
+                if (messagesView.getChildAt(index) !in retained) messagesView.removeViewAt(index)
+            }
+            desired.forEachIndexed { index, child ->
+                if (messagesView.getChildAt(index) !== child) {
+                    (child.parent as? ViewGroup)?.removeView(child)
+                    messagesView.addView(child, index)
+                }
+            }
+        }
+        if (structureChanged || contentChanged) scroll.post {
+            if (!closing) {
+                // scrollTo leaves focus and text selection with their existing owners.
+                if (atBottom) scroll.scrollTo(0, messagesView.height)
+                else anchor?.takeIf { it.parent === messagesView }?.let { scroll.scrollTo(0, it.top + anchorOffset) }
+            }
+        }
+    }
+
+    private fun disposeMessageRows() {
+        (messageRows.values.toSet() + listOfNotNull(pendingQuestionRow, partialAnswerRow)).forEach { it.dispose() }
+        messageRows.clear(); historyRows = emptyList()
+        pendingQuestionRow = null; partialAnswerRow = null
     }
 
     private fun refreshCollectionState() {
@@ -356,8 +478,8 @@ internal class ChatScreen(
         webSearch.accessible(if (selected) "联网搜索：开启，点按关闭" else "联网搜索：关闭，点按开启")
     }
 
-    private fun addEvidencePreview(title: String, text: String, expand: () -> Unit) {
-        messagesView.addView(MaterialCardView(this).apply {
+    private fun createEvidencePreview(title: String, text: String, expand: () -> Unit): View =
+        MaterialCardView(this).apply {
             setCardBackgroundColor(SURFACE); strokeWidth = 0; cardElevation = 0f
             radius = dp(12).toFloat(); isClickable = true; isFocusable = true
             accessible("展开完整$title"); setOnClickListener { expand() }
@@ -369,11 +491,11 @@ internal class ChatScreen(
                     setPadding(0, dp(6), 0, 0)
                 })
             })
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
-    }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
+        }
 
-    private fun addImagePreview(title: String, bitmap: Bitmap) {
-        messagesView.addView(MaterialCardView(this).apply {
+    private fun createImagePreview(title: String, bitmap: Bitmap): View =
+        MaterialCardView(this).apply {
             setCardBackgroundColor(SURFACE); strokeWidth = 0; cardElevation = 0f; radius = dp(12).toFloat()
             isClickable = true; isFocusable = true; accessible("查看$title，可双指缩放")
             setOnClickListener {
@@ -391,8 +513,8 @@ internal class ChatScreen(
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }, LinearLayout.LayoutParams(-1, dp(180)))
             })
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
-    }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
+        }
 
     private fun renderEvidence() {
         mediaView.text = when {
@@ -411,34 +533,53 @@ internal class ChatScreen(
         if (image == null) reuse.isChecked = false
     }
 
-    private fun addMessage(role: String, value: String, evidence: String, suggestions: String = "", messageIndex: Int = -1,
-                           presentation: CharSequence? = null) {
+    private fun createMessageRow(role: String): MessageRow {
         val isUser = role == "user"
+        val messageText = label("", if (isUser) 12f else 13f).apply {
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
+            setTextIsSelectable(true)
+            setLineSpacing(dp(4).toFloat(), 1f)
+            if (isUser) { maxWidth = dp(320); setTextColor(ON_TONAL_SURFACE) }
+        }
+        val notice = label("", 10f, true).apply { setPadding(0, dp(6), 0, 0); visibility = View.GONE }
         val block = column().apply {
             setPadding(if (isUser) dp(10) else 0, if (isUser) dp(7) else 0,
                 if (isUser) dp(10) else 0, if (isUser) dp(7) else 0)
             if (isUser) background = card(TONAL_SURFACE, dp(20).toFloat())
             if (role != "assistant" && role != "user") addView(label("上下文", 10f, true))
-            addView(label("", if (isUser) 12f else 13f).apply {
-                setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
-                text = presentation ?: MarkdownText.render(value); setTextIsSelectable(true)
-                setLineSpacing(dp(4).toFloat(), 1f)
-                if (isUser) { maxWidth = dp(320); setTextColor(ON_TONAL_SURFACE) }
-            })
-            if (!isUser && suggestions.isNotBlank() && suggestions.length <= 32768) {
-                val widgetKey = "$messageIndex:$suggestions"
-                visibleSuggestionKeys.add(widgetKey)
-                val widget = suggestionViews.getOrPut(widgetKey) { this@ChatScreen.searchSuggestionsView(suggestions) }
-                (widget.parent as? android.view.ViewGroup)?.removeView(widget)
-                addView(widget)
-            }
-            if (!isUser && evidence.contains("未完成")) addView(label(evidence, 10f, true).apply { setPadding(0, dp(6), 0, 0) })
+            addView(messageText)
+            addView(notice)
         }
-        messagesView.addView(block, LinearLayout.LayoutParams(if (isUser) -2 else -1, -2).apply {
+        block.layoutParams = LinearLayout.LayoutParams(if (isUser) -2 else -1, -2).apply {
             gravity = if (isUser) Gravity.END else Gravity.START
             if (isUser) marginStart = dp(32)
             topMargin = dp(4); bottomMargin = dp(if (isUser) 8 else 12)
-        })
+        }
+        return MessageRow(role, block, messageText, notice)
+    }
+
+    private fun updateMessageRow(row: MessageRow, value: String, evidence: String, suggestions: String = ""): Boolean {
+        var changed = false
+        if (row.value != value) {
+            row.text.text = MarkdownText.render(value)
+            row.value = value
+            changed = true
+        }
+        val html = suggestions.takeIf { row.role != "user" && it.isNotBlank() && it.length <= 32768 }.orEmpty()
+        if (row.suggestions != html) {
+            row.suggestionView?.let { row.block.removeView(it); it.destroy() }
+            row.suggestionView = html.takeIf { it.isNotEmpty() }?.let { searchSuggestionsView(it) }
+            row.suggestionView?.let { row.block.addView(it, row.block.indexOfChild(row.notice)) }
+            row.suggestions = html
+            changed = true
+        }
+        val notice = evidence.takeIf { row.role != "user" && it.contains("未完成") }.orEmpty()
+        if (row.notice.text != notice) {
+            row.notice.text = notice
+            row.notice.visibility = if (notice.isEmpty()) View.GONE else View.VISIBLE
+            changed = true
+        }
+        return changed
     }
 
     private fun submit() {
@@ -563,9 +704,8 @@ internal class ChatScreen(
     }
 
     fun dispose(retaining: Boolean = false) {
-        renderedMessages.clear()
-        suggestionViews.values.forEach { (it.parent as? android.view.ViewGroup)?.removeView(it); it.destroy() }
-        suggestionViews.clear()
+        disposeMessageRows()
+        evidencePreviews.clear()
         if (closing) return
         closing = true
         playback.removeObserver(playbackObserver)
