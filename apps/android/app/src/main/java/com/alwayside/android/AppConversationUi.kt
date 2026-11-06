@@ -461,6 +461,7 @@ internal class HistoryListScreen(
             marginStart = activity.dp(8); topMargin = activity.dp(2)
         })
         card.addView(entry)
+        HistoryRowTouch(card)
         rows.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = activity.dp(8) })
     }
 
