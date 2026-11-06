@@ -66,6 +66,9 @@ internal class ChatScreen(
     private var restoredStatus = ""
     private var handoff: HandedOffConversation? = null
     private var openedStoredRecord = false
+    private var favorite = false
+    private val collectionStore = HistoryStore(this)
+    private val collectionTags = CollectionTagDialogs(activity) { refreshCollectionState() }
     private val playbackIcon = AudioPlaybackIcon(this)
     private val playback = ChatAudioPlayback(this) { updatePlayback(it) }
     internal data class RetainedConversation(
@@ -128,6 +131,7 @@ internal class ChatScreen(
         composer.setText(draft)
         reuse.isChecked = image != null && reuseImage
         send.isEnabled = true
+        refreshCollectionState()
         render()
     }
 
@@ -153,16 +157,25 @@ internal class ChatScreen(
                         if (fresh.connectionId != activeConnection.connectionId) webSearchOverride = null
                         activeConnection = fresh; defaultWebSearch = fresh.webSearch
                     }
-                    if (ready) render() else renderWebSearch()
+                    if (ready) { refreshCollectionState(); render() } else renderWebSearch()
                 }
                 override fun onViewDetachedFromWindow(view: View) { playback.stop() }
             })
         }
         toolbar = materialToolbar("对话", onBack).apply {
+            addIconAction(4, R.drawable.ic_line_bookmark, "收藏会话") { toggleFavorite() }.isEnabled = false
             addIconAction(1, R.drawable.ic_copy, "复制整段会话") { copyConversation() }
             addIconAction(2, android.R.drawable.ic_menu_manage, "设置") { onSettings() }
             addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
                 icon = playbackIcon; isVisible = false
+            }
+            menu.add(0, 5, 5, "设置会话标签").apply {
+                isVisible = false
+                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+                setOnMenuItemClickListener {
+                    if (ready && favorite) collectionTags.editTags(listOf(session.conversationId))
+                    true
+                }
             }
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(64)))
@@ -242,6 +255,7 @@ internal class ChatScreen(
         conversationTitle = session.title
         toolbar.title = conversationTitle
         toolbar.menu.findItem(3)?.isVisible = availableAudio() != null
+        renderCollectionActions()
         val hasPending = session.question.isNotBlank()
         val providerLabel = if (session.busy || session.question.isNotBlank()) session.requestProviderLabel else ProviderCapabilities.label(activeConnection)
         statusView.text = providerLabel + "\n" +
@@ -288,6 +302,41 @@ internal class ChatScreen(
         composerLayout.isEnabled = !session.busy
         composerLayout.hint = if (session.messages.isEmpty() && !hasPending) "想了解什么？" else "继续追问…"
         if (atBottom) scroll.post { if (!closing) scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun refreshCollectionState() {
+        if (!ready) return
+        runCatching { collectionStore.find(session.conversationId) }
+            .onSuccess { favorite = it?.isFavorite == true }
+        renderCollectionActions()
+    }
+
+    private fun renderCollectionActions() {
+        val label = if (favorite) "取消收藏" else "收藏会话"
+        toolbar.menu.findItem(4)?.apply {
+            icon = prototypeIcon(if (favorite) R.drawable.ic_bookmark_filled else R.drawable.ic_line_bookmark)
+            iconTintList = android.content.res.ColorStateList.valueOf(if (favorite) ACCENT else INK)
+            title = label; contentDescription = label; tooltipText = label
+            isEnabled = ready && (openedStoredRecord || session.messages.isNotEmpty() ||
+                session.question.isNotBlank() || session.transcript.isNotBlank() || session.sourceText.isNotBlank())
+        }
+        toolbar.menu.findItem(5)?.isVisible = ready && favorite
+    }
+
+    private fun toggleFavorite() {
+        if (!ready) return
+        runCatching {
+            var stored = collectionStore.find(session.conversationId)
+            if (stored == null) {
+                collectionStore.save(session.snapshot())
+                stored = collectionStore.find(session.conversationId)
+            }
+            collectionStore.setFavorite(session.conversationId, stored?.isFavorite != true)
+            favorite = stored?.isFavorite != true
+        }.onSuccess {
+            renderCollectionActions()
+            toast(if (favorite) "已收藏" else "已取消收藏，重新加入普通历史保留队列")
+        }.onFailure { toast(it.message?.take(120) ?: "无法保存收藏，请重试") }
     }
 
     private fun renderWebSearch() {

@@ -42,6 +42,7 @@ class MainActivity : ThemedActivity() {
     private var historyView: View? = null
     private var historyPermission: View? = null
     private var restoredHistorySelection = emptyList<String>()
+    private var restoredHistoryBrowse = HistoryBrowse()
     private var backCallback: android.window.OnBackInvokedCallback? = null
     private var retainedChatOffered = false
     private val assistantStateListener: () -> Unit = {
@@ -55,6 +56,7 @@ class MainActivity : ThemedActivity() {
     private data class RetainedApp(
         val pages: List<String>, val chat: ChatScreen.RetainedConversation?,
         val settingsPage: String?, val historyY: Int, val historySelection: List<String>,
+        val historyBrowse: HistoryBrowse,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,6 +76,10 @@ class MainActivity : ThemedActivity() {
         historyY = savedInstanceState?.getInt("history_y") ?: retained?.historyY ?: 0
         restoredHistorySelection = savedInstanceState?.getStringArrayList("history_selection")
             ?: retained?.historySelection.orEmpty()
+        restoredHistoryBrowse = if (savedInstanceState != null) HistoryBrowse(
+            savedInstanceState.getBoolean("history_favorites"), savedInstanceState.getString("history_tag"),
+            savedInstanceState.getBoolean("history_untagged"), savedInstanceState.getString("history_query").orEmpty(),
+        ) else retained?.historyBrowse ?: HistoryBrowse()
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
         restoredSettingsPage=savedInstanceState?.getString("settings_page") ?: retained?.settingsPage
@@ -103,7 +109,7 @@ class MainActivity : ThemedActivity() {
 
     private fun updateBackCallback() {
         if(Build.VERSION.SDK_INT < 33)return
-        val canHandleBack = navigation.canGoBack || (navigation.current == AppPage.HISTORY && historyScreen?.selecting == true)
+        val canHandleBack = navigation.canGoBack || (navigation.current == AppPage.HISTORY && historyScreen?.canGoBack == true)
         if(canHandleBack && backCallback == null) {
             backCallback=android.window.OnBackInvokedCallback { navigateBack() }.also {
                 onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,it)
@@ -117,7 +123,7 @@ class MainActivity : ThemedActivity() {
     @Deprecated("Legacy key bridge; gesture Back uses OnBackInvokedCallback")
     @SuppressLint("GestureBackNavigation")
     @Suppress("DEPRECATION")
-    override fun onBackPressed() { if(navigation.canGoBack || (navigation.current == AppPage.HISTORY && historyScreen?.selecting == true))navigateBack() else super.onBackPressed() }
+    override fun onBackPressed() { if(navigation.canGoBack || (navigation.current == AppPage.HISTORY && historyScreen?.canGoBack == true))navigateBack() else super.onBackPressed() }
 
     private fun hideKeyboard() {
         currentFocus?.let { getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0) }
@@ -156,7 +162,7 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun openHistory(): Unit = leaveSettings {
-        historyScreen?.back()
+        historyScreen?.prepareToLeave()
         hideKeyboard();chatScreen?.dispose();chatScreen=null
         discardPendingChat()
         navigation.openHistory();showCurrent()
@@ -164,7 +170,7 @@ class MainActivity : ThemedActivity() {
 
     private fun openSettings() {
         if(navigation.current == AppPage.SETTINGS)return
-        historyScreen?.back()
+        historyScreen?.prepareToLeave()
         hideKeyboard();navigation.openSettings();createSettings()
     }
 
@@ -225,7 +231,7 @@ class MainActivity : ThemedActivity() {
         ChatScreen(this,::navigateBack,::openSettings,id,savedState,retained,autoAskText)
 
     private fun openChat(id: String?,autoAskText: Boolean = false): Unit = leaveSettings {
-        historyScreen?.back()
+        historyScreen?.prepareToLeave()
         hideKeyboard()
         if(chatScreen?.matches(id) != true) {
             discardPendingChat()
@@ -270,11 +276,11 @@ class MainActivity : ThemedActivity() {
             val history = HistoryListScreen(this, onOpen = { openChat(it) }, onSettings = ::openSettings,
                 onToggleAssistant = ::toggleAssistant,
                 onSelectionChanged = ::historySelectionChanged, initialSelection = restoredHistorySelection,
-                onIntro = ::showGuideInvitation)
+                onIntro = ::showGuideInvitation, browse = restoredHistoryBrowse)
             restoredHistorySelection = emptyList()
             historyScreen = history
             historyScroll = history.scrollView
-            root = LinearLayout(this).apply {
+            root = history.wrap(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND)
                 addView(history.toolbar)
                 historyPermission = column().apply {
@@ -282,7 +288,7 @@ class MainActivity : ThemedActivity() {
                     action("准备实际使用", true, ::openPreparation)
                 }.also { addView(it) }
                 addView(history.scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
-            }
+            })
             historyView = root
             history.restoreScroll(historyY)
         } else historyScreen?.refresh()
@@ -292,7 +298,7 @@ class MainActivity : ThemedActivity() {
 
     private fun historySelectionChanged() {
         val selecting=historyScreen?.selecting == true
-        historyPermission?.visibility=if(selecting || guidePreferences.load().showOnHome || Settings.canDrawOverlays(this))View.GONE else View.VISIBLE
+        historyPermission?.visibility=if(selecting || historyScreen?.browse?.favorites == true || guidePreferences.load().showOnHome || Settings.canDrawOverlays(this))View.GONE else View.VISIBLE
         updateBackCallback()
     }
 
@@ -374,6 +380,11 @@ class MainActivity : ThemedActivity() {
         outState.putString("preparation_settings_page",preparationSettings?.pageName() ?: preparationSettingsPage)
         outState.putInt("history_y",historyScroll?.scrollY ?: historyY)
         outState.putStringArrayList("history_selection", ArrayList(historyScreen?.selectedIds() ?: restoredHistorySelection))
+        val browse = historyScreen?.browse ?: restoredHistoryBrowse
+        outState.putBoolean("history_favorites", browse.favorites)
+        outState.putString("history_tag", browse.tag)
+        outState.putBoolean("history_untagged", browse.untagged)
+        outState.putString("history_query", browse.query)
         chatScreen?.let { chat -> outState.putBundle("chat",Bundle().also { chat.saveState(it) }) }
             ?: pendingChatState?.let { outState.putBundle("chat",it) }
         outState.putBoolean("assistant_start_attempted",assistantStartAttempted)
@@ -386,7 +397,7 @@ class MainActivity : ThemedActivity() {
     override fun onRetainNonConfigurationInstance(): Any {
         val retained=chatScreen?.retain() ?: pendingRetainedChat;retainedChatOffered=retained!=null
         return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName() ?: restoredSettingsPage,historyScroll?.scrollY ?: historyY,
-            historyScreen?.selectedIds() ?: restoredHistorySelection)
+            historyScreen?.selectedIds() ?: restoredHistorySelection, historyScreen?.browse ?: restoredHistoryBrowse)
     }
 
     override fun onDestroy() {
