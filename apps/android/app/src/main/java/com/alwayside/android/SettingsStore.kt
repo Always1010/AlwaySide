@@ -126,7 +126,8 @@ internal class SettingsStore(context: Context) {
     }
 
     fun resetConfiguration() = synchronized(lock) {
-        val edit = prefs.edit().remove("config").remove("credential")
+        val publicFields = runCatching { WireJson.decode(prefs.getString("config", "{}") ?: "{}") }.getOrNull()
+        val edit = prefs.edit().putString("config", WireJson.encode(SettingsRecovery.reset(publicFields))).remove("credential")
         prefs.all.keys.filter { it.startsWith("credential.") }.forEach { edit.remove(it) }
         check(edit.commit()) { "Settings reset failed" }
         ActiveServiceRequests.revoke(ServiceCatalog())

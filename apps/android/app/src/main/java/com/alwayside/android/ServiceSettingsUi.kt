@@ -154,7 +154,23 @@ internal class ServiceSettingsUi(
                 Page.KEY -> renderKey(c)
             }
             if (status.isNotBlank()) note(status)
-        } catch (_: Exception) { note("无法读取服务配置，请关闭设置后重试。") }
+        } catch (_: Exception) {
+            onHeader("AI 服务", null); onEditMenu(null)
+            note("无法读取服务配置。")
+            row("重置 AI 服务配置") { confirmConfigurationReset() }
+        }
+    }
+
+    private fun confirmConfigurationReset() {
+        MaterialAlertDialogBuilder(this).setTitle("重置 AI 服务配置？")
+            .setMessage("将移除 API 密钥和服务配置，停止相关请求。保留本地会话、媒体、外观及可读取的提示词。")
+            .setNegativeButton("取消", null).setPositiveButton("重置") { _, _ ->
+                runCatching { store.resetConfiguration() }.onSuccess {
+                    cancelRequest(); closeField(); dismissDialogs()
+                    card = null; cardInitial = null; key = null; keyInitial = null; expected = null
+                    history.clear(); page = Page.ROOT; status = ""; redraw()
+                }.onFailure { toast("重置未完成，请重试") }
+            }.showTracked()
     }
 
     private fun navigate(next: Page) {
