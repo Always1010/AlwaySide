@@ -163,8 +163,12 @@ internal class ChatScreen(
             })
         }
         toolbar = materialToolbar("对话", onBack).apply {
+            overflowIcon = prototypeIcon(R.drawable.ic_line_more).apply { setTint(INK) }
             addIconAction(4, R.drawable.ic_line_star, "收藏会话") { toggleFavorite() }.isEnabled = false
-            addIconAction(1, R.drawable.ic_copy, "复制整段会话") { copyConversation() }
+            menu.add(0, 1, 1, "复制整段会话").apply {
+                setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+                setOnMenuItemClickListener { copyConversation(); true }
+            }
             addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
                 icon = playbackIcon; isVisible = false
             }

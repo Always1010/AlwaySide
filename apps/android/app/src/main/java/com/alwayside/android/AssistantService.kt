@@ -166,7 +166,7 @@ class AssistantService : Service() {
         var send: View? = null
         var cancel: View? = null
         var retry: View? = null
-        var copy: View? = null
+        var copy: MenuItem? = null
         var pin: MaterialButton? = null
         var favorite: MaterialButton? = null
         var isFavorite = false
@@ -892,7 +892,7 @@ class AssistantService : Service() {
         node.cancel?.visibility=if(node.chat.busy)View.VISIBLE else View.GONE
         node.retry?.visibility=if(node.chat.canRetry&&!gathering)View.VISIBLE else View.GONE
         node.retry?.accessible(node.chat.retryLabel)
-        node.copy?.visibility=if(text.isNotBlank())View.VISIBLE else View.GONE
+        node.copy?.isEnabled=text.isNotBlank()
         node.imageChoice?.isEnabled=!node.chat.busy&&!gathering
         node.imageChoice?.alpha=if(node.imageChoice?.isEnabled==false).55f else 1f
         updateSearch(node)
