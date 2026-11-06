@@ -189,7 +189,7 @@ internal class HistoryListScreen(
             toolbar.addIconAction(1,android.R.drawable.ic_menu_delete,"删除选中的会话",::confirmDeletion).isEnabled=selection.snapshot().isNotEmpty()
             val selected = values.filter { selection.contains(it.id) }
             val allFavorites = selected.isNotEmpty() && selected.all { it.isFavorite }
-            toolbar.addIconAction(6, if (allFavorites) R.drawable.ic_star_filled else R.drawable.ic_line_star,
+            toolbar.addIconAction(6, if (allFavorites) R.drawable.ic_bookmark_filled else R.drawable.ic_line_bookmark,
                 if (allFavorites) "取消选中会话的收藏" else "收藏选中的会话") {
                 val ids = selection.snapshot()
                 val failures = ids.filter { runCatching { store.setFavorite(it, !allFavorites) }.isFailure }
@@ -287,7 +287,7 @@ internal class HistoryListScreen(
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 }, LinearLayout.LayoutParams(0, -2, 1f))
                 if (value.isFavorite) addView(ImageView(activity).apply {
-                    setImageDrawable(activity.prototypeIcon(R.drawable.ic_star_filled))
+                    setImageDrawable(activity.prototypeIcon(R.drawable.ic_bookmark_filled))
                     imageTintList = android.content.res.ColorStateList.valueOf(ACCENT)
                     contentDescription = "已收藏"
                 }, LinearLayout.LayoutParams(activity.dp(14), activity.dp(14)).apply { marginStart = activity.dp(6) })
@@ -348,7 +348,7 @@ internal class HistoryListScreen(
         }
         entry("全部对话", R.drawable.ic_line_history, values.size, !browse.favorites) { navigate(false) }
         val favorites = values.filter { it.isFavorite }
-        entry("我的收藏", R.drawable.ic_line_star, favorites.size,
+        entry("我的收藏", R.drawable.ic_line_bookmark, favorites.size,
             browse.favorites && browse.tag == null && !browse.untagged) { navigate(true) }
         drawerRows.addView(activity.settingsSectionHeader("收藏标签", addDescription = "新建标签", onAdd = tagDialogs::createTag).apply {
             setPadding(activity.dp(16), activity.dp(16), 0, activity.dp(4))
