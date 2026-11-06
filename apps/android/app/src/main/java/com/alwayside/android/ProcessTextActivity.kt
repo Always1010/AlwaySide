@@ -11,6 +11,7 @@ import java.util.UUID
 /** Explicit Android text-selection/share entry. Never reads the clipboard or original document. */
 class ProcessTextActivity : ThemedActivity() {
     private var confirmation: AlertDialog? = null
+    private var information: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,7 +42,9 @@ class ProcessTextActivity : ThemedActivity() {
             addView(iconButton(R.drawable.ic_line_info, "查看处理方式") {
                 MaterialAlertDialogBuilder(this@ProcessTextActivity).setTitle("处理方式")
                     .setMessage("确认后按当前默认设置打开对话或提问。自动提问会将这段文字发送到配置的 API 服务，可能产生费用。")
-                    .setPositiveButton("知道了", null).show()
+                    .setPositiveButton("知道了", null).create().also {
+                        information?.dismiss(); information = it; it.show()
+                    }
             })
         }
         confirmation = MaterialAlertDialogBuilder(this).setTitle("处理这段文字？")
@@ -65,6 +68,7 @@ class ProcessTextActivity : ThemedActivity() {
 
     override fun onDestroy() {
         confirmation?.dismiss(); confirmation = null
+        information?.dismiss(); information = null
         super.onDestroy()
     }
 
