@@ -57,6 +57,23 @@ internal object HistoryCollection {
         return state.copy(conversations = state.conversations.map { if (it.id == id) it.copy(tags = unique) else it })
     }
 
+    /** Apply only explicit tag changes and collect missing favorites in a single transaction. */
+    fun editTags(state: HistoryState, ids: List<String>, edits: Map<String, Boolean>, collectMissing: Boolean, now: Long): HistoryState {
+        val targets = ids.toSet()
+        require(targets.isNotEmpty()) { "请选择会话" }
+        val records = state.conversations.filter { it.id in targets }
+        check(records.size == targets.size) { "部分会话已不存在，请重新选择" }
+        check(collectMissing || records.all { it.isFavorite }) { "部分会话已取消收藏，请重新选择" }
+        require(edits.keys.all { it in state.tags }) { "标签已更改，请重新打开标签面板" }
+        return state.copy(conversations = state.conversations.map { value ->
+            if (value.id !in targets) value else {
+                val tags = value.tags.toMutableSet()
+                edits.forEach { (tag, checked) -> if (checked) tags.add(tag) else tags.remove(tag) }
+                value.copy(tags = tags.toList(), favoriteAt = if (value.isFavorite) value.favoriteAt else maxOf(1, now))
+            }
+        })
+    }
+
     fun createTag(state: HistoryState, name: String): HistoryState {
         validateTag(name)
         require(name !in state.tags) { "标签已存在" }

@@ -32,6 +32,9 @@ internal class HistoryStore(context: Context) {
         HistoryCollection.favorite(it, id, favorite, System.currentTimeMillis())
     }
     fun setTags(id: String, tags: List<String>) = change { HistoryCollection.setTags(it, id, tags) }
+    fun editTags(ids: List<String>, edits: Map<String, Boolean>, collectMissing: Boolean) = change {
+        HistoryCollection.editTags(it, ids, edits, collectMissing, System.currentTimeMillis())
+    }
     fun createTag(name: String) = change { HistoryCollection.createTag(it, name.trim()) }
     fun renameTag(old: String, new: String) = change { HistoryCollection.renameTag(it, old, new.trim()) }
     fun deleteTag(name: String) = change { HistoryCollection.deleteTag(it, name) }

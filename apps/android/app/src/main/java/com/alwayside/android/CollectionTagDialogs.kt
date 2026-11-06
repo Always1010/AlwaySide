@@ -46,10 +46,11 @@ internal class CollectionTagDialogs(private val activity: Activity, private val 
         dialog.show()
     }
 
-    fun editTags(ids: List<String>) {
-        val records = try { ids.mapNotNull(store::find) } catch (error: Exception) { failed(error); return }
+    fun editTags(ids: List<String>, collectMissing: Boolean = false, onSaved: () -> Unit = {}) {
+        val records = try { ids.mapNotNull(store::summary) } catch (error: Exception) { failed(error); return }
         if (records.isEmpty()) return
-        if (records.any { !it.isFavorite }) return
+        if (!collectMissing && records.any { !it.isFavorite }) return
+        val collecting = collectMissing && records.any { !it.isFavorite }
         val edits = linkedMapOf<String, Boolean>()
         val dialog = BottomSheetDialog(activity)
         val body = activity.column()
@@ -77,21 +78,15 @@ internal class CollectionTagDialogs(private val activity: Activity, private val 
         }
         body.addView(LinearLayout(activity).apply {
             gravity = Gravity.CENTER_VERTICAL
-            addView(activity.label("会话标签", 20f), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(activity.label(if (collecting) "收藏并设置标签" else "会话标签", 20f), LinearLayout.LayoutParams(0, -2, 1f))
             addView(activity.iconButton(R.drawable.ic_line_plus, "新建标签") { editName(after = ::renderChoices) })
         })
         body.addView(ScrollView(activity).apply { addView(choices); isFillViewport = false },
             LinearLayout.LayoutParams(-1, activity.dp(280)))
-        body.action("保存", true) {
+        body.action(if (collecting) "收藏并保存" else "保存", true) {
             runCatching {
-                records.forEach { original ->
-                    val latest = store.find(original.id) ?: return@forEach
-                    if (!latest.isFavorite) return@forEach
-                    val tags = latest.tags.toMutableSet()
-                    edits.forEach { (tag, checked) -> if (checked) tags.add(tag) else tags.remove(tag) }
-                    store.setTags(latest.id, tags.toList())
-                }
-            }.onSuccess { dialog.dismiss(); onChanged() }.onFailure { failed(it); onChanged() }
+                store.editTags(ids.distinct(), edits.toMap(), collectMissing)
+            }.onSuccess { dialog.dismiss(); onSaved(); onChanged() }.onFailure { failed(it) }
         }
         renderChoices(); dialog.setContentView(body); dialog.show()
     }

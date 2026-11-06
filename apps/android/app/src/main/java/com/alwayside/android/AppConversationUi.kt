@@ -344,8 +344,10 @@ internal class HistoryListScreen(
                 if (failures.isNotEmpty()) failed() else if (allFavorites) Toast.makeText(activity,
                     "已取消收藏，重新加入普通历史保留队列", Toast.LENGTH_SHORT).show()
             }
-            action(R.drawable.ic_line_tag, "设置会话标签", allFavorites) {
-                tagDialogs.editTags(selection.snapshot())
+            action(R.drawable.ic_line_tag, if (allFavorites) "设置会话标签" else "收藏并设置标签") {
+                tagDialogs.editTags(selection.snapshot(), collectMissing = !allFavorites) {
+                    selection.cancel(); onSelectionChanged()
+                }
             }
             action(R.drawable.ic_line_trash, "删除选中的会话", run = ::confirmDeletion)
             toolbar.addIconAction(2,android.R.drawable.ic_menu_close_clear_cancel,"取消选择") { back() }

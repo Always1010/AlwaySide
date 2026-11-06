@@ -76,4 +76,28 @@ class HistoryCollectionTest {
         assertEquals(3, HistoryCollection.retain(state.copy(historyLimit = Int.MAX_VALUE)).conversations.size)
         assertThrows(IllegalArgumentException::class.java) { HistoryCollection.retain(state.copy(historyLimit = 0)) }
     }
+
+    @Test fun jointTagEditCollectsMissingFavoritesAndPreservesUnchangedMetadata() {
+        val first = value("first", 1).copy(tags = listOf("甲"), favoriteAt = 5)
+        val second = value("second", 2).copy(tags = listOf("乙"))
+        val untouched = value("other", 3)
+        val state = HistoryState(listOf(first, second, untouched), listOf("甲", "乙", "丙"))
+        val next = HistoryCollection.editTags(state, listOf("first", "second"), mapOf("丙" to true), true, 100)
+        assertEquals(first.copy(tags = listOf("甲", "丙")), next.conversations[0])
+        assertEquals(second.copy(tags = listOf("乙", "丙"), favoriteAt = 100), next.conversations[1])
+        assertEquals(untouched, next.conversations[2])
+        val removed = HistoryCollection.editTags(next, listOf("first", "second"), mapOf("甲" to false), false, 200)
+        assertEquals(listOf("丙"), removed.conversations[0].tags)
+        assertEquals(next.conversations[1], removed.conversations[1])
+        assertThrows(IllegalStateException::class.java) {
+            HistoryCollection.editTags(state, listOf("first", "second"), emptyMap(), false, 100)
+        }
+        assertThrows(IllegalStateException::class.java) {
+            HistoryCollection.editTags(state, listOf("first", "gone"), emptyMap(), true, 100)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            HistoryCollection.editTags(state, listOf("second"), mapOf("gone" to true), true, 100)
+        }
+        assertFalse(state.conversations[1].isFavorite)
+    }
 }
