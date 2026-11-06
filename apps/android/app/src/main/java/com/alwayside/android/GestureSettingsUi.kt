@@ -26,6 +26,19 @@ internal class GestureSettingsUi(
 
     fun render() = with(context) {
         content.removeAllViews()
+        GestureBindings.functions.groupBy { it.group }.forEach { (group, functions) ->
+            header(group, help = if (group == "屏幕") "点开功能可选择多个手势；已被互斥功能占用的手势不可选择。单击与双击需短暂等待以识别连续点击。" else null)
+            val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            functions.forEach { function ->
+                rows.addView(settingsListRow(function.title, functionSummary(function)) { showFunction(function) })
+            }
+            addGroup(rows)
+        }
+        header("绑定管理")
+        addGroup(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(settingsListRow("恢复默认绑定") { confirmReset() })
+        })
         header("拓展选项")
         val extension = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         extension.addView(LinearLayout(this).apply {
@@ -60,20 +73,6 @@ internal class GestureSettingsUi(
             })
         }
         addGroup(extension)
-
-        GestureBindings.functions.groupBy { it.group }.forEach { (group, functions) ->
-            header(group, help = if (group == "屏幕") "点开功能可选择多个手势；已被互斥功能占用的手势不可选择。单击与双击需短暂等待以识别连续点击。" else null)
-            val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            functions.forEach { function ->
-                rows.addView(settingsListRow(function.title, functionSummary(function)) { showFunction(function) })
-            }
-            addGroup(rows)
-        }
-        header("绑定管理")
-        addGroup(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(settingsListRow("恢复默认绑定") { confirmReset() })
-        })
     }
 
     private fun header(title: String, help: String? = null) = with(context) {
