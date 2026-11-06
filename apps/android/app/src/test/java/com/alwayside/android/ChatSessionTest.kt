@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 import java.io.File
 import java.util.ArrayDeque
@@ -12,6 +13,71 @@ import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.TimeUnit
 
 class ChatSessionTest {
+    @Test fun floatingConversationRoundTripsKeepIdentityMessagesAndLatestComposerState() {
+        val h = Harness()
+        h.session.newConversation(kind = "photo")
+        val id = h.session.conversationId
+        var floating: ChatSession? = h.session
+        var returnedState: AppConversationState? = null
+        var closed = 0
+
+        repeat(2) { round ->
+            val app = HandedOffConversation(floating!!, null, { closed++; h.session.close() },
+                restore = { state -> floating = h.session; returnedState = state; true })
+            floating = null
+            app.session.submit(h.config, "应用追问 $round", null, "text")
+            h.worker.runNext(); h.drainMain()
+            val state = AppConversationState("未发送草稿 $round", round == 0, round == 0)
+            assertTrue(app.returnToFloating(state))
+            app.dispose() // Disposing the old Activity must not close the returned session.
+
+            assertSame(app.session, floating)
+            assertEquals(id, floating!!.conversationId)
+            assertEquals(state, returnedState)
+            assertEquals((round + 1) * 4 - 2, floating!!.messages.size)
+            floating!!.submit(h.config, "悬浮追问 $round", null, "text")
+            h.worker.runNext(); h.drainMain()
+            assertEquals((round + 1) * 4, floating!!.messages.size)
+            assertEquals(id, h.saved.single().id)
+            assertEquals(floating!!.messages, h.saved.single().messages)
+        }
+        assertEquals(0, closed)
+        h.session.close()
+    }
+
+    @Test fun returningToFloatingDoesNotCancelAnAnswerStillBeingGenerated() {
+        val h = Harness()
+        h.session.submit(h.config, "继续回答", null, "text")
+        val app = HandedOffConversation(h.session, null, h.session::close, restore = { true })
+        assertTrue(app.returnToFloating(AppConversationState("", null, false)))
+        assertFalse(app.returnToFloating(AppConversationState("旧页面", true, true)))
+        app.dispose()
+        assertTrue(h.session.busy)
+        assertFalse(h.worker.isShutdown)
+
+        h.worker.runNext(); h.drainMain()
+        assertEquals("answer", h.session.messages.last().text)
+        assertFalse(h.session.busy)
+        h.session.close()
+    }
+
+    @Test fun unavailableFloatingOwnerFallsBackToClosingOnceAndCannotRestoreDisposedConversation() {
+        val h = Harness()
+        h.session.submit(h.config, "待完成请求", null, "text")
+        var available = false
+        var closes = 0
+        val app = HandedOffConversation(h.session, null, { closes++; h.session.close() }, restore = { available })
+        val state = AppConversationState("草稿", null, false)
+        assertFalse(app.returnToFloating(state))
+        assertTrue(h.session.busy)
+        app.dispose(); app.dispose()
+        available = true
+        assertFalse(app.returnToFloating(state))
+        assertEquals(1, closes)
+        assertFalse(h.session.busy)
+        assertTrue(h.worker.isShutdown)
+    }
+
     @Test fun failuresBeforeAnyAnswerStayVisibleInEveryFloatingConversationAndRecoverOnRetry() {
         val failures = listOf(
             HttpTransport.failure(401) to "API 认证或权限失败",

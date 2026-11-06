@@ -222,7 +222,11 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun discardPendingChat() {
-        pendingRetainedChat?.let { if(it.handoff != null)it.handoff.dispose() else it.session.close() }
+        pendingRetainedChat?.let {
+            if(it.handoff != null) {
+                if(!it.handoff.returnToFloating(AppConversationState(it.draft,it.webSearchOverride,it.reuseImage)))it.handoff.dispose()
+            } else it.session.close()
+        }
         pendingRetainedChat=null;pendingChatState=null
     }
 
@@ -353,6 +357,13 @@ class MainActivity : ThemedActivity() {
     }
 
     override fun onStop() {
+        if (!isChangingConfigurations) chatScreen?.let { chat ->
+            val state = Bundle().also { chat.saveState(it) }
+            if (chat.returnToFloating()) {
+                pendingChatState = state
+                chat.dispose(); chatScreen = null
+            }
+        }
         ProbeState.removeServiceListener(assistantStateListener)
         super.onStop()
     }
@@ -360,6 +371,10 @@ class MainActivity : ThemedActivity() {
     override fun onResume() {
         super.onResume()
         if(navigation.current == AppPage.TUTORIAL)return
+        if(navigation.hasChat && chatScreen == null) {
+            restoreChat()
+            if(navigation.current == AppPage.CHAT)showCurrent()
+        }
         if(navigation.current == AppPage.HISTORY)showHistory()
         if(navigation.current == AppPage.PREPARATION)showPreparation()
         if(!allowOnboarding)return

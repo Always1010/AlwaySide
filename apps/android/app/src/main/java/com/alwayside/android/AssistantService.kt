@@ -1086,7 +1086,19 @@ class AssistantService : Service() {
         node.clip?.file?.let{ActiveConversationBridge.retainAudio(it)}
         ActiveConversationBridge.offer(id,HandedOffConversation(node.chat,node.frame?.bitmap,{
             node.chat.close();node.clip?.file?.let{ActiveConversationBridge.releaseAudio(it);it.delete()}
-        },node.clip,node.draft,node.webSearchOverride,node.originalFrame?.bitmap ?: node.frame?.bitmap,node.imageMode!=2))
+        },node.clip,node.draft,node.webSearchOverride,node.originalFrame?.bitmap ?: node.frame?.bitmap,node.imageMode!=2,
+            restore={ state ->
+                // Never replace a newer capture, restart a stopped service, or copy stale history.
+                if(!alive || nodes.containsKey(node.kind)) false else {
+                    node.draft=state.draft;node.webSearchOverride=state.webSearchOverride
+                    node.imageMode=if(!state.reuseImage)2 else if(node.imageMode==2)0 else node.imageMode
+                    node.detached=false;node.openingInApp=false
+                    node.clip?.file?.let{ActiveConversationBridge.releaseAudio(it)}
+                    nodes[node.kind]=node
+                    refresh(node)
+                    true
+                }
+            }))
         ProbeState.requesting=nodes.values.any{it.chat.busy}
         return node.frame?.bitmap
     }

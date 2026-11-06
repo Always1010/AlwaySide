@@ -5,9 +5,23 @@ import android.os.Looper
 import java.io.File
 
 /** Main-thread handoff. No service is started and no media is written to disk. */
-internal data class HandedOffConversation(val session: ChatSession, val image: Bitmap?, val dispose: () -> Unit,
+internal data class AppConversationState(val draft: String, val webSearchOverride: Boolean?, val reuseImage: Boolean)
+
+internal class HandedOffConversation(val session: ChatSession, val image: Bitmap?, dispose: () -> Unit,
     val audio: AudioClip? = null, val draft: String = "", val webSearchOverride: Boolean? = null,
-    val originalImage: Bitmap? = image, val reuseImage: Boolean = true)
+    val originalImage: Bitmap? = image, val reuseImage: Boolean = true,
+    private val restore: ((AppConversationState) -> Boolean)? = null) {
+    private var released = false
+    val dispose: () -> Unit = {
+        if (!released) { released = true; dispose() }
+    }
+
+    fun returnToFloating(state: AppConversationState): Boolean {
+        if (released || restore?.invoke(state) != true) return false
+        released = true
+        return true
+    }
+}
 
 internal object ActiveConversationBridge {
     var detachHandler: ((String) -> Bitmap?)? = null

@@ -64,6 +64,7 @@ internal class ChatScreen(
     private var conversationTitle = "文字对话"
     private var restoredStatus = ""
     private var handoff: HandedOffConversation? = null
+    private var returnedToFloating = false
     private var openedStoredRecord = false
     private var favorite = false
     private val collectionStore = HistoryStore(this)
@@ -97,7 +98,7 @@ internal class ChatScreen(
             // Transfer before reading: the overlay no longer owns or writes this conversation.
             image = ActiveConversationBridge.detach(id)
             handoff = ActiveConversationBridge.takeSession(id)
-            if (webSearchOverride == null) webSearchOverride = handoff?.webSearchOverride
+            if (handoff != null) webSearchOverride = handoff?.webSearchOverride
             image = handoff?.image ?: image
             originalImage = handoff?.originalImage
             (handoff?.session?.snapshot() ?: HistoryStore(this).find(id)).also {
@@ -121,7 +122,7 @@ internal class ChatScreen(
         openedStoredRecord = saved != null
         restoredStatus = if (handoff == null) saved?.status.orEmpty() else ""
         if (handoff == null) session.newConversation(saved)
-        bindConversation(draft.ifBlank { handoff?.draft.orEmpty() }, handoff?.reuseImage ?: reuseImage)
+        bindConversation(handoff?.draft ?: draft, handoff?.reuseImage ?: reuseImage)
     }
 
     private fun bindConversation(draft: String, reuseImage: Boolean) {
@@ -545,7 +546,7 @@ internal class ChatScreen(
         // A failed/deleted history entry must remain that entry after recreation, not become a new chat.
         if (!ready) requestedId?.let { outState.putString(EXTRA_ID, it) }
         if (ready) {
-            if (openedStoredRecord || session.messages.isNotEmpty() || session.question.isNotBlank() || session.transcript.isNotBlank())
+            if (handoff != null || openedStoredRecord || session.messages.isNotEmpty() || session.question.isNotBlank() || session.transcript.isNotBlank())
                 outState.putString(EXTRA_ID, session.conversationId)
             outState.putString("draft", composer.text.toString())
             outState.putBoolean("reuse", reuse.isChecked)
@@ -570,10 +571,22 @@ internal class ChatScreen(
             openedStoredRecord, composer.text.toString(), reuse.isChecked, webSearchOverride, originalImage)
     }
 
+    /** Keep a single owner when Home leaves this Activity alive behind the overlay. */
+    fun returnToFloating(): Boolean {
+        if (!ready || returnedToFloating) return false
+        val state = AppConversationState(composer.text.toString(), webSearchOverride, reuse.isChecked)
+        if (handoff?.returnToFloating(state) != true) return false
+        session.setObserver(null)
+        returnedToFloating = true
+        return true
+    }
+
     private fun releaseConversation() {
         if (::session.isInitialized) {
             session.setObserver(null)
-            if (handoff != null) handoff?.dispose?.invoke() else session.close()
+            if (handoff != null) {
+                if (!returnedToFloating && !returnToFloating()) handoff?.dispose?.invoke()
+            } else session.close()
         } else handoff?.dispose?.invoke()
     }
 
