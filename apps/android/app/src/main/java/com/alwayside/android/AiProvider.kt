@@ -77,6 +77,15 @@ internal class AiProvider : AiGateway {
         }
     }
 
+    /** A successful silent response may contain no words; this probe only checks the file API. */
+    fun probeTranscription(config: AppConfig, file: File, cancellation: RequestCancellation): String = sanitized(cancellation) {
+        val target = ProviderConnections.transcription(config)
+        validateConnection(target)
+        validateModel(target.transcriptionModel)
+        if (target.transcriptionPrompt.length > 32000) throw ProviderException("转写提示过长")
+        TranscriptionProbe.read(file) { source, bytes -> transcribePart(target, source, bytes, cancellation) }
+    }
+
     private fun transcribePart(config: AppConfig, source: RandomAccessFile, pcmBytes: Int,
                                cancellation: RequestCancellation): String {
         val fileSize = pcmBytes.toLong() + 44

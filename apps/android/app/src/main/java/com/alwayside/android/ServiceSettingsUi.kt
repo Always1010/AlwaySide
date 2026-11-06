@@ -16,8 +16,6 @@ import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CancellationException
@@ -822,7 +820,7 @@ internal class ServiceSettingsUi(
             val provider = AiProvider()
             val result = if (kind == "audio") {
                 val file = File.createTempFile("alwayside-transcription-test-", ".wav", cacheDir)
-                try { file.writeBytes(silentWav()); provider.transcribe(config, file, token) } finally { file.delete() }
+                try { file.writeBytes(TranscriptionProbe.audio()); provider.probeTranscription(config, file, token) } finally { file.delete() }
             } else provider.respond(config, emptyList(), when (kind) {
                 "image" -> "图片中央色块是什么颜色？只回复中文颜色名称。"
                 "search" -> "请实际使用联网搜索工具，查找今天的一则科技新闻，并给出日期与来源链接。"
@@ -888,9 +886,4 @@ internal class ServiceSettingsUi(
             "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
         } finally { bitmap.recycle() }
     }
-    private fun silentWav(): ByteArray = ByteBuffer.allocate(44 + 32000).order(ByteOrder.LITTLE_ENDIAN).apply {
-        put("RIFF".toByteArray()); putInt(32036); put("WAVEfmt ".toByteArray()); putInt(16)
-        putShort(1.toShort()); putShort(1.toShort()); putInt(16000); putInt(32000); putShort(2.toShort()); putShort(16.toShort())
-        put("data".toByteArray()); putInt(32000); put(ByteArray(32000))
-    }.array()
 }
