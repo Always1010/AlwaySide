@@ -36,6 +36,9 @@ class MainActivity : ThemedActivity() {
     private var preparationSettings: SettingsScreen? = null
     private var preparationSettingsPage: String? = null
     private var restoredSettingsPage: String? = null
+    private var pendingSettings: SettingsScreen.RetainedState? = null
+    private var pendingPreparationSettings: SettingsScreen.RetainedState? = null
+    private var leaveSettingsConfirmation: AlertDialog? = null
     private var pendingChatState: Bundle? = null
     private var pendingRetainedChat: ChatScreen.RetainedConversation? = null
     private var historyScroll: ScrollView? = null
@@ -63,6 +66,7 @@ class MainActivity : ThemedActivity() {
         val settingsPage: String?, val historyY: Int, val historySelection: List<String>,
         val historyBrowse: HistoryBrowse, val historySelecting: Boolean,
         val previewOwner: Any, val slideLesson: LongPressSlideLesson?,
+        val settings: SettingsScreen.RetainedState?, val preparationSettings: SettingsScreen.RetainedState?,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,7 +101,8 @@ class MainActivity : ThemedActivity() {
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
         restoredSettingsPage=savedInstanceState?.getString("settings_page") ?: retained?.settingsPage
-        preparationSettingsPage=savedInstanceState?.getString("preparation_settings_page") ?: "API"
+        pendingSettings=retained?.settings; pendingPreparationSettings=retained?.preparationSettings
+        preparationSettingsPage=savedInstanceState?.getString("preparation_settings_page") ?: retained?.preparationSettings?.page ?: "API"
         pendingChatState=savedInstanceState?.getBundle("chat"); pendingRetainedChat=retained?.chat
         // Restoring a tutorial must not construct its background chat/provider or decrypt settings.
         if(navigation.hasChat && navigation.current != AppPage.TUTORIAL) restoreChat()
@@ -149,7 +154,7 @@ class MainActivity : ThemedActivity() {
         if(navigation.current==AppPage.PREPARATION_SETTINGS) {
             if(preparationSettings?.consumeEditorBack()==true)return
             preparationSettings?.requestLeave {
-                preparationSettings?.dispose();preparationSettings=null
+                preparationSettings?.dispose();preparationSettings=null;pendingPreparationSettings=null
                 navigation.back();showCurrent()
             }
             return
@@ -160,7 +165,7 @@ class MainActivity : ThemedActivity() {
         when(navigation.back(settingsAtRoot=settingsScreen?.isHome ?: true)) {
             AppBack.SETTINGS_CATEGORY -> settingsScreen?.back()
             AppBack.PAGE -> {
-                if("SETTINGS" !in navigation.snapshot()) { settingsScreen?.dispose();settingsScreen=null }
+                if("SETTINGS" !in navigation.snapshot()) { settingsScreen?.dispose();settingsScreen=null;pendingSettings=null }
                 if(!navigation.hasChat) { chatScreen?.dispose();chatScreen=null;discardPendingChat() }
                 showCurrent()
             }
@@ -169,12 +174,24 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun leaveSettings(then: () -> Unit) {
-        val settings=if(navigation.current==AppPage.PREPARATION_SETTINGS)preparationSettings else settingsScreen
-        if(settings == null)then() else settings.requestLeave {
-            settings.dispose()
-            if(settings===preparationSettings)preparationSettings=null else settingsScreen=null
+        if(leaveSettingsConfirmation != null)return
+        val settings=settingsScreen?.retain() ?: pendingSettings
+        val preparation=preparationSettings?.retain() ?: pendingPreparationSettings
+        val leave = {
+            settingsScreen?.dispose();settingsScreen=null;pendingSettings=null
+            preparationSettings?.dispose();preparationSettings=null;pendingPreparationSettings=null
             then()
         }
+        if(settings?.hasUnsavedChanges != true && preparation?.hasUnsavedChanges != true) { leave();return }
+        // An external entry may arrive during recreation before its background page is shown.
+        if(container.childCount==0)showCurrent()
+        val dialog=MaterialAlertDialogBuilder(this).setTitle("放弃未保存的修改？")
+            .setMessage("当前流程中还有未保存的设置，离开后将丢弃。")
+            .setNegativeButton("继续编辑",null)
+            .setPositiveButton("放弃并离开") { _, _ -> leave() }.create()
+        leaveSettingsConfirmation=dialog
+        dialog.setOnDismissListener { if(leaveSettingsConfirmation===dialog)leaveSettingsConfirmation=null }
+        dialog.show()
     }
 
     private fun openHistory(): Unit = leaveSettings {
@@ -186,13 +203,17 @@ class MainActivity : ThemedActivity() {
 
     private fun openSettings() {
         if(navigation.current == AppPage.SETTINGS)return
-        historyScreen?.prepareToLeave()
-        hideKeyboard();navigation.openSettings();createSettings()
+        leaveSettings {
+            historyScreen?.prepareToLeave()
+            hideKeyboard();navigation.openSettings();createSettings()
+        }
     }
 
     private fun createSettings(page: String? = null) {
         restoredSettingsPage=page
-        settingsScreen=SettingsScreen(this,::present,::navigateBack,page,::openTutorial,::openPreparation,::openHelp,::openSlidePreview)
+        settingsScreen=SettingsScreen(this,::present,::navigateBack,page,::openTutorial,::openPreparation,::openHelp,::openSlidePreview,
+            retained=pendingSettings)
+        pendingSettings=null
     }
 
     private fun openHelp() { hideKeyboard();navigation.openHelp();showCurrent() }
@@ -338,7 +359,9 @@ class MainActivity : ThemedActivity() {
             AppPage.HELP -> present(HelpScreen(this,::navigateBack,::openTutorial,::openPreparation,guidePreferences.load().completedLessons.size==TutorialLesson.entries.size).view)
             AppPage.PREPARATION_SETTINGS -> {
                 val screen=preparationSettings ?: SettingsScreen(this,::present,::navigateBack,preparationSettingsPage,
-                    onSlideTutorial=::openSlidePreview).also { preparationSettings=it }
+                    onSlideTutorial=::openSlidePreview,retained=pendingPreparationSettings).also {
+                        preparationSettings=it;pendingPreparationSettings=null
+                    }
                 screen.show()
             }
         }
@@ -500,10 +523,12 @@ class MainActivity : ThemedActivity() {
         val retained=chatScreen?.retain() ?: pendingRetainedChat;retainedChatOffered=retained!=null
         return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName() ?: restoredSettingsPage,historyScroll?.scrollY ?: historyY,
             historyScreen?.selectedIds() ?: restoredHistorySelection, historyScreen?.browse ?: restoredHistoryBrowse,
-            historyScreen?.selecting ?: restoredHistorySelecting,previewOwner,slideLesson)
+            historyScreen?.selecting ?: restoredHistorySelecting,previewOwner,slideLesson,
+            settingsScreen?.retain() ?: pendingSettings,preparationSettings?.retain() ?: pendingPreparationSettings)
     }
 
     override fun onDestroy() {
+        leaveSettingsConfirmation?.dismiss();leaveSettingsConfirmation=null
         dismissSlidePreview(clearLesson = false)
         previewEntryDialog?.dismiss(); previewEntryDialog = null
         if (!isChangingConfigurations) AssistantPreview.overlays.setActive(previewOwner, false)

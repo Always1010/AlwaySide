@@ -122,6 +122,12 @@ internal class SettingsEditPanel(
         onRequestClose()
     }
 
+    /** Restore an in-memory draft without making it the editor's saved baseline. */
+    fun restoreDraft(value: String) {
+        field.setText(value)
+        field.setSelection(field.length())
+    }
+
     fun close() {
         closing = true
         (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)

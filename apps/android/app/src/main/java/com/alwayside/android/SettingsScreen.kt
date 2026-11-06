@@ -21,7 +21,7 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.appbar.MaterialToolbar
 
-/** Category pages intentionally keep their draft only in the current view, never saved instance state. */
+/** Category drafts survive configuration changes only in memory, never saved instance state. */
 internal class SettingsScreen(
     private val activity: Activity,
     private val onContent: (View) -> Unit,
@@ -31,7 +31,15 @@ internal class SettingsScreen(
     private val onPreparation: () -> Unit = {},
     private val onHelp: () -> Unit = {},
     private val onSlideTutorial: () -> Unit = {},
+    retained: RetainedState? = null,
 ) : ContextWrapper(activity) {
+    internal data class RetainedState(
+        val page: String, val service: ServiceSettingsUi.RetainedState?, val field: FieldEditState?,
+        val editorConnectionId: String?, val editorTranscriptionId: String?,
+    ) {
+        val hasUnsavedChanges: Boolean get() = this.field?.changed == true || service?.hasUnsavedChanges == true
+        override fun toString() = "SettingsScreen.RetainedState(values redacted)"
+    }
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
         AI("AI 服务", "问答与转写服务配置、API 管理", android.R.drawable.ic_menu_manage),
@@ -77,17 +85,27 @@ internal class SettingsScreen(
     private var renderedConnectionId: String? = null
     private var editorConnectionId: String? = null
     private var editorTranscriptionId: String? = null
+    private var pendingServiceState = retained?.service
+    private val fieldOpeners = mutableMapOf<String, (RetainedState?) -> Unit>()
 
     init {
         store = SettingsStore(this)
         interactionStore = InteractionPreferences(this)
-        showPage(if (initialPage in setOf("API", "ANSWER", "TRANSCRIPTION", "MODELS")) Page.AI
-            else Page.entries.firstOrNull { it.name == initialPage } ?: Page.HOME)
+        val restoredPage = retained?.page ?: initialPage
+        showPage(if (restoredPage in setOf("API", "ANSWER", "TRANSCRIPTION", "MODELS")) Page.AI
+            else Page.entries.firstOrNull { it.name == restoredPage } ?: Page.HOME)
+        retained?.field?.let { field ->
+            if (field.name == "presetName" && page == Page.PROMPTS) savePreset(field)
+            else fieldOpeners[field.name]?.invoke(retained)
+        }
     }
 
     val isHome: Boolean get() = page == Page.HOME
 
     fun pageName(): String = page.name
+
+    fun retain(): RetainedState = RetainedState(page.name, serviceUi?.retain() ?: pendingServiceState,
+        activeEdit?.copy(), editorConnectionId, editorTranscriptionId)
 
     /** Reattach the existing view so navigating the host does not recreate a draft. */
     fun show() {
@@ -177,7 +195,7 @@ internal class SettingsScreen(
                         if (edit != null) addIconAction(4302, android.R.drawable.ic_menu_manage, "编辑服务", edit)
                             .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
                     }
-                }).also { serviceUi = it }
+                }, retained = pendingServiceState).also { serviceUi = it; pendingServiceState = null }
                 ui.render(body, serviceEntry)
             }
             Page.PROMPTS -> promptPage(config)
@@ -350,10 +368,14 @@ internal class SettingsScreen(
         }
         valueViews[name] = valueView
         if (secret) credentialState = valueView
-        val open = {
+        val open: (RetainedState?) -> Unit = { restoring ->
             finishEditing {
                 val start = try {
-                    when (name) {
+                    if (restoring?.field != null) {
+                        editorConnectionId = restoring.editorConnectionId
+                        editorTranscriptionId = restoring.editorTranscriptionId
+                        restoring.field.initial
+                    } else when (name) {
                         "recordingMaxMinutes" -> interactionStore.load().recordingMaxMinutes.toString()
                         "historyLimit" -> HistoryStore(this).historyLimit().toString()
                         else -> {
@@ -368,7 +390,7 @@ internal class SettingsScreen(
                     toast(if (name == "historyLimit") "无法读取历史上限，请重试" else "无法读取配置，请先检查 API 管理")
                     return@finishEditing
                 }
-                activeEdit = FieldEditState(name, start)
+                activeEdit = restoring?.field?.copy() ?: FieldEditState(name, start)
                 lateinit var panel: SettingsEditPanel
                 panel = SettingsEditPanel(this, title, hintValue, start, multiline, secret, numeric, decimal,
                     onDraft = { draft -> if (activeEdit?.name == name) activeEdit?.draft = draft },
@@ -378,11 +400,13 @@ internal class SettingsScreen(
                     activeEdit = null; closeEditor = null; editorConnectionId = null; editorTranscriptionId = null
                     panel.close()
                 }
+                restoring?.field?.let { panel.restoreDraft(it.draft) }
                 panel.show()
             }
         }
+        fieldOpeners[name] = open
         content.contentDescription = "编辑$title，${valueView.text}"
-        content.setOnClickListener { open() }
+        content.setOnClickListener { open(null) }
         if (multiline) {
             group = null
             content.addView(label(title, 13f, true).apply { textSize = 13f }, LinearLayout.LayoutParams(-1, -2))
@@ -394,7 +418,7 @@ internal class SettingsScreen(
             content.addView(valueView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
             body.addView(content, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
         } else {
-            val row = settingsListRow(title, inlineValue = true, showArrow = false, onClick = open)
+            val row = settingsListRow(title, inlineValue = true, showArrow = false, onClick = { open(null) })
             val text = row.getChildAt(0) as LinearLayout
             text.addView(valueView.apply {
                 textSize = 14f; setTextColor(MUTED); gravity = Gravity.END
@@ -656,8 +680,8 @@ internal class SettingsScreen(
         }
     }
 
-    private fun savePreset() {
-        activeEdit = FieldEditState("presetName", "")
+    private fun savePreset(restored: FieldEditState? = null) {
+        activeEdit = restored?.copy() ?: FieldEditState("presetName", "")
         lateinit var panel: SettingsEditPanel
         panel = SettingsEditPanel(this, "模板名称", "1–60 字，保存当前六项已存配置", "", false, false, false, false,
             onDraft = { activeEdit?.takeIf { it.name == "presetName" }?.draft = it },
@@ -682,6 +706,7 @@ internal class SettingsScreen(
                 }
             })
         closeEditor = { activeEdit = null; closeEditor = null; panel.close() }
+        restored?.let { panel.restoreDraft(it.draft) }
         panel.show()
     }
 
@@ -772,6 +797,7 @@ internal class SettingsScreen(
 
     private fun clearDraft() {
         closeEditor?.invoke(); activeEdit = null; closeEditor = null
+        fieldOpeners.clear()
         valueViews.clear(); selections.clear(); ballPreview = null; colorPalette = null; credentialState = null; group = null
     }
 
@@ -807,6 +833,7 @@ internal class SettingsScreen(
         if (disposed) return
         disposed = true
         serviceUi?.dispose(); serviceUi = null
+        pendingServiceState = null
         generation++
         dismissDialogs()
         clearDraft()

@@ -25,9 +25,10 @@ internal class ServiceSettingsUi(
     private val activity: Activity,
     private val onHeader: (String, String?) -> Unit,
     private val onEditMenu: ((() -> Unit)?) -> Unit = {},
+    retained: RetainedState? = null,
 ) : ContextWrapper(activity) {
-    private enum class Page { ROOT, PURPOSE, API, CARD, KEY }
-    private data class KeyForm(
+    internal enum class Page { ROOT, PURPOSE, API, CARD, KEY }
+    internal data class KeyForm(
         val id: String? = null, val providerId: String = "", val providerName: String = "",
         val kind: ProviderKind? = null, val name: String = "", val secret: String = "",
         val baseUrl: String = "", val protocol: ApiProtocol = ApiProtocol.RESPONSES,
@@ -36,12 +37,26 @@ internal class ServiceSettingsUi(
     ) {
         override fun toString() = "KeyForm(credential redacted)"
     }
+    internal data class RetainedState(
+        val page: Page, val history: List<Page>, val purpose: ModelPurpose,
+        val card: ModelProfile?, val cardInitial: ModelProfile?, val modelDefaultPending: Boolean,
+        val key: KeyForm?, val keyInitial: KeyForm?, val expected: ServiceCatalog?,
+        val connectionExpanded: Boolean, val optionsExpanded: Boolean,
+        val field: FieldEditState?, val status: String,
+        val verification: Map<String, Pair<ServiceCatalog, String>>,
+    ) {
+        val hasUnsavedChanges: Boolean get() = card != cardInitial || key != keyInitial || this.field?.changed == true
+        override fun toString() = "ServiceSettingsUi.RetainedState(values redacted)"
+    }
     private val store = SettingsStore(this)
     private var body: LinearLayout? = null
     private var group: LinearLayout? = null
     private var fieldEditor: SettingsEditPanel? = null
     private var fieldInitial = ""
     private var fieldDraft = ""
+    private var fieldTitle: String? = null
+    private val fieldOpeners = mutableMapOf<String, () -> Unit>()
+    private var pendingField = retained?.field
     private var page = Page.ROOT
     private val history = mutableListOf<Page>()
     private var initialized = false
@@ -69,6 +84,21 @@ internal class ServiceSettingsUi(
     private var status = ""
     private val verification = mutableMapOf<String, Pair<ServiceCatalog, String>>()
 
+    init {
+        retained?.let {
+            initialized = true; page = it.page; history.addAll(it.history); purpose = it.purpose
+            card = it.card; cardInitial = it.cardInitial; modelDefaultPending = it.modelDefaultPending
+            key = it.key; keyInitial = it.keyInitial; expected = it.expected
+            connectionExpanded = it.connectionExpanded; optionsExpanded = it.optionsExpanded
+            status = it.status; verification.putAll(it.verification)
+        }
+    }
+
+    fun retain(): RetainedState = RetainedState(page, history.toList(), purpose, card, cardInitial,
+        modelDefaultPending, key, keyInitial, expected, connectionExpanded, optionsExpanded,
+        fieldTitle?.let { FieldEditState(it, fieldInitial, fieldDraft) } ?: pendingField?.copy(),
+        status, verification.toMap())
+
     fun render(container: LinearLayout, entry: String = "AI") {
         if (disposed) return
         body = container
@@ -81,6 +111,14 @@ internal class ServiceSettingsUi(
             }
         }
         redraw()
+        pendingField?.let { field ->
+            pendingField = null
+            fieldOpeners[field.name]?.invoke()
+            if (fieldEditor != null) {
+                fieldInitial = field.initial
+                fieldEditor?.restoreDraft(field.draft)
+            }
+        }
     }
 
     fun back(): Boolean {
@@ -125,13 +163,14 @@ internal class ServiceSettingsUi(
     fun dispose() {
         disposed = true; cancelRequest(); closeField(); dismissDialogs()
         card = null; cardInitial = null; key = null; keyInitial = null; body = null
+        pendingField = null; fieldOpeners.clear(); expected = null; verification.clear()
     }
 
     private fun catalog() = requireNotNull(store.load().serviceCatalog)
     private fun redraw() {
         if (disposed) return
         val target = body ?: return
-        target.removeAllViews(); group = null
+        target.removeAllViews(); group = null; fieldOpeners.clear()
         try {
             val c = catalog()
             onHeader(when (page) {
@@ -300,6 +339,7 @@ internal class ServiceSettingsUi(
             if (usable.isNotEmpty()) note("请先选择密钥")
             return
         }
+        fieldOpeners["模型"] = ::openModelEditor
         row("模型", p.model.ifBlank { "请选择" }) { chooseModel(c) }
         section("用途参数", help = if (purpose == ModelPurpose.ANSWER)
             "未设置的参数使用服务默认，支持范围随服务、接口和模型变化。\n\n输出上限：留空或 16–131072。Temperature：0–2，旧版 Claude 为 0–1；Top P：0–1，两种采样参数只设置一项。推理、详细程度及搜索需模型支持。"
@@ -543,12 +583,14 @@ internal class ServiceSettingsUi(
         choose("选择模型", labels, checkedIndex = models.indexOfFirst { it.id == draft.model }) { index ->
             when {
                 index < models.size -> { card = requireNotNull(card).copy(model = models[index].id); redraw() }
-                index == models.size -> editInput("模型", requireNotNull(card).model) {
-                    card = requireNotNull(card).copy(model = it.trim())
-                }
+                index == models.size -> openModelEditor()
                 else -> fetchDraftModels(c)
             }
         }
+    }
+
+    private fun openModelEditor() = editInput("模型", requireNotNull(card).model) {
+        card = requireNotNull(card).copy(model = it.trim())
     }
 
     private fun fetchDraftModels(c: ServiceCatalog) {
@@ -584,15 +626,17 @@ internal class ServiceSettingsUi(
         val displayed = if (secret) {
             if (value.isNotBlank()) "已输入" else if (expected?.credentials?.find { it.id == key?.id }?.unreadable == true) "需更新" else if (key?.id != null) "已保存" else "未设置"
         } else value.ifBlank { "未设置" }
-        row(title, displayed) {
+        val open = {
             editInput(title, value, secret, multiline, numeric, decimal, changed)
         }
+        fieldOpeners[title] = open
+        row(title, displayed, open)
     }
 
     private fun editInput(title: String, value: String, secret: Boolean = false,
                           multiline: Boolean = false, numeric: Boolean = false, decimal: Boolean = false,
                           changed: (String) -> Unit) {
-        fieldInitial = value; fieldDraft = value
+        fieldTitle = title; fieldInitial = value; fieldDraft = value
         fieldEditor = SettingsEditPanel(this, title, "", value, multiline, secret, numeric, decimal,
             onDraft = { fieldDraft = it }, onRequestClose = { finishFieldEditing {} },
             onSave = { text, error ->
@@ -615,7 +659,7 @@ internal class ServiceSettingsUi(
     }
 
     private fun closeField() {
-        fieldEditor?.close(); fieldEditor = null; fieldInitial = ""; fieldDraft = ""
+        fieldEditor?.close(); fieldEditor = null; fieldTitle = null; fieldInitial = ""; fieldDraft = ""
     }
 
     private fun section(title: String, description: String? = null, help: String? = null, add: () -> Unit = {}) {
