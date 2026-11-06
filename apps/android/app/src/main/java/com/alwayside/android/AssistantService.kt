@@ -5,7 +5,6 @@ import android.content.*
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.*
-import android.media.MediaPlayer
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.*
@@ -78,7 +77,7 @@ class AssistantService : Service() {
     }
     private val capturePermissionGate = CapturePermissionGate()
     private val requestingConsent: Boolean get() = capturePermissionGate.isPending
-    private var player: MediaPlayer? = null
+    private val playback by lazy { ChatAudioPlayback.get(this) }
     private var lastKind = "photo"
     private val taps = TapSequence()
     private var burstRecording = false
@@ -203,7 +202,7 @@ class AssistantService : Service() {
         }
         AssistantPreview.overlays.addListener(previewListener)
         ProbeState.serviceRunning = true
-        cacheDir.listFiles()?.filter { it.name.startsWith("listening-") && it.extension == "wav" && !ActiveConversationBridge.isAudioRetained(it) }?.forEach { it.delete() }
+        cacheDir.listFiles()?.filter { it.name.startsWith("listening-") && it.extension == "wav" && !ActiveConversationBridge.isAudioRetained(it) && !ChatAudioPlayback.isUsingFile(it) }?.forEach { it.delete() }
         main.post(ticker)
     }
     override fun onBind(intent: Intent?) = null
@@ -425,7 +424,8 @@ class AssistantService : Service() {
         // Invalidate pending real capture/consent and touch callbacks before displaying a simulation.
         capturePermissionGate.cancel(); captureEpoch++
         gathering = false; captureOwner = null; restoreCaptureWindows = null
-        removeMenu(); removeBubble(); stopPlayback()
+        removeMenu(); removeBubble()
+        nodes.values.forEach { playback.setVisible(it, null, false) }
         previewWindows = nodes.values.mapNotNull { node ->
             val root = node.root ?: return@mapNotNull null
             val layout = node.layout ?: return@mapNotNull null
@@ -454,7 +454,7 @@ class AssistantService : Service() {
             if (!node.detached && nodes[node.kind] === node && node.root === root && !root.isAttachedToWindow) {
                 clamp(layout)
                 layout.softInputMode = (layout.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST) or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
-                runCatching { windows.addView(root, layout); node.layout = layout; refresh(node) }
+                runCatching { windows.addView(root, layout); node.layout = layout; playback.setVisible(node, node.chat.conversationId, true); refresh(node) }
                     .onFailure { hideWindow(node, false); toast("小窗恢复失败，可从悬浮球重新打开") }
             }
         }
@@ -637,7 +637,7 @@ class AssistantService : Service() {
         nodes.remove(kind)?.let { old ->
             hideWindow(old)
             if (old.chat.busy) { old.chat.cancel(); toast("已停止上一条同类请求，开始新会话") }
-            old.chat.close(); old.clip?.file?.delete()
+            old.chat.close(); old.clip?.file?.let { ChatAudioPlayback.deleteTemporaryAudio(it) }
         }
         return FloatingConversation(kind).also { nodes[kind]=it;lastKind=kind }
     }
@@ -650,7 +650,7 @@ class AssistantService : Service() {
         node.audioApproval=null
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.favorite=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
         node.composer=null;node.composerToggle=null
-        if (stopAudio) stopPlayback()
+        playback.setVisible(node, null, false, retaining = !stopAudio)
     }
     private fun icon(resource: Int, description: String, run: () -> Unit) = uiContext.iconButton(resource,description,run)
     private fun showWindow(node: FloatingConversation, restoredLayout: WindowManager.LayoutParams? = null, focusQuestion: Boolean = false) {
@@ -755,7 +755,7 @@ class AssistantService : Service() {
             insets
         }
         layout.softInputMode=(if(focusQuestion)WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE else WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN) or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        try{windows.addView(root,layout);node.root=root;node.layout=layout;if(!node.composerExpanded)root.requestFocus();updatePin(node);refresh(node);if(focusQuestion)focusQuestionInput(node)}catch(_:RuntimeException){toast("无法打开结果窗口，请检查悬浮权限")}
+        try{windows.addView(root,layout);node.root=root;node.layout=layout;playback.setVisible(node,node.chat.conversationId,true);if(!node.composerExpanded)root.requestFocus();updatePin(node);refresh(node);if(focusQuestion)focusQuestionInput(node)}catch(_:RuntimeException){toast("无法打开结果窗口，请检查悬浮权限")}
         removeBubble();showBubble()
     }
     private fun setComposerExpanded(node:FloatingConversation,expanded:Boolean,fromUser:Boolean=false) {
@@ -1133,6 +1133,7 @@ class AssistantService : Service() {
     }
     private fun discardPendingAudio(node:FloatingConversation){
         if(!node.awaitingAudioApproval||nodes[node.kind]!==node)return
+        ChatAudioPlayback.stopConversation(node.chat.conversationId)
         node.awaitingAudioApproval=false
         hideWindow(node);nodes.remove(node.kind);node.chat.close()
         val deleted=node.clip?.file?.delete()==true
@@ -1147,15 +1148,24 @@ class AssistantService : Service() {
         ProbeState.lastEvent=if(current!=null)"录音已取消并丢弃，没有发起请求" else "当前没有录音"
         if(notify)toast(ProbeState.lastEvent)
     }
-    private fun stopPlayback(){player?.let{runCatching{it.stop()};it.release()};player=null}
-    private fun playClip(){val file=nodes["audio"]?.clip?.file?:return;stopPlayback();try{val p=MediaPlayer();player=p;p.setDataSource(file.absolutePath);p.setOnPreparedListener{if(player===it)it.start()};p.setOnCompletionListener{stopPlayback()};p.setOnErrorListener{_,_,_->stopPlayback();toast("回听失败");true};p.prepareAsync();toast("正在回听上一段") }catch(_:Exception){stopPlayback();toast("无法回听")}}
+    private fun stopPlayback() { playback.stop() }
+    private fun playClip() {
+        val node = nodes["audio"] ?: return
+        val file = node.clip?.file ?: return
+        if (!preferences.load().backgroundPlayback && node.root?.isAttachedToWindow != true) {
+            showWindow(node)
+            if (node.root?.isAttachedToWindow != true) return
+        }
+        if (playback.isActive(node.chat.conversationId)) playback.toggle()
+        else playback.play(node.chat.conversationId, file)
+    }
     private fun detachToApplication(id:String):Bitmap?{
         val entry=nodes.entries.firstOrNull{it.value.chat.conversationId==id}?:return null
         val node=entry.value;hideWindow(node);node.detached=true;nodes.remove(entry.key)
         if(captureOwner===node){captureEpoch++;removeSelector();restoreAfterCapture()}
         node.clip?.file?.let{ActiveConversationBridge.retainAudio(it)}
         ActiveConversationBridge.offer(id,HandedOffConversation(node.chat,node.frame?.bitmap,{
-            node.chat.close();node.clip?.file?.let{ActiveConversationBridge.releaseAudio(it);it.delete()}
+            node.chat.close();node.clip?.file?.let{ActiveConversationBridge.releaseAudio(it);ChatAudioPlayback.deleteTemporaryAudio(it)}
         },node.clip,node.draft,node.webSearchOverride,node.originalFrame?.bitmap ?: node.frame?.bitmap,node.imageMode!=2,
             restore={ state ->
                 // Never replace a newer capture, restart a stopped service, or copy stale history.
@@ -1195,9 +1205,9 @@ class AssistantService : Service() {
         AssistantPreview.overlays.removeListener(previewListener); AssistantPreview.finishRecording = null
         previewWindows=emptyList();previewSelector=null;deferredPreviewWindows.clear()
         AppAppearance.removeListener(this, appearanceListener)
-        preferences.removeListener(preferencesListener);cancelRecording(false);stopPlayback()
+        preferences.removeListener(preferencesListener);cancelRecording(false)
         apiPreferences.unregisterOnSharedPreferenceChangeListener(apiPreferencesListener)
-        nodes.values.forEach{hideWindow(it);it.chat.close();it.clip?.file?.delete()};nodes.clear()
+        nodes.values.forEach{hideWindow(it);it.chat.close();it.clip?.file?.let { file -> ChatAudioPlayback.deleteTemporaryAudio(file) }};nodes.clear()
         clearCapture();removeMenu();removeBubble();removeSelector();mediaWorker.shutdown()
         ProbeState.serviceRunning=false;ProbeState.recording=false;ProbeState.requesting=false;ProbeState.lastEvent="助手与采集已停止"
         stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy()

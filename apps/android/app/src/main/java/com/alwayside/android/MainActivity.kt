@@ -73,7 +73,7 @@ class MainActivity : ThemedActivity() {
         slideLesson = retained?.slideLesson ?: savedInstanceState?.takeIf { it.containsKey("slide_lesson") }?.let {
             LongPressSlideLesson(it.getInt("slide_lesson"), it.getBoolean("slide_passed"))
         }
-        val entry = AppEntry.take(intent)
+        val entry = AppEntry.take(intent) ?: AudioPlaybackService.takeEntry(intent, this)
         guidePreferences.initialize(onboarding.contains("overlay_prompted") || onboarding.contains("assistant_enabled") ||
             SettingsStore(this).hasSavedConfiguration())
         navigation = AppNavigation(savedInstanceState?.getStringArrayList("pages") ?: retained?.pages.orEmpty())
@@ -103,7 +103,7 @@ class MainActivity : ThemedActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
-        val entry = AppEntry.take(intent)
+        val entry = AppEntry.take(intent) ?: AudioPlaybackService.takeEntry(intent, this)
         if(entry != null) route(entry)
         else if(intent.action == Intent.ACTION_MAIN) { allowOnboarding=true;assistantStartAttempted=false }
     }
@@ -419,6 +419,7 @@ class MainActivity : ThemedActivity() {
 
     override fun onStart() {
         super.onStart()
+        chatScreen?.setPlaybackForeground(true)
         previewForeground = true
         syncPreview(); showSlidePreview()
         ProbeState.addServiceListener(assistantStateListener)
@@ -426,6 +427,7 @@ class MainActivity : ThemedActivity() {
     }
 
     override fun onStop() {
+        if (!isChangingConfigurations) chatScreen?.setPlaybackForeground(false)
         previewForeground = false
         dismissSlidePreview(clearLesson = false)
         previewEntryDialog?.dismiss(); previewEntryDialog = null

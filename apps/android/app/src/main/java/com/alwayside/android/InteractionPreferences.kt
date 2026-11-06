@@ -31,6 +31,7 @@ internal data class InteractionConfig(
     val recordingMaxMinutes: Int = RecordingLimits.DEFAULT_MINUTES,
     val collapseFollowUpByDefault: Boolean = true,
     val saveHistoryAudio: Boolean = true,
+    val backgroundPlayback: Boolean = false,
     val recordingLimitAction: RecordingLimitAction = RecordingLimitAction.DISCARD,
     val useDefaultQuestion: Boolean = true,
     val menuWebSearch: Boolean? = null,
@@ -82,6 +83,7 @@ internal class InteractionPreferences(private val context: Context) {
             recordingMaxMinutes = prefs.getInt("recordingMaxMinutes", d.recordingMaxMinutes).coerceIn(0, RecordingLimits.MAX_MINUTES),
             collapseFollowUpByDefault = prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
             saveHistoryAudio = prefs.getBoolean("saveHistoryAudio", d.saveHistoryAudio),
+            backgroundPlayback = prefs.getBoolean("backgroundPlayback", d.backgroundPlayback),
             recordingLimitAction = RecordingLimitAction.from(prefs.getString("recordingLimitAction", null)),
             useDefaultQuestion = prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
             menuWebSearch = if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
@@ -111,6 +113,7 @@ internal class InteractionPreferences(private val context: Context) {
             .putString("recordingLimitAction", value.recordingLimitAction.value)
             .putBoolean("collapseFollowUpByDefault", value.collapseFollowUpByDefault)
             .putBoolean("saveHistoryAudio", value.saveHistoryAudio)
+            .putBoolean("backgroundPlayback", value.backgroundPlayback)
             .putBoolean("useDefaultQuestion", value.useDefaultQuestion)
         for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
             val key = "binding_${recording}_${gesture.name}"

@@ -1,17 +1,23 @@
 package com.alwayside.android
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.SharedPreferences
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.widget.Toast
 import java.io.File
 
-/** Playback belongs to the chat, independently of its messages and toolbar rendering. */
-internal class ChatAudioPlayback(
-    private val context: Context,
-    private val onChanged: (State) -> Unit,
-) {
+/** One application-owned player. Screens subscribe without owning its lifetime. Main thread only. */
+internal class ChatAudioPlayback private constructor(private val context: Context) {
     internal data class State(
         val preparing: Boolean = false,
         val playing: Boolean = false,
@@ -19,10 +25,64 @@ internal class ChatAudioPlayback(
     )
 
     private val handler = Handler(Looper.getMainLooper())
+    private val preferences = InteractionPreferences(context)
+    private val visibility = PlaybackVisibility(preferences.load().backgroundPlayback)
+    private val observers = mutableSetOf<() -> Unit>()
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        .setAudioAttributes(attributes).setWillPauseWhenDucked(true)
+        .setOnAudioFocusChangeListener({ change ->
+            when (change) {
+                AudioManager.AUDIOFOCUS_LOSS -> { resumeOnFocus = false; pause(); abandonFocus() }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    resumeOnFocus = resumeOnFocus || state.playing
+                    pause(temporary = true)
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> if (resumeOnFocus) { resumeOnFocus = false; hasFocus = true; startOrResume() }
+            }
+        }, handler).build()
+    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "backgroundPlayback") {
+            visibility.backgroundPlayback = preferences.load().backgroundPlayback
+            if (visibility.shouldStop(conversationId)) stop()
+            else if (conversationId != null) {
+                if (visibility.backgroundPlayback) requestService() else {
+                    releaseService()
+                    if (waitingForService) { waitingForService = false; startOrResume() }
+                }
+            }
+        }
+    }
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) pause()
+            if (intent.action == Intent.ACTION_SCREEN_OFF && !visibility.backgroundPlayback) stop()
+        }
+    }
     private var player: MediaPlayer? = null
-    private var duration = 0
+    private var file: File? = null
+    private var deleteWhenStopped = false
+    private var resumeOnFocus = false
+    private var hasFocus = false
+    private var waitingForService = false
+    private var serviceRequested = false
+    private var service: AudioPlaybackService? = null
     private var state = State()
-    val isActive: Boolean get() = player != null
+    var conversationId: String? = null
+        private set
+    var duration: Int = 0
+        private set
+    val position: Int get() = runCatching { player?.currentPosition ?: 0 }.getOrDefault(0)
+    val currentState: State get() = state
+
+    init {
+        preferences.addListener(preferenceListener)
+        val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY).apply { addAction(Intent.ACTION_SCREEN_OFF) }
+        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else context.registerReceiver(noisyReceiver, filter)
+    }
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -30,61 +90,141 @@ internal class ChatAudioPlayback(
             if (!state.playing) return
             try {
                 updatePosition(current, playing = true)
-                handler.postDelayed(this, 50)
+                handler.postDelayed(this, if (observers.isEmpty()) 1000 else 50)
             } catch (_: Exception) { failed() }
         }
     }
 
-    fun play(file: File) {
-        stop()
+    fun stateFor(id: String): State = if (conversationId == id) state else State()
+    fun isActive(id: String): Boolean = conversationId == id
+    fun fileFor(id: String): File? = file?.takeIf { conversationId == id && it.isFile }
+    fun addObserver(observer: () -> Unit) { observers.add(observer); observer() }
+    fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
+
+    fun setVisible(owner: Any, id: String?, visible: Boolean, retaining: Boolean = false) {
+        visibility.update(owner, id, visible)
+        if (!retaining && visibility.shouldStop(conversationId)) stop()
+    }
+
+    fun play(id: String, source: File) {
+        stop(releaseHosting = false)
+        conversationId = id
+        file = source
+        publish(State(preparing = true, remaining = 1f))
+        startOrResume()
+    }
+
+    fun toggle() {
+        if (state.preparing || conversationId == null) return
+        if (state.playing) pause() else startOrResume()
+    }
+
+    fun resume() { if (!state.playing && !state.preparing && conversationId != null) startOrResume() }
+
+    private fun startOrResume() {
+        if (visibility.backgroundPlayback && service?.hosting != true) {
+            waitingForService = true
+            requestService()
+            return
+        }
+        waitingForService = false
+        if (player == null) prepare() else startPrepared()
+    }
+
+    private fun prepare() {
         try {
             val next = MediaPlayer()
             player = next
-            publish(State(preparing = true, remaining = 1f))
-            next.setDataSource(file.absolutePath)
+            next.setAudioAttributes(attributes)
+            next.setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK)
+            // MediaPlayer duplicates the descriptor, so async prepare is safe after this stream closes.
+            requireNotNull(file).inputStream().use { next.setDataSource(it.fd) }
             next.setOnPreparedListener { current ->
                 if (player === current) {
-                    try {
-                        duration = current.duration
-                        check(duration > 0)
-                        current.start()
-                        publish(State(playing = true, remaining = 1f))
-                        handler.post(ticker)
-                    } catch (_: Exception) { failed() }
+                    duration = current.duration
+                    if (duration > 0) startPrepared() else failed()
                 }
             }
             next.setOnCompletionListener { if (player === it) stop() }
-            next.setOnErrorListener { current, _, _ ->
-                if (player === current) failed()
-                true
-            }
+            next.setOnErrorListener { current, _, _ -> if (player === current) failed(); true }
             next.prepareAsync()
         } catch (_: Exception) { failed() }
     }
 
-    fun toggle() {
+    private fun startPrepared() {
         val current = player ?: return
-        if (state.preparing) return
+        try {
+            if (!hasFocus) {
+                hasFocus = audioManager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+                if (!hasFocus) { stop(); toast("暂时无法播放，请在其他音频结束后重试"); return }
+            }
+            current.start()
+            updatePosition(current, playing = true)
+            handler.removeCallbacks(ticker)
+            handler.post(ticker)
+        } catch (_: Exception) { failed() }
+    }
+
+    fun pause(temporary: Boolean = false) {
+        if (!temporary) resumeOnFocus = false
+        if (state.preparing) { stop(); return }
+        val current = player ?: return
         try {
             if (state.playing) {
                 current.pause()
                 handler.removeCallbacks(ticker)
                 updatePosition(current, playing = false)
-            } else {
-                current.start()
-                updatePosition(current, playing = true)
-                handler.post(ticker)
+            }
+            if (!temporary) {
+                abandonFocus()
+                service?.pauseHosting()
             }
         } catch (_: Exception) { failed() }
     }
 
-    fun stop() {
+    fun stop(releaseHosting: Boolean = true) {
         handler.removeCallbacks(ticker)
         val previous = player
-        player = null // Ignore late callbacks from the released player.
-        duration = 0
+        player = null // Ignore callbacks from the released player.
+        waitingForService = false
+        resumeOnFocus = false
+        abandonFocus()
         runCatching { previous?.release() }
+        if (deleteWhenStopped) file?.delete()
+        file = null; deleteWhenStopped = false
+        conversationId = null; duration = 0
         publish(State())
+        if (releaseHosting) releaseService()
+    }
+
+    private fun abandonFocus() {
+        if (hasFocus) { hasFocus = false; audioManager.abandonAudioFocusRequest(focus) }
+    }
+
+    private fun requestService() {
+        if (serviceRequested || conversationId == null) return
+        serviceRequested = true
+        try { context.startForegroundService(Intent(context, AudioPlaybackService::class.java)) }
+        catch (_: RuntimeException) { serviceRequested = false; stop(); toast("无法启动后台播放，请返回聊天后重试") }
+    }
+
+    /** Called only after the mediaPlayback service has entered the foreground (before audio focus). */
+    fun serviceReady(host: AudioPlaybackService): Boolean {
+        serviceRequested = false
+        if (conversationId == null || !visibility.backgroundPlayback) return false
+        service = host
+        if (waitingForService) startOrResume()
+        return conversationId != null
+    }
+
+    fun serviceDestroyed(host: AudioPlaybackService) {
+        if (service === host) { service = null; stop() }
+    }
+
+    private fun releaseService() {
+        val previous = service
+        service = null
+        previous?.finishHosting()
     }
 
     private fun updatePosition(current: MediaPlayer, playing: Boolean) {
@@ -93,13 +233,32 @@ internal class ChatAudioPlayback(
     }
 
     private fun publish(next: State) {
-        if (state == next) return
+        val changed = state.preparing != next.preparing || state.playing != next.playing ||
+            (state.remaining == null) != (next.remaining == null)
         state = next
-        onChanged(next)
+        observers.toList().forEach { it() }
+        if (changed) service?.updatePlayback()
     }
 
-    private fun failed() {
-        stop()
-        Toast.makeText(context, "无法回听，音频可能已被删除或暂不可读", Toast.LENGTH_LONG).show()
+    private fun failed() { stop(); toast("无法回听，音频可能已被删除或暂不可读") }
+    private fun toast(message: String) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+
+    companion object {
+        @Volatile private var instance: ChatAudioPlayback? = null
+        fun get(context: Context): ChatAudioPlayback = instance ?: ChatAudioPlayback(context.applicationContext).also { instance = it }
+
+        fun isUsingFile(file: File): Boolean = instance?.file?.absolutePath == file.absolutePath
+
+        /** Temporary audio can outlive the overlay/chat that originally owned it. */
+        fun deleteTemporaryAudio(file: File) {
+            val current = instance
+            if (isUsingFile(file)) current?.deleteWhenStopped = true else file.delete()
+        }
+
+        fun stopConversation(id: String? = null) {
+            val current = instance ?: return
+            val action = Runnable { if (id == null || current.conversationId == id) current.stop() }
+            if (Looper.myLooper() == Looper.getMainLooper()) action.run() else current.handler.post(action)
+        }
     }
 }

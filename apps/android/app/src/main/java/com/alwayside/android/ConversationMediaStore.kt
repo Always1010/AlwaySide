@@ -15,7 +15,10 @@ internal class ConversationMediaStore(context: Context) {
 
     fun saveAudio(id: String, input: java.io.InputStream, length: Long) = audio.save(id, input, length)
     fun loadAudio(id: String): File? = audio.load(id)
-    fun deleteAudio(id: String) = audio.delete(id)
+    fun deleteAudio(id: String) {
+        ChatAudioPlayback.stopConversation(id)
+        audio.delete(id)
+    }
     fun delete(id: String) { deleteImage(id); deleteAudio(id) }
 
     fun saveImages(id: String, original: Bitmap, current: Bitmap) = synchronized(lock) {
@@ -73,6 +76,7 @@ internal class ConversationMediaStore(context: Context) {
     }
 
     fun clear() = synchronized(lock) {
+        ChatAudioPlayback.stopConversation()
         directory.listFiles()?.forEach { check(it.delete()) { "图片删除失败" } }
         audio.clear()
     }

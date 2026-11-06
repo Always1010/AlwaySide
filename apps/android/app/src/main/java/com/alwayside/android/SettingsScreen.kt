@@ -304,6 +304,9 @@ internal class SettingsScreen(
     }
 
     private fun mediaPage(config: InteractionConfig) {
+        section("音频播放")
+        check("backgroundPlayback", "后台播放", config.backgroundPlayback,
+            help = "开启后，离开聊天、切换应用或锁屏仍继续播放，可通过系统媒体控件暂停或停止。\n\n关闭时，离开当前聊天即停止播放。强行停止应用或重启手机会结束播放。")
         section("录音", "时长和上限策略从下次录音生效；0 表示不限时长。\n\n自动处理还需开启菜单中的「使用默认提问方式」；手动结束的行为在「结果窗口」设置。")
         input("recordingMaxMinutes", "录音时长上限", "单位：分钟；1～${RecordingLimits.MAX_MINUTES}，0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
         choice("recordingLimitAction", "达到上限后", config.recordingLimitAction.value, RecordingLimitAction.choices,
@@ -493,6 +496,7 @@ internal class SettingsScreen(
                         "autoAskText" -> it.copy(autoAskText = value)
                         "saveHistoryImages" -> it.copy(saveHistoryImages = value)
                         "saveHistoryAudio" -> it.copy(saveHistoryAudio = value)
+                        "backgroundPlayback" -> it.copy(backgroundPlayback = value)
                         else -> error("Unknown toggle")
                     } }
                 }

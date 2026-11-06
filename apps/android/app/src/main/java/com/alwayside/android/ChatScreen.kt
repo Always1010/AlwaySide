@@ -25,7 +25,7 @@ import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 
-/** Full-screen in-app conversation. This path never starts a service or capture. */
+/** Full-screen in-app conversation. Capture remains exclusively user-started through the assistant. */
 internal class ChatScreen(
     private val activity: Activity,
     private val onBack: () -> Unit,
@@ -70,7 +70,11 @@ internal class ChatScreen(
     private val collectionStore = HistoryStore(this)
     private val collectionTags = CollectionTagDialogs(activity) { refreshCollectionState() }
     private val playbackIcon = AudioPlaybackIcon(this)
-    private val playback = ChatAudioPlayback(this) { updatePlayback(it) }
+    private val playback = ChatAudioPlayback.get(this)
+    private var playbackForeground = true
+    private val playbackObserver: () -> Unit = {
+        if (ready && !closing) updatePlayback(playback.stateFor(session.conversationId))
+    }
     internal data class RetainedConversation(
         val session: ChatSession, val image: Bitmap?, val handoff: HandedOffConversation?,
         val title: String, val status: String, val openedStoredRecord: Boolean,
@@ -152,6 +156,8 @@ internal class ChatScreen(
             setBackgroundColor(BACKGROUND); fitsSystemWindows = true
             addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
+                    playback.addObserver(playbackObserver)
+                    setPlaybackForeground(playbackForeground)
                     // Reload configuration when the existing chat view is reattached.
                     runCatching { SettingsStore(this@ChatScreen).load() }.getOrNull()?.let { fresh ->
                         if (fresh.connectionId != activeConnection.connectionId) webSearchOverride = null
@@ -159,7 +165,10 @@ internal class ChatScreen(
                     }
                     if (ready) { refreshCollectionState(); render() } else renderWebSearch()
                 }
-                override fun onViewDetachedFromWindow(view: View) { playback.stop() }
+                override fun onViewDetachedFromWindow(view: View) {
+                    playback.removeObserver(playbackObserver)
+                    playback.setVisible(this@ChatScreen, null, false, retaining = activity.isChangingConfigurations)
+                }
             })
         }
         toolbar = materialToolbar("对话", onBack).apply {
@@ -478,12 +487,13 @@ internal class ChatScreen(
     private fun availableAudio(): java.io.File? =
         handoff?.audio?.file?.takeIf { it.isFile && it.length() > 44 }
             ?: if (::session.isInitialized && session.kind == "audio")
-                runCatching { ConversationMediaStore(this).loadAudio(session.conversationId) }.getOrNull() else null
+                runCatching { ConversationMediaStore(this).loadAudio(session.conversationId) }.getOrNull()
+                    ?: playback.fileFor(session.conversationId) else null
 
     private fun playAudio() {
-        if (playback.isActive) { playback.toggle(); return }
+        if (playback.isActive(session.conversationId)) { playback.toggle(); return }
         val file = availableAudio() ?: run { toast("原始音频未保留或已被删除"); return }
-        playback.play(file)
+        playback.play(session.conversationId, file)
     }
 
     private fun updatePlayback(state: ChatAudioPlayback.State) {
@@ -558,7 +568,8 @@ internal class ChatScreen(
         suggestionViews.clear()
         if (closing) return
         closing = true
-        playback.stop()
+        playback.removeObserver(playbackObserver)
+        playback.setVisible(this, null, false, retaining = retaining)
         if (!retaining || !ready) releaseConversation()
     }
 
@@ -567,6 +578,13 @@ internal class ChatScreen(
         session.setObserver(null)
         return RetainedConversation(session, image, handoff, conversationTitle, restoredStatus,
             openedStoredRecord, composer.text.toString(), reuse.isChecked, webSearchOverride, originalImage)
+    }
+
+    fun setPlaybackForeground(foreground: Boolean) {
+        playbackForeground = foreground
+        if (foreground && !view.isAttachedToWindow) return
+        playback.setVisible(this, if (ready) session.conversationId else null,
+            foreground && view.isAttachedToWindow && !closing)
     }
 
     /** Keep a single owner when Home leaves this Activity alive behind the overlay. */
