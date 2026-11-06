@@ -10,8 +10,6 @@ import android.graphics.Paint
 import android.util.Base64
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -69,6 +67,7 @@ internal class ServiceSettingsUi(
     private var progress: AlertDialog? = null
     private var closeGuard: AlertDialog? = null
     private val dialogs = mutableSetOf<AlertDialog>()
+    private val choiceSheets = mutableSetOf<SettingsChoiceSheet>()
     private var status = ""
     private val verification = mutableMapOf<String, Pair<ServiceCatalog, String>>()
 
@@ -663,23 +662,20 @@ internal class ServiceSettingsUi(
         title: String, values: List<String>, checkedIndex: Int = -1,
         disabledIndices: Set<Int> = emptySet(), selected: (Int) -> Unit,
     ) {
+        if (disposed) return
         if (values.isEmpty()) { toast("暂无可选项"); return }
-        val builder = MaterialAlertDialogBuilder(this).setTitle(title)
-        val listener = android.content.DialogInterface.OnClickListener { dialog, index ->
-            if (index !in disabledIndices) { dialog.dismiss(); selected(index) }
+        lateinit var sheet: SettingsChoiceSheet
+        sheet = SettingsChoiceSheet(this, title, values, checkedIndex, disabledIndices = disabledIndices) { index ->
+            if (disposed || index in disabledIndices) false else {
+                // Close the picker before opening the next editor or navigating.
+                sheet.dismiss()
+                selected(index)
+                true
+            }
         }
-        if (disabledIndices.isEmpty()) builder.setSingleChoiceItems(values.toTypedArray(), checkedIndex, listener)
-        else builder.setSingleChoiceItems(object : ArrayAdapter<String>(builder.context,
-            com.google.android.material.R.layout.mtrl_alert_select_dialog_singlechoice, values) {
-            override fun areAllItemsEnabled() = false
-            override fun isEnabled(position: Int) = position !in disabledIndices
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
-                super.getView(position, convertView, parent).apply {
-                    isEnabled = position !in disabledIndices
-                    alpha = if (isEnabled) 1f else 0.38f
-                }
-        }, checkedIndex, listener)
-        builder.setNegativeButton("取消", null).showTracked()
+        choiceSheets += sheet
+        sheet.setOnDismissListener { choiceSheets.remove(sheet) }
+        sheet.show()
     }
     private fun confirmDelete(title: String, message: String, remove: () -> Unit) {
         MaterialAlertDialogBuilder(this).setTitle(title).setMessage(message).setNegativeButton("取消", null)
@@ -706,7 +702,10 @@ internal class ServiceSettingsUi(
     private fun AlertDialog.showTracked(): AlertDialog = also { dialog ->
         if (!disposed) { dialogs += dialog; dialog.setOnDismissListener { dialogs.remove(dialog) }; dialog.show() }
     }
-    private fun dismissDialogs() { dialogs.toList().forEach { it.dismiss() }; dialogs.clear(); closeGuard = null }
+    private fun dismissDialogs() {
+        choiceSheets.toList().forEach { it.dismiss() }; choiceSheets.clear()
+        dialogs.toList().forEach { it.dismiss() }; dialogs.clear(); closeGuard = null
+    }
 
     /** Only remove locally known unsupported values, preserving unknown model options. */
     private fun compatibleProfile(c: ServiceCatalog, old: ModelProfile, next: ModelProfile, done: () -> Unit = {}, error: (String) -> Unit = ::toast) {

@@ -67,6 +67,7 @@ internal class SettingsScreen(
     private var generation = 0
     private var currentRoot: View? = null
     private val dialogs = mutableSetOf<AlertDialog>()
+    private val choiceSheets = mutableSetOf<SettingsChoiceSheet>()
     private var disposed = false
     private var serviceUi: ServiceSettingsUi? = null
     private var serviceToolbar: MaterialToolbar? = null
@@ -514,17 +515,19 @@ internal class SettingsScreen(
         if (help != null) row.addView(settingsHelp(title, help))
         row.setOnClickListener { finishEditing {
             val keys = options.keys.toList()
-            val labels = keys.map { key ->
-                optionDescriptions[key]?.let { "${options[key]}\n$it" } ?: options.getValue(key)
-            }
-            MaterialAlertDialogBuilder(this).setTitle(title).setSingleChoiceItems(labels.toTypedArray(), keys.indexOf(selections[name])) { dialog, index ->
+            val descriptions = keys.mapIndexedNotNull { index, key -> optionDescriptions[key]?.let { index to it } }.toMap()
+            val sheet = SettingsChoiceSheet(this, title, keys.map(options::getValue), keys.indexOf(selections[name]), descriptions) { index ->
+                if (disposed) return@SettingsChoiceSheet false
                 if (persistChoice(name, keys[index])) {
                     selections[name] = keys[index]
                     valueView.text = options[keys[index]]
                     onSelected?.invoke(keys[index])
-                    dialog.dismiss()
-                }
-            }.setNegativeButton("取消", null).showTracked()
+                    true
+                } else false
+            }
+            choiceSheets += sheet
+            sheet.setOnDismissListener { choiceSheets.remove(sheet) }
+            sheet.show()
         } }
         addRow(row)
     }
@@ -787,6 +790,7 @@ internal class SettingsScreen(
 
     private fun dismissDialogs() {
         templateSheet?.dismiss(); templateSheet = null
+        choiceSheets.toList().forEach { it.dismiss() }; choiceSheets.clear()
         discardConfirmation = null
         dialogs.toList().forEach { it.dismiss() }
         dialogs.clear()
