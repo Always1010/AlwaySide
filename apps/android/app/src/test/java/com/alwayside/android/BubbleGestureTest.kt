@@ -67,29 +67,56 @@ class BubbleGestureTest {
         assertEquals(BubbleGesture.SINGLE, machine().up(1200))
     }
 
-    @Test fun legacyCustomBindingsAndSeparateRecordingActionsArePreserved() {
-        val original = InteractionConfig(singleAction = AssistantActions.HISTORY,
-            recordingSingleAction = AssistantActions.SETTINGS, tripleAction = AssistantActions.NONE)
-        val migrated = original.copy(bindings = GestureBindings.legacy(original))
-        assertEquals(AssistantActions.HISTORY, migrated.action(1, false))
-        assertEquals(AssistantActions.SETTINGS, migrated.action(1, true))
-        assertEquals(AssistantActions.START_AUDIO, migrated.action(2, false))
-        assertEquals(AssistantActions.END_AUDIO, migrated.action(2, true))
-        assertEquals(AssistantActions.NONE, migrated.action(3, false))
-        assertEquals(AssistantActions.NONE, migrated.gestureAction(BubbleGesture.DOWN, false))
-        assertEquals(AssistantActions.START_AUDIO, migrated.copy(longPressSlide = true).gestureAction(BubbleGesture.DOWN, false))
-    }
-
-    @Test fun conflictReplacementOnlyChangesOverlappingStatesAndSupportsMultipleGestures() {
-        val original = GestureBindings.legacy(InteractionConfig())
+    @Test fun conflictsAreRejectedAndOnlyIncompatibleOwnersAreReported() {
+        val original = GestureBindings.defaults()
         val conflict = GestureBindings.conflicts(original, AssistantActions.CROP, BubbleGesture.DOUBLE, setOf(false))
         assertEquals(listOf(AssistantActions.START_AUDIO), conflict.map { it.action })
-        val changed = GestureBindings.assign(original, AssistantActions.CROP, BubbleGesture.DOUBLE, setOf(false))
-        assertTrue(GestureBindings.valid(changed))
-        assertTrue(changed.contains(GestureBinding(BubbleGesture.DOUBLE, true, AssistantActions.END_AUDIO)))
-        assertTrue(changed.contains(GestureBinding(BubbleGesture.TRIPLE, false, AssistantActions.CROP)))
-        assertTrue(changed.contains(GestureBinding(BubbleGesture.DOUBLE, false, AssistantActions.CROP)))
-        assertFalse(GestureBindings.valid(changed + changed.first()))
+        try {
+            GestureBindings.assign(original, AssistantActions.CROP, BubbleGesture.DOUBLE, setOf(false))
+            fail("An occupied gesture must never replace its owner")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(GestureBindings.defaults(), original)
+        assertFalse(GestureBindings.valid(original + original.first()))
+    }
+
+    @Test fun fixedFunctionRulesAllowCompatiblePairsAndRejectAllConflictingPairs() {
+        val cases = listOf(
+            Triple(AssistantActions.SCREEN, AssistantActions.START_AUDIO, true),
+            Triple(AssistantActions.SCREEN, AssistantActions.CROP, true),
+            Triple(AssistantActions.CROP, AssistantActions.START_AUDIO, true),
+            Triple(AssistantActions.END_AUDIO, AssistantActions.CANCEL_AUDIO, true),
+            Triple(AssistantActions.START_AUDIO, AssistantActions.END_AUDIO, false),
+            Triple(AssistantActions.CROP, AssistantActions.CANCEL_AUDIO, false),
+            Triple(AssistantActions.SCREEN, AssistantActions.END_AUDIO, false),
+        ) + GestureBindings.functions.filter { it.action != AssistantActions.MENU }.map {
+            Triple(AssistantActions.MENU, it.action, true)
+        }
+        for ((first, second, blocked) in cases) for ((owner, target) in listOf(first to second, second to first)) {
+            val ownerFunction = GestureBindings.functions.first { it.action == owner }
+            val targetFunction = GestureBindings.functions.first { it.action == target }
+            val assigned = GestureBindings.assign(emptyList(), owner, BubbleGesture.INWARD, ownerFunction.states)
+            assertEquals("$owner / $target", blocked,
+                GestureBindings.conflicts(assigned, target, BubbleGesture.INWARD, targetFunction.states).isNotEmpty())
+            if (!blocked) assertTrue(GestureBindings.valid(GestureBindings.assign(
+                assigned, target, BubbleGesture.INWARD, targetFunction.states)))
+        }
+    }
+
+    @Test fun editingVisibleChoicesPreservesHiddenDirectionsAndOtherFunctions() {
+        assertEquals(listOf(BubbleGesture.SINGLE, BubbleGesture.DOUBLE, BubbleGesture.TRIPLE, BubbleGesture.HOLD),
+            GestureBindings.visibleGestures(false))
+        val withDirection = GestureBindings.assign(GestureBindings.defaults(), AssistantActions.SCREEN,
+            BubbleGesture.INWARD, setOf(false))
+        val visible = GestureBindings.visibleGestures(false).toSet()
+        val menuRemoved = GestureBindings.updateSelection(withDirection, AssistantActions.MENU, visible, emptySet())
+        val updated = GestureBindings.updateSelection(menuRemoved, AssistantActions.SCREEN, visible, setOf(BubbleGesture.SINGLE))
+        assertTrue(GestureBindings.valid(updated))
+        assertTrue(updated.contains(GestureBinding(BubbleGesture.INWARD, false, AssistantActions.SCREEN)))
+        assertTrue(updated.contains(GestureBinding(BubbleGesture.DOUBLE, true, AssistantActions.END_AUDIO)))
+        assertFalse(updated.any { it.action == AssistantActions.SCREEN && it.gesture == BubbleGesture.HOLD })
+        val config = InteractionConfig(bindings = updated)
+        assertEquals(AssistantActions.NONE, config.gestureAction(BubbleGesture.INWARD, false))
+        assertEquals(AssistantActions.SCREEN, config.copy(longPressSlide = true).gestureAction(BubbleGesture.INWARD, false))
     }
 
     @Test fun practiceRequiresTheRightGestureAndDistinguishesReleaseFromTimeout() {

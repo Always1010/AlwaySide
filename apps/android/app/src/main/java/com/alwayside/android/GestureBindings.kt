@@ -18,43 +18,51 @@ internal object GestureBindings {
     val functions = listOf(
         GestureFunction(AssistantActions.SCREEN, "截图问答", "屏幕", setOf(false)),
         GestureFunction(AssistantActions.CROP, "框选问答", "屏幕", setOf(false)),
-        GestureFunction(AssistantActions.START_AUDIO, "开始录音", "声音", setOf(false)),
-        GestureFunction(AssistantActions.END_AUDIO, "结束录音", "声音", setOf(true)),
-        GestureFunction(AssistantActions.CANCEL_AUDIO, "丢弃本次录音", "声音", setOf(true)),
-        GestureFunction(AssistantActions.MENU, "展开菜单", "助手", setOf(false, true)),
-        GestureFunction(AssistantActions.LAST, "最近悬浮对话", "助手", setOf(false, true)),
-        GestureFunction(AssistantActions.HISTORY, "对话记录", "助手", setOf(false, true)),
-        GestureFunction(AssistantActions.SETTINGS, "设置", "助手", setOf(false, true)),
+        GestureFunction(AssistantActions.START_AUDIO, "开始录音", "录音", setOf(false)),
+        GestureFunction(AssistantActions.END_AUDIO, "结束录音", "录音", setOf(true)),
+        GestureFunction(AssistantActions.CANCEL_AUDIO, "取消并丢弃录音", "录音", setOf(true)),
+        GestureFunction(AssistantActions.MENU, "展开菜单", "基本操作", setOf(false, true)),
     )
     fun title(action: String) = functions.find { it.action == action }?.title ?: "不执行动作"
 
-    fun legacy(config: InteractionConfig): List<GestureBinding> = buildList {
-        for (recording in listOf(false, true)) {
-            val legacy = if (recording) listOf(config.recordingSingleAction, config.recordingDoubleAction,
-                config.recordingTripleAction, config.recordingLongAction)
-            else listOf(config.singleAction, config.doubleAction, config.tripleAction, config.longAction)
-            legacy.forEachIndexed { index, raw ->
-                val action = if (raw == AssistantActions.AUDIO) {
-                    if (recording) AssistantActions.END_AUDIO else AssistantActions.START_AUDIO
-                } else raw
-                if (action != AssistantActions.NONE) add(GestureBinding(BubbleGesture.taps(index + 1), recording, action))
-            }
-            add(GestureBinding(BubbleGesture.DOWN, recording, if (recording) AssistantActions.END_AUDIO else AssistantActions.START_AUDIO))
-            add(GestureBinding(BubbleGesture.INWARD, recording, AssistantActions.LAST))
-        }
-        add(GestureBinding(BubbleGesture.UP, false, AssistantActions.CROP))
-    }
+    fun defaults(): List<GestureBinding> = listOf(
+        GestureBinding(BubbleGesture.SINGLE, false, AssistantActions.MENU),
+        GestureBinding(BubbleGesture.SINGLE, true, AssistantActions.MENU),
+        GestureBinding(BubbleGesture.DOUBLE, false, AssistantActions.START_AUDIO),
+        GestureBinding(BubbleGesture.DOUBLE, true, AssistantActions.END_AUDIO),
+        GestureBinding(BubbleGesture.TRIPLE, false, AssistantActions.CROP),
+        GestureBinding(BubbleGesture.TRIPLE, true, AssistantActions.CANCEL_AUDIO),
+        GestureBinding(BubbleGesture.HOLD, false, AssistantActions.SCREEN),
+    )
+
+    fun visibleGestures(slideEnabled: Boolean) = BubbleGesture.entries.filter { slideEnabled || !it.directional }
 
     fun conflicts(bindings: List<GestureBinding>, action: String, gesture: BubbleGesture, states: Set<Boolean>) =
         bindings.filter { it.gesture == gesture && it.recording in states && it.action != action }
 
     fun assign(bindings: List<GestureBinding>, action: String, gesture: BubbleGesture, states: Set<Boolean>): List<GestureBinding> {
-        require(functions.any { it.action == action } && states.isNotEmpty())
-        return bindings.filterNot { it.gesture == gesture && it.recording in states } +
+        val function = functions.first { it.action == action }
+        require(states == function.states)
+        require(conflicts(bindings, action, gesture, states).isEmpty()) { "手势已被其他功能占用" }
+        return bindings.filterNot { it.gesture == gesture && it.action == action } +
             states.map { GestureBinding(gesture, it, action) }
+    }
+
+    /** Apply only changed checkboxes. Invisible gestures and untouched bindings are preserved. */
+    fun updateSelection(bindings: List<GestureBinding>, action: String, visibleGestures: Set<BubbleGesture>,
+        selected: Set<BubbleGesture>): List<GestureBinding> {
+        require(valid(bindings) && selected.all { it in visibleGestures })
+        val function = functions.first { it.action == action }
+        val owned = bindings.filter { it.action == action }.map { it.gesture }.toSet()
+        var result = bindings.filterNot { it.action == action && it.gesture in visibleGestures && it.gesture !in selected }
+        for (gesture in selected - owned) result = assign(result, action, gesture, function.states)
+        return result
     }
 
     fun valid(bindings: List<GestureBinding>) = bindings.size <= BubbleGesture.entries.size * 2 &&
         bindings.map { it.gesture to it.recording }.distinct().size == bindings.size &&
-        bindings.all { binding -> functions.any { it.action == binding.action } }
+        bindings.all { binding -> functions.any { it.action == binding.action && binding.recording in it.states } } &&
+        bindings.groupBy { it.action to it.gesture }.all { (key, values) ->
+            values.map { it.recording }.toSet() == functions.first { it.action == key.first }.states
+        }
 }

@@ -4,33 +4,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InteractionDefaultsTest {
-    @Test fun upgradesOldIdleDefaultWithoutChangingAppearanceOrRecordingControls() {
-        val old = InteractionConfig(singleAction=AssistantActions.SCREEN,tripleAction=AssistantActions.NONE,
-            longAction=AssistantActions.MENU,
-            ballSize=37,ballOpacity=80,saveHistoryImages=true,recordingLongAction=AssistantActions.CANCEL_AUDIO,
-            collapseFollowUpByDefault=false)
-        val updated = InteractionDefaults.upgrade(old)
-        assertEquals(AssistantActions.MENU,updated.action(1,false))
-        assertEquals(AssistantActions.SCREEN,updated.action(4,false))
-        assertEquals(old.copy(singleAction=AssistantActions.MENU,longAction=AssistantActions.SCREEN),updated)
-        assertEquals(AssistantActions.MENU,updated.action(1,true))
-        assertEquals(AssistantActions.CANCEL_AUDIO,updated.action(4,true))
+    @Test fun factoryBindingsUseOnlyTheAgreedFourBasicGestures() {
+        val config = InteractionConfig()
+        assertFalse(config.longPressSlide)
+        assertEquals(600, config.longPressMillis)
+        assertEquals(1500, config.slideWindowMillis)
+        assertEquals(AssistantActions.MENU, config.action(1, false))
+        assertEquals(AssistantActions.MENU, config.action(1, true))
+        assertEquals(AssistantActions.START_AUDIO, config.action(2, false))
+        assertEquals(AssistantActions.END_AUDIO, config.action(2, true))
+        assertEquals(AssistantActions.CROP, config.action(3, false))
+        assertEquals(AssistantActions.CANCEL_AUDIO, config.action(3, true))
+        assertEquals(AssistantActions.SCREEN, config.action(4, false))
+        assertEquals(AssistantActions.NONE, config.action(4, true))
+        assertTrue(GestureBindings.valid(config.resolvedBindings()))
+        assertFalse(config.resolvedBindings().any { it.gesture.directional })
+        for (gesture in BubbleGesture.entries.filter { it.directional }) for (recording in listOf(false, true))
+            assertEquals(AssistantActions.NONE, config.copy(longPressSlide = true).gestureAction(gesture, recording))
     }
-    @Test fun preservesAnyCustomizedIdleScheme() {
-        val customized = InteractionConfig(singleAction=AssistantActions.SCREEN,longAction=AssistantActions.MENU,
-            doubleAction=AssistantActions.LAST)
-        assertEquals(customized,InteractionDefaults.upgrade(customized))
-        val customTriple = customized.copy(doubleAction=AssistantActions.AUDIO,tripleAction=AssistantActions.SETTINGS)
-        assertEquals(customTriple,InteractionDefaults.upgrade(customTriple))
-    }
-    @Test fun newDefaultsAreStableAndKeepRecordingCancellation() {
-        val defaults=InteractionConfig()
-        assertEquals(defaults,InteractionDefaults.upgrade(defaults))
-        assertEquals(AssistantActions.MENU,defaults.action(1,false))
-        assertEquals(AssistantActions.CROP,defaults.action(3,false))
-        assertEquals(AssistantActions.SCREEN,defaults.action(4,false))
-        assertEquals(AssistantActions.MENU,defaults.action(1,true))
-        assertEquals(AssistantActions.SCREEN,defaults.action(4,true))
-        assertEquals(AssistantActions.CANCEL_AUDIO,defaults.action(3,true))
+
+    @Test fun menuExtrasCannotBeBoundAndInapplicableBindingsAreInvalid() {
+        for (action in listOf(AssistantActions.LAST, AssistantActions.SETTINGS, AssistantActions.HISTORY)) {
+            assertFalse(GestureBindings.functions.any { it.action == action })
+            assertFalse(GestureBindings.valid(listOf(GestureBinding(BubbleGesture.HOLD, false, action))))
+        }
+        assertFalse(GestureBindings.valid(listOf(GestureBinding(BubbleGesture.HOLD, true, AssistantActions.SCREEN))))
+        assertFalse(GestureBindings.valid(listOf(GestureBinding(BubbleGesture.SINGLE, false, AssistantActions.MENU))))
     }
 }

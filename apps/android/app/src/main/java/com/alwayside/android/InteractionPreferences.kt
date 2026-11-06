@@ -15,23 +15,12 @@ internal object AssistantActions {
     const val SETTINGS = "settings"
     const val CANCEL_AUDIO = "cancel_audio"
     const val NONE = "none"
-    val choices = linkedMapOf(SCREEN to "截图问答", AUDIO to "开始／结束录音并处理", MENU to "展开菜单",
-        CROP to "框选问答", LAST to "最近悬浮对话", HISTORY to "应用内对话记录", SETTINGS to "设置",
-        CANCEL_AUDIO to "取消并丢弃录音", NONE to "不执行动作")
 }
 
 internal data class InteractionConfig(
     val ballSize: Int = 36,
     val ballOpacity: Int = 55,
     val ballColor: Int = 0xFFCC5C74.toInt(),
-    val singleAction: String = AssistantActions.MENU,
-    val doubleAction: String = AssistantActions.AUDIO,
-    val tripleAction: String = AssistantActions.CROP,
-    val longAction: String = AssistantActions.SCREEN,
-    val recordingSingleAction: String = AssistantActions.MENU,
-    val recordingDoubleAction: String = AssistantActions.AUDIO,
-    val recordingTripleAction: String = AssistantActions.CANCEL_AUDIO,
-    val recordingLongAction: String = AssistantActions.SCREEN,
     val autoAskImage: Boolean = true,
     val autoAskAudio: Boolean = true,
     val rememberWindowPosition: Boolean = true,
@@ -50,7 +39,7 @@ internal data class InteractionConfig(
     val slideWindowMillis: Int = 1500,
     val bindings: List<GestureBinding>? = null,
 ) {
-    fun resolvedBindings() = bindings ?: GestureBindings.legacy(this)
+    fun resolvedBindings() = bindings ?: GestureBindings.defaults()
     fun gestureAction(gesture: BubbleGesture, recording: Boolean): String {
         if (gesture.directional && !longPressSlide) return AssistantActions.NONE
         return resolvedBindings().firstOrNull { it.gesture == gesture && it.recording == recording }?.action ?: AssistantActions.NONE
@@ -61,16 +50,7 @@ internal data class InteractionConfig(
         else -> autoAskText
     }
 
-    fun action(taps: Int, recording: Boolean): String = if (bindings != null) gestureAction(BubbleGesture.taps(taps), recording) else when {
-        recording && taps == 1 -> recordingSingleAction
-        recording && taps == 2 -> recordingDoubleAction
-        recording && taps == 3 -> recordingTripleAction
-        recording -> recordingLongAction
-        taps == 1 -> singleAction
-        taps == 2 -> doubleAction
-        taps == 3 -> tripleAction
-        else -> longAction
-    }
+    fun action(taps: Int, recording: Boolean): String = gestureAction(BubbleGesture.taps(taps), recording)
 }
 
 internal data class SavedWindow(val xFraction: Float, val yFraction: Float, val widthDp: Int, val heightDp: Int)
@@ -78,68 +58,47 @@ internal data class SavedWindow(val xFraction: Float, val yFraction: Float, val 
 internal class InteractionPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("assistant_interaction", Context.MODE_PRIVATE)
     fun load(): InteractionConfig {
-        val version = prefs.getInt("gestureDefaultsVersion", 0)
-        val hasStoredGestures = listOf("singleAction", "doubleAction", "tripleAction", "longAction").any(prefs::contains)
-        val d = if (version < InteractionDefaults.VERSION && hasStoredGestures)
-            InteractionConfig(singleAction=AssistantActions.SCREEN,tripleAction=AssistantActions.NONE,
-                longAction=AssistantActions.MENU) else InteractionConfig()
-        fun action(key: String, fallback: String) = prefs.getString(key, fallback)?.takeIf { it in AssistantActions.choices } ?: fallback
-        val loaded = InteractionConfig(
-            prefs.getInt("ballSize", d.ballSize).coerceIn(18, 48),
-            prefs.getInt("ballOpacity", d.ballOpacity).coerceIn(15, 100),
-            prefs.getInt("ballColor", d.ballColor) or 0xFF000000.toInt(),
-            action("singleAction", d.singleAction), action("doubleAction", d.doubleAction),
-            action("tripleAction", d.tripleAction), action("longAction", d.longAction),
-            action("recordingSingleAction", d.recordingSingleAction), action("recordingDoubleAction", d.recordingDoubleAction),
-            action("recordingTripleAction", d.recordingTripleAction), action("recordingLongAction", d.recordingLongAction),
-            prefs.getBoolean("autoAskImage", d.autoAskImage), prefs.getBoolean("autoAskAudio", d.autoAskAudio),
-            prefs.getBoolean("rememberWindowPosition", d.rememberWindowPosition),
-            prefs.getBoolean("rememberWindowSize", d.rememberWindowSize), prefs.getBoolean("defaultPinned", d.defaultPinned),
-            prefs.getBoolean("saveHistoryImages", d.saveHistoryImages),
-            prefs.getBoolean("autoAskText", d.autoAskText),
-            prefs.getInt("recordingMaxMinutes", d.recordingMaxMinutes).coerceIn(0, RecordingLimits.MAX_MINUTES),
-            prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
-            prefs.getBoolean("saveHistoryAudio", d.saveHistoryAudio),
-            RecordingLimitAction.from(prefs.getString("recordingLimitAction", null)),
-            prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
-            if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
-        )
-        fun withBindings(value: InteractionConfig): InteractionConfig {
-            val rules = if (prefs.getInt("gestureBindingsVersion", 0) == 1) buildList {
-                for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
-                    val saved = prefs.getString("binding_${recording}_${gesture.name}", null)
-                    if (GestureBindings.functions.any { it.action == saved }) add(GestureBinding(gesture, recording, saved!!))
+        val d = InteractionConfig()
+        // This pre-release format has one current schema, without legacy gesture migration.
+        val savedBindings = if (prefs.getInt("gestureBindingsVersion", 0) == 2) buildList {
+            for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
+                prefs.getString("binding_${recording}_${gesture.name}", null)?.let {
+                    add(GestureBinding(gesture, recording, it))
                 }
-            } else GestureBindings.legacy(value)
-            return value.copy(bindings = rules, longPressSlide = prefs.getBoolean("longPressSlide", false),
-                longPressMillis = prefs.getInt("longPressMillis", 600).coerceIn(400, 1500),
-                slideWindowMillis = prefs.getInt("slideWindowMillis", 1500).coerceIn(500, 3000))
-        }
-        if (version >= InteractionDefaults.VERSION) return withBindings(loaded)
-        val upgraded = InteractionDefaults.upgrade(loaded)
-        val edit = prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
-        if (upgraded != loaded) edit.putString("singleAction", upgraded.singleAction).putString("longAction", upgraded.longAction)
-        // Persist only the default-policy upgrade; all other appearance, media and user mappings stay intact.
-        edit.commit()
-        return withBindings(upgraded)
+            }
+        } else GestureBindings.defaults()
+        return InteractionConfig(
+            ballSize = prefs.getInt("ballSize", d.ballSize).coerceIn(18, 48),
+            ballOpacity = prefs.getInt("ballOpacity", d.ballOpacity).coerceIn(15, 100),
+            ballColor = prefs.getInt("ballColor", d.ballColor) or 0xFF000000.toInt(),
+            autoAskImage = prefs.getBoolean("autoAskImage", d.autoAskImage),
+            autoAskAudio = prefs.getBoolean("autoAskAudio", d.autoAskAudio),
+            rememberWindowPosition = prefs.getBoolean("rememberWindowPosition", d.rememberWindowPosition),
+            rememberWindowSize = prefs.getBoolean("rememberWindowSize", d.rememberWindowSize),
+            defaultPinned = prefs.getBoolean("defaultPinned", d.defaultPinned),
+            saveHistoryImages = prefs.getBoolean("saveHistoryImages", d.saveHistoryImages),
+            autoAskText = prefs.getBoolean("autoAskText", d.autoAskText),
+            recordingMaxMinutes = prefs.getInt("recordingMaxMinutes", d.recordingMaxMinutes).coerceIn(0, RecordingLimits.MAX_MINUTES),
+            collapseFollowUpByDefault = prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
+            saveHistoryAudio = prefs.getBoolean("saveHistoryAudio", d.saveHistoryAudio),
+            recordingLimitAction = RecordingLimitAction.from(prefs.getString("recordingLimitAction", null)),
+            useDefaultQuestion = prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
+            menuWebSearch = if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
+            longPressSlide = prefs.getBoolean("longPressSlide", false),
+            longPressMillis = prefs.getInt("longPressMillis", 600).coerceIn(400, 1500),
+            slideWindowMillis = prefs.getInt("slideWindowMillis", 1500).coerceIn(500, 3000),
+            bindings = savedBindings.takeIf(GestureBindings::valid) ?: GestureBindings.defaults(),
+        )
     }
     fun save(value: InteractionConfig) {
         require(value.ballSize in 18..48 && value.ballOpacity in 15..100)
         require(value.recordingMaxMinutes in 0..RecordingLimits.MAX_MINUTES)
         require(value.longPressMillis in 400..1500 && value.slideWindowMillis in 500..3000)
         require(GestureBindings.valid(value.resolvedBindings()))
-        require((listOf(value.singleAction, value.doubleAction, value.tripleAction, value.longAction,
-            value.recordingSingleAction, value.recordingDoubleAction, value.recordingTripleAction,
-            value.recordingLongAction)).all { it in AssistantActions.choices })
-        val edit=prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
-            .putInt("gestureBindingsVersion", 1).putBoolean("longPressSlide", value.longPressSlide)
+        val edit=prefs.edit().putInt("gestureBindingsVersion", 2).putBoolean("longPressSlide", value.longPressSlide)
             .putInt("longPressMillis", value.longPressMillis).putInt("slideWindowMillis", value.slideWindowMillis)
             .putInt("ballSize", value.ballSize).putInt("ballOpacity", value.ballOpacity)
-            .putInt("ballColor", value.ballColor).putString("singleAction", value.singleAction)
-            .putString("doubleAction", value.doubleAction).putString("tripleAction", value.tripleAction)
-            .putString("longAction", value.longAction).putString("recordingSingleAction", value.recordingSingleAction)
-            .putString("recordingDoubleAction", value.recordingDoubleAction).putString("recordingTripleAction", value.recordingTripleAction)
-            .putString("recordingLongAction", value.recordingLongAction).putBoolean("autoAskImage", value.autoAskImage)
+            .putInt("ballColor", value.ballColor).putBoolean("autoAskImage", value.autoAskImage)
             .putBoolean("autoAskAudio", value.autoAskAudio).putBoolean("rememberWindowPosition", value.rememberWindowPosition)
             .putBoolean("rememberWindowSize", value.rememberWindowSize).putBoolean("defaultPinned", value.defaultPinned)
             .putBoolean("saveHistoryImages", value.saveHistoryImages).putBoolean("autoAskText", value.autoAskText)

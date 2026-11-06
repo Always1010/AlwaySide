@@ -3,9 +3,12 @@ package com.alwayside.android
 import android.content.Context
 import android.view.Gravity
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 
@@ -19,9 +22,11 @@ internal class GestureSettingsUi(
     private val showDialog: (MaterialAlertDialogBuilder) -> AlertDialog,
     private val onTutorial: () -> Unit,
 ) {
+    private var feedback: Toast? = null
+
     fun render() = with(context) {
         content.removeAllViews()
-        header("扩展手势")
+        header("拓展选项")
         val extension = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         extension.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(8), dp(8), dp(8))
@@ -51,7 +56,7 @@ internal class GestureSettingsUi(
         addGroup(extension)
 
         GestureBindings.functions.groupBy { it.group }.forEach { (group, functions) ->
-            header(group, help = if (group == "屏幕") "每个功能可绑定多个手势，点开功能后逐项设置。公共功能可分别绑定未录音、录音中或两种状态。\n\n同一状态的同一手势只执行一个功能；替换前会确认。单击与双击需短暂等待以识别连续点击。" else null)
+            header(group, help = if (group == "屏幕") "点开功能可选择多个手势；已被互斥功能占用的手势不可选择。单击与双击需短暂等待以识别连续点击。" else null)
             val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             functions.forEach { function ->
                 rows.addView(settingsListRow(function.title, functionSummary(function)) { showFunction(function) })
@@ -61,8 +66,7 @@ internal class GestureSettingsUi(
         header("绑定管理")
         addGroup(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(settingsListRow("清除全部绑定") { confirmReset(false) })
-            addView(settingsListRow("恢复默认绑定") { confirmReset(true) })
+            addView(settingsListRow("恢复默认绑定") { confirmReset() })
         })
     }
 
@@ -85,7 +89,7 @@ internal class GestureSettingsUi(
 
     private fun showHelp() {
         val dialog = showDialog(MaterialAlertDialogBuilder(context).setTitle("长按滑动")
-            .setMessage("开启后，按住悬浮球等待提示，可向上、向下或向屏幕内侧滑动。方向位移成立立即执行；原地松手或持续不动直到选择时间结束，执行长按动作。普通拖动仍用于移动悬浮球。\n\n长按等待决定何时进入选择；滑动选择时间决定可选择多久。系统无障碍长按时间更长时，以系统设置为准。\n\n关闭后保留方向手势绑定，重新开启即可使用。")
+            .setMessage("开启后，按住悬浮球等待提示，可向上、向下或向屏幕内侧滑动。方向位移成立立即执行；原地松手或持续不动直到选择时间结束，执行长按动作。普通拖动仍用于移动悬浮球。\n\n长按等待决定何时进入选择；滑动选择时间决定可选择多久。系统无障碍长按时间更长时，以系统设置为准。\n\n方向手势默认未分配，开启不会自动绑定。关闭后保留已有绑定，重新开启即可使用。")
             .setNegativeButton("关闭", null).setPositiveButton("体验", null))
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { dialog.dismiss(); onTutorial() }
     }
@@ -107,108 +111,107 @@ internal class GestureSettingsUi(
     }
 
     private fun showFunction(function: GestureFunction) = with(context) {
+        val initialConfig = load()
+        val initial = initialConfig.resolvedBindings()
+        val gestures = GestureBindings.visibleGestures(initialConfig.longPressSlide).toSet()
+        val selected = initial.filter { it.action == function.action && it.gesture in gestures }
+            .mapTo(mutableSetOf()) { it.gesture }
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        fun renderRows() {
-            rows.removeAllViews()
-            BubbleGesture.entries.forEach { gesture ->
-                val enabled = !gesture.directional || config.longPressSlide
-                rows.addView(settingsListRow(gesture.title, gestureSummary(function, gesture), showArrow = enabled,
-                    onClick = if (enabled) ({ showStates(function, gesture) { refresh(); renderRows() } }) else null).apply {
-                    isEnabled = enabled; alpha = if (enabled) 1f else .45f
-                })
+        gestures.forEach { gesture ->
+            val conflicts = GestureBindings.conflicts(initial, function.action, gesture, function.states)
+            val checkbox = MaterialCheckBox(this).apply {
+                isChecked = gesture in selected
+                isClickable = false; isFocusable = false; isSaveEnabled = false
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-        }
-        config = load(); renderRows()
-        showDialog(MaterialAlertDialogBuilder(this).setTitle(function.title)
-            .setView(ScrollView(this).apply { addView(rows) }).setPositiveButton("完成", null))
-    }
-
-    private fun showStates(function: GestureFunction, gesture: BubbleGesture, onSaved: () -> Unit) {
-        val current = load().resolvedBindings()
-        val own = current.filter { it.action == function.action && it.gesture == gesture }.map { it.recording }.toSet()
-        val states = listOf(emptySet<Boolean>()) + when (function.states) {
-            setOf(false, true) -> listOf(setOf(false), setOf(true), setOf(false, true))
-            else -> listOf(function.states)
-        }
-        lateinit var picker: AlertDialog
-        fun restoreSelection() {
-            val actual = runCatching { load().resolvedBindings() }.getOrDefault(current)
-                .filter { it.action == function.action && it.gesture == gesture }.map { it.recording }.toSet()
-            val selectedIndex = states.indexOf(actual)
-            picker.listView.apply { clearChoices(); if (selectedIndex >= 0) setItemChecked(selectedIndex, true) }
-        }
-        picker = showDialog(MaterialAlertDialogBuilder(context).setTitle("${function.title} · ${gesture.title}")
-            .setSingleChoiceItems(states.map(::stateTitle).toTypedArray(), states.indexOf(own)) { _, index ->
-                val selected = states[index]
-                val latest = load().resolvedBindings()
-                val conflicts = GestureBindings.conflicts(latest, function.action, gesture, selected)
-                val commit = {
-                    val saved = save { value ->
-                        // A confirmation must never overwrite mappings changed while it was open.
-                        require(value.resolvedBindings() == latest) { "手势绑定已改变，请重新选择" }
-                        val remaining = latest.filterNot {
-                            it.action == function.action && it.gesture == gesture
-                        }
-                        value.copy(bindings = if (selected.isEmpty()) remaining
-                            else GestureBindings.assign(remaining, function.action, gesture, selected))
-                    }
-                    if (saved) { picker.dismiss(); onSaved() } else restoreSelection()
-                    saved
+            val name = label(gesture.title, 15f).apply { textSize = 15f }
+            rows.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(48); setPadding(dp(16), 0, dp(16), 0)
+                background = touchFeedback()
+                isClickable = true; isFocusable = true; isSaveEnabled = false
+                contentDescription = gesture.title
+                addView(name, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(checkbox, LinearLayout.LayoutParams(dp(48), dp(48)))
+                fun updateCheck() {
+                    val blocked = gesture !in selected && conflicts.isNotEmpty()
+                    checkbox.isChecked = gesture in selected
+                    checkbox.isEnabled = !blocked
+                    name.alpha = if (blocked) 0.38f else 1f
                 }
-                if (conflicts.isEmpty()) commit()
-                else {
-                    val summary = conflicts.joinToString("\n") {
-                        "${if (it.recording) "录音中" else "未录音"}：${GestureBindings.title(it.action)}"
-                    }
-                    val confirmation = showDialog(MaterialAlertDialogBuilder(context).setTitle("替换已有绑定？")
-                        .setMessage("${gesture.title}在以下状态已绑定：\n$summary\n\n替换为「${function.title}」，其他状态的绑定保留。")
-                        .setNegativeButton("取消") { _, _ -> restoreSelection() }
-                        .setOnCancelListener { restoreSelection() }.setPositiveButton("替换", null))
-                    confirmation.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        if (commit()) confirmation.dismiss()
+                accessibilityDelegate = object : View.AccessibilityDelegate() {
+                    override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+                        super.onInitializeAccessibilityNodeInfo(host, info)
+                        info.className = "android.widget.CheckBox"
+                        info.isCheckable = gesture in selected || conflicts.isEmpty()
+                        info.isChecked = gesture in selected
                     }
                 }
-            }.setNegativeButton("取消", null))
+                updateCheck()
+                setOnClickListener {
+                    if (gesture !in selected && conflicts.isNotEmpty()) {
+                        val owners = conflicts.map { GestureBindings.title(it.action) }.distinct()
+                            .joinToString("、") { "「$it」" }
+                        showFeedback("${gesture.title}已用于$owners")
+                    } else {
+                        if (!selected.remove(gesture)) selected.add(gesture)
+                        updateCheck()
+                        sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
+                    }
+                }
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+        val picker = showDialog(MaterialAlertDialogBuilder(this).setTitle(function.title)
+            .setView(ScrollView(this).apply { isSaveEnabled = false; addView(rows) })
+            .setNegativeButton("取消", null).setPositiveButton("保存", null))
+        picker.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            // Keep the draft local and preserve untouched and hidden mappings exactly as loaded.
+            val latest = runCatching { load().resolvedBindings() }.getOrNull()
+            if (latest != initial) {
+                showFeedback("手势绑定已变化，请关闭后重新选择")
+                return@setOnClickListener
+            }
+            val updated = runCatching {
+                GestureBindings.updateSelection(initial, function.action, gestures, selected)
+            }.getOrElse {
+                showFeedback("手势已被占用，请重新选择")
+                return@setOnClickListener
+            }
+            if (updated == initial) {
+                picker.dismiss()
+                return@setOnClickListener
+            }
+            val saved = save { value ->
+                require(value.resolvedBindings() == initial) { "手势绑定已变化，请重新选择" }
+                value.copy(bindings = GestureBindings.updateSelection(
+                    value.resolvedBindings(), function.action, gestures, selected))
+            }
+            if (saved) { picker.dismiss(); refresh() }
+        }
     }
 
-    private fun confirmReset(defaults: Boolean) {
-        val title = if (defaults) "恢复默认绑定" else "清除全部绑定"
-        val dialog = showDialog(MaterialAlertDialogBuilder(context).setTitle("$title？")
-            .setMessage(if (defaults) "仅恢复所有功能的默认手势绑定。长按滑动开关、时间与其他设置保持不变。"
-                else "移除所有功能在未录音与录音中的手势绑定，包括已停用的方向手势。长按滑动开关、时间与其他设置保持不变。")
-            .setNegativeButton("取消", null).setPositiveButton(if (defaults) "恢复默认" else "清除", null))
+    private fun confirmReset() {
+        val dialog = showDialog(MaterialAlertDialogBuilder(context).setTitle("恢复默认绑定？")
+            .setMessage("恢复基础手势绑定，方向手势恢复为未分配。长按滑动开关与时间保持不变。")
+            .setNegativeButton("取消", null).setPositiveButton("恢复默认", null))
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            if (save { it.copy(bindings = if (defaults) InteractionConfig().resolvedBindings() else emptyList()) }) {
+            if (save { it.copy(bindings = GestureBindings.defaults()) }) {
                 dialog.dismiss(); refresh()
             }
         }
     }
 
     private fun functionSummary(function: GestureFunction): String {
-        val bindings = config.resolvedBindings().filter { it.action == function.action }
-        if (bindings.isEmpty()) return "未绑定"
-        return bindings.groupBy { it.gesture }.entries.joinToString("、") { (gesture, values) ->
-            val states = values.map { it.recording }.toSet()
-            val details = buildList {
-                if (function.states.size > 1 || states != function.states) add(stateTitle(states))
-                if (gesture.directional && !config.longPressSlide) add("已停用")
-            }
-            gesture.title + if (details.isEmpty()) "" else "（${details.joinToString("，")}）"
-        }
+        val gestures = config.resolvedBindings().filter {
+            it.action == function.action && (!it.gesture.directional || config.longPressSlide)
+        }.map { it.gesture }.toSet()
+        return BubbleGesture.entries.filter { it in gestures }.joinToString("、") { it.title }
+            .ifEmpty { "未分配手势" }
     }
 
-    private fun gestureSummary(function: GestureFunction, gesture: BubbleGesture): String {
-        val states = config.resolvedBindings().filter { it.action == function.action && it.gesture == gesture }
-            .map { it.recording }.toSet()
-        val value = if (function.states.size == 1 && states == function.states) "已绑定" else stateTitle(states)
-        return value + if (gesture.directional && !config.longPressSlide) " · 已停用" else ""
-    }
-
-    private fun stateTitle(states: Set<Boolean>) = when (states) {
-        setOf(false, true) -> "两种状态"
-        setOf(true) -> "录音中"
-        setOf(false) -> "未录音"
-        else -> "未绑定"
+    private fun showFeedback(message: String) {
+        feedback?.cancel()
+        feedback = Toast.makeText(context, message, Toast.LENGTH_SHORT).also { it.show() }
     }
 
     private fun seconds(millis: Int) = "${millis / 1000}.${millis % 1000 / 100} 秒"

@@ -541,14 +541,6 @@ internal class SettingsScreen(
             return persist(SettingsUpdate.Choice(SettingsUpdate.ChoiceField.valueOf(name), value))
         return persistInteraction { when (name) {
             "recordingLimitAction" -> it.copy(recordingLimitAction = RecordingLimitAction.from(value))
-            "singleAction" -> it.copy(singleAction = value)
-            "doubleAction" -> it.copy(doubleAction = value)
-            "tripleAction" -> it.copy(tripleAction = value)
-            "longAction" -> it.copy(longAction = value)
-            "recordingSingleAction" -> it.copy(recordingSingleAction = value)
-            "recordingDoubleAction" -> it.copy(recordingDoubleAction = value)
-            "recordingTripleAction" -> it.copy(recordingTripleAction = value)
-            "recordingLongAction" -> it.copy(recordingLongAction = value)
             else -> error("Unknown choice")
         } }
     }

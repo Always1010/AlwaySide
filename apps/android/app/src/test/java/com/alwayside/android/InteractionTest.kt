@@ -21,7 +21,6 @@ class InteractionTest {
         val disabled = defaults.copy(saveHistoryAudio = false)
         assertFalse(disabled.saveHistoryAudio)
         assertTrue(disabled.saveHistoryImages)
-        assertFalse(InteractionDefaults.upgrade(disabled).saveHistoryAudio)
         assertTrue(defaults.copy(saveHistoryImages = false).saveHistoryAudio)
     }
 
@@ -57,10 +56,11 @@ class InteractionTest {
         assertEquals(AssistantActions.MENU, cfg.action(1, false))
         assertEquals(AssistantActions.SCREEN, cfg.action(4, false))
         assertEquals(AssistantActions.MENU, cfg.action(1, true))
-        assertEquals(AssistantActions.AUDIO, cfg.action(2, true))
+        assertEquals(AssistantActions.END_AUDIO, cfg.action(2, true))
         assertEquals(AssistantActions.CROP, cfg.action(3, false))
         assertEquals(AssistantActions.CANCEL_AUDIO, cfg.action(3, true))
-        assertEquals(AssistantActions.SCREEN, cfg.action(4, true))
-        assertEquals(AssistantActions.CANCEL_AUDIO, cfg.copy(recordingSingleAction = AssistantActions.CANCEL_AUDIO).action(1, true))
+        assertEquals(AssistantActions.NONE, cfg.action(4, true))
+        assertEquals(AssistantActions.CANCEL_AUDIO, cfg.copy(bindings = listOf(
+            GestureBinding(BubbleGesture.SINGLE, true, AssistantActions.CANCEL_AUDIO))).action(1, true))
     }
 }
