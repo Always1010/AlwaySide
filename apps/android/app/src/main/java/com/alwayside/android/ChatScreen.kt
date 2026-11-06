@@ -29,7 +29,6 @@ import com.google.android.material.textfield.TextInputLayout
 internal class ChatScreen(
     private val activity: Activity,
     private val onBack: () -> Unit,
-    private val onSettings: () -> Unit,
     id: String? = null,
     savedState: Bundle? = null,
     retained: RetainedConversation? = null,
@@ -152,7 +151,7 @@ internal class ChatScreen(
             setBackgroundColor(BACKGROUND); fitsSystemWindows = true
             addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
-                    // The existing chat view is reattached when returning from Settings.
+                    // Reload configuration when the existing chat view is reattached.
                     runCatching { SettingsStore(this@ChatScreen).load() }.getOrNull()?.let { fresh ->
                         if (fresh.connectionId != activeConnection.connectionId) webSearchOverride = null
                         activeConnection = fresh; defaultWebSearch = fresh.webSearch
@@ -165,7 +164,6 @@ internal class ChatScreen(
         toolbar = materialToolbar("对话", onBack).apply {
             addIconAction(4, R.drawable.ic_line_star, "收藏会话") { toggleFavorite() }.isEnabled = false
             addIconAction(1, R.drawable.ic_copy, "复制整段会话") { copyConversation() }
-            addIconAction(2, android.R.drawable.ic_menu_manage, "设置") { onSettings() }
             addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
                 icon = playbackIcon; isVisible = false
             }

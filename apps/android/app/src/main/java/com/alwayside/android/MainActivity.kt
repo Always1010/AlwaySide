@@ -228,7 +228,7 @@ class MainActivity : ThemedActivity() {
 
     private fun createChat(id: String? = null,savedState: Bundle? = null,
         retained: ChatScreen.RetainedConversation? = null,autoAskText: Boolean = false): ChatScreen =
-        ChatScreen(this,::navigateBack,::openSettings,id,savedState,retained,autoAskText)
+        ChatScreen(this,::navigateBack,id,savedState,retained,autoAskText)
 
     private fun openChat(id: String?,autoAskText: Boolean = false): Unit = leaveSettings {
         historyScreen?.prepareToLeave()
