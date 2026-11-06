@@ -204,9 +204,21 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     }
     val header = context.materialToolbar(title,null,compact=true).apply {
         setTitleTextAppearance(context,R.style.TextAppearance_AlwaySide_AssistantTitle)
+        minimumHeight=context.dp(44)
     }
-    val favorite = header.addIconAction(3,R.drawable.ic_line_star,"收藏会话",actions.favorite)
-    val pin = header.addIconAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示",actions.pin)
+    private fun headerAction(id: Int, resource: Int, description: String, action: () -> Unit): MaterialButton {
+        val context=header.context
+        return context.iconButton(resource,description,action).apply {
+            iconSize=context.dp(20)
+            minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0
+            setPadding(context.dp(12),0,context.dp(12),0)
+            cornerRadius=context.dp(22)
+            setToggleCheckedStateOnClick(false)
+            layoutParams=ViewGroup.LayoutParams(context.dp(44),context.dp(44))
+        }.also { header.addIconAction(id,resource,description,action).actionView=it }
+    }
+    val favorite = headerAction(3,R.drawable.ic_line_star,"收藏会话",actions.favorite)
+    val pin = headerAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示",actions.pin)
     val content = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(15),context.dp(13),context.dp(15),context.dp(8)) }
     val sourceContent = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(12),context.dp(5),context.dp(12),context.dp(5)) }
     val response = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(0,context.dp(12),0,0) }
@@ -252,8 +264,8 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     }
 
     init { with(context) {
-        header.addIconAction(2,R.drawable.ic_line_expand,"在应用中打开",actions.expand)
-        body.addView(header,LinearLayout.LayoutParams(-1,dp(48)))
+        headerAction(2,R.drawable.ic_line_expand,"在应用中打开",actions.expand)
+        body.addView(header,LinearLayout.LayoutParams(-1,dp(44)))
         body.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
         val sourceCard=assistantCard(12)
         sourceCard.addView(sourceContent);content.addView(sourceCard,LinearLayout.LayoutParams(-1,-2))

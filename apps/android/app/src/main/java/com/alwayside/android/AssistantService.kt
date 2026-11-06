@@ -158,8 +158,8 @@ class AssistantService : Service() {
         var cancel: View? = null
         var retry: View? = null
         var copy: View? = null
-        var pin: MenuItem? = null
-        var favorite: MenuItem? = null
+        var pin: MaterialButton? = null
+        var favorite: MaterialButton? = null
         var isFavorite = false
         var imageChoice: MaterialButton? = null
         var search: MaterialButton? = null
@@ -734,17 +734,14 @@ class AssistantService : Service() {
     private fun updatePin(node:FloatingConversation){node.pin?.apply{
         icon=uiContext.prototypeIcon(if(node.pinned)R.drawable.ic_pin_filled else R.drawable.ic_line_pin)
         isCheckable=true;isChecked=node.pinned
-        title=if(node.pinned)"取消固定" else "固定窗口"
-        iconTintList=android.content.res.ColorStateList.valueOf(if(node.pinned)ACCENT else MUTED)
-        contentDescription=if(node.pinned)"取消固定，之后点外部收起" else "固定窗口，点外部保持显示"
-        tooltipText=contentDescription
+        iconTint=android.content.res.ColorStateList.valueOf(if(node.pinned)ACCENT else MUTED)
+        accessible(if(node.pinned)"取消固定，之后点外部收起" else "固定窗口，点外部保持显示")
     }}
     private fun updateFavorite(node:FloatingConversation){node.favorite?.apply{
         icon=uiContext.prototypeIcon(if(node.isFavorite)R.drawable.ic_star_filled else R.drawable.ic_line_star)
         isCheckable=true;isChecked=node.isFavorite
-        iconTintList=android.content.res.ColorStateList.valueOf(if(node.isFavorite)ACCENT else MUTED)
-        title=if(node.isFavorite)"取消收藏" else "收藏会话"
-        contentDescription=title;tooltipText=title
+        iconTint=android.content.res.ColorStateList.valueOf(if(node.isFavorite)ACCENT else MUTED)
+        accessible(if(node.isFavorite)"取消收藏" else "收藏会话")
     }}
     private fun toggleFavorite(node:FloatingConversation){
         if(!alive||node.detached)return
