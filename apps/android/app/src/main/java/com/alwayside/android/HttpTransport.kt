@@ -33,12 +33,12 @@ internal class HttpTransport {
             if (method == "POST") connection.outputStream.use { cancellation.throwIfCancelled(); writeBody(it) }
             cancellation.throwIfCancelled()
             val status = connection.responseCode
-            if (status !in 200..299) throw ProviderException(statusMessage(status))
+            if (status !in 200..299) throw failure(status)
             val result = readBody(connection, deadline)
-            if (timedOut.get()) throw ProviderException("请求超时，请手动重试")
+            if (timedOut.get()) throw ProviderException("请求超时，请手动重试", "请求超时，可重试")
             return result
         } catch (error: java.io.IOException) {
-            if (timedOut.get()) throw ProviderException("请求超时，请手动重试")
+            if (timedOut.get()) throw ProviderException("请求超时，请手动重试", "请求超时，可重试")
             throw error
         } finally {
             ActiveServiceRequests.release(cancellation)
@@ -60,13 +60,23 @@ internal class HttpTransport {
             val buffer = ByteArray(8192)
             while (true) {
                 cancellation.throwIfCancelled()
-                if (System.nanoTime() > deadline) throw ProviderException("请求超时，请手动重试")
+                if (System.nanoTime() > deadline) throw ProviderException("请求超时，请手动重试", "请求超时，可重试")
                 val count = input.read(buffer)
                 if (count < 0) return result.toString("UTF-8")
                 if (result.size() + count > maxBytes) throw ProviderException("服务返回内容过大")
                 result.write(buffer, 0, count)
             }
         }
+        internal fun failure(status: Int) = ProviderException(statusMessage(status), when (status) {
+            401, 403 -> "API 认证或权限失败"
+            404 -> "接口或模型不存在"
+            408, 504 -> "请求超时，可重试"
+            413 -> "请求内容过大"
+            429 -> "请求受限或额度不足"
+            in 500..599 -> "服务暂时不可用"
+            else -> "请求失败，请查看详情"
+        })
+
         private fun statusMessage(status: Int) = when (status) {
             in 300..399 -> "服务返回重定向（HTTP $status），请直接填写最终 HTTPS API 地址"
             401, 403 -> "API 认证或访问权限失败（HTTP $status），请检查 Key、地域与模型权限"

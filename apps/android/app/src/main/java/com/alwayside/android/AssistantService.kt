@@ -138,6 +138,7 @@ class AssistantService : Service() {
         var layout: WindowManager.LayoutParams? = null
         var response: LinearLayout? = null
         var status: TextView? = null
+        var requestNotice: AssistantRequestNoticeView? = null
         var source: TextView? = null
         var sourceImage: ImageView? = null
         var transcript: TextView? = null
@@ -502,7 +503,7 @@ class AssistantService : Service() {
     private fun hideWindow(node: FloatingConversation, stopAudio: Boolean = true) {
         node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);remove(it) }
         node.suggestionViews.values.forEach { (it.parent as? ViewGroup)?.removeView(it); it.destroy() };node.suggestionViews.clear()
-        node.root=null;node.layout=null;node.response=null;node.status=null;node.source=null;node.sourceImage=null;node.transcript=null
+        node.root=null;node.layout=null;node.response=null;node.status=null;node.requestNotice=null;node.source=null;node.sourceImage=null;node.transcript=null
         node.transcriptCopy=null
         node.audioApproval=null
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
@@ -541,6 +542,9 @@ class AssistantService : Service() {
             ))
         val body=presentation.body;val header=presentation.header;val sourceContent=presentation.sourceContent
         node.pin=presentation.pin;node.content=presentation.content;node.response=presentation.response;node.status=presentation.status
+        node.requestNotice=AssistantRequestNoticeView(uiContext) { node.chat.dismissNotice() }.also {
+            presentation.noticeSlot.addView(it,FrameLayout.LayoutParams(-1,-2).apply { setMargins(dp(8),0,dp(8),dp(4)) })
+        }
         node.scroll=presentation.scroll;node.composerToggle=presentation.toggle;node.composer=presentation.composerSection
         node.cancel=presentation.cancel;node.retry=presentation.retry;node.copy=presentation.copy
         node.imageChoice=presentation.imageChoice;node.search=presentation.search;node.send=presentation.send
@@ -701,8 +705,19 @@ class AssistantService : Service() {
         val text=messages.joinToString("\n\n") { it.second }.takeLast(100000)
         val scroll=node.scroll;val nearBottom=scroll==null||(scroll.scrollY+scroll.height>=(node.content?.height ?: 0)-dp(48))
         renderFloatingMessages(node,messages)
-        node.status?.text=if(node.awaitingAudioApproval)"已达录音上限，录音已停止，尚未上传。请选择转写或丢弃。" else if(text.isBlank()&&!node.chat.busy)"${when(node.kind){"photo"->"截图";"audio"->"录音";else->"原文"}}已就绪，输入问题后发送" else node.chat.status
-        node.apiSnapshot?.let { api -> node.status?.text = (if(node.chat.busy || node.chat.question.isNotBlank())node.chat.requestProviderLabel else ProviderCapabilities.label(api)) + "\n" + node.status?.text?.toString().orEmpty() }
+        val notice=node.chat.notice.takeUnless { node.awaitingAudioApproval }
+        node.requestNotice?.render(notice)
+        val status=floatingConversationStatus(node.kind,node.chat.phase,node.chat.status,node.awaitingAudioApproval)
+        val providerLabel=node.apiSnapshot?.let { api ->
+            if(node.chat.busy || node.chat.question.isNotBlank())node.chat.requestProviderLabel else ProviderCapabilities.label(api)
+        }.orEmpty()
+        // Exception details belong behind the info action, including after the user dismisses the notice.
+        val showStatus=node.awaitingAudioApproval || when(node.chat.phase) {
+            ChatRequestPhase.FAILED,ChatRequestPhase.CANCELLED,ChatRequestPhase.PAUSED -> false
+            else -> true
+        }
+        node.status?.text=listOf(providerLabel,if(showStatus)status else "").filter { it.isNotBlank() }.joinToString("\n")
+        node.status?.visibility=if(node.status?.text.isNullOrBlank())View.GONE else View.VISIBLE
         node.audioApproval?.visibility=if(node.awaitingAudioApproval)View.VISIBLE else View.GONE
         node.composerToggle?.isEnabled=!node.awaitingAudioApproval
         updateSendEnabled(node)
@@ -804,24 +819,24 @@ class AssistantService : Service() {
         archivePrepared(node);showWindow(node,focusQuestion=!autoAsk)
         if(autoAsk)submitDefault(node)
     }
-    private fun submitDefault(node:FloatingConversation){val c=readApiConfig()?:return;node.automaticFirstQuestion=true;sendQuestion(node,when(node.kind){"photo"->c.defaultQuestion;"audio"->c.audioQuestion;else->c.textQuestion},c,useDefaultAudioOutput=true)}
-    private fun readApiConfig():AppConfig?=try{SettingsStore(this).load()}catch(_:Exception){toast("无法读取 API 配置，请在设置中重新保存密钥");null}
+    private fun submitDefault(node:FloatingConversation){val c=readApiConfig(node)?:return;node.automaticFirstQuestion=true;sendQuestion(node,when(node.kind){"photo"->c.defaultQuestion;"audio"->c.audioQuestion;else->c.textQuestion},c,useDefaultAudioOutput=true)}
+    private fun readApiConfig(node:FloatingConversation):AppConfig?=try{SettingsStore(this).load()}catch(_:Exception){node.chat.reportSubmissionFailure(IllegalStateException("无法读取 API 配置，请在设置中重新保存密钥"));null}
     private fun sendQuestion(node:FloatingConversation,text:String,frozen:AppConfig?=null,useDefaultAudioOutput:Boolean=false){
         if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
         if(node.chat.busy||gathering||recorder!=null){toast("请先结束当前采集或请求");return}
-        if(text.isBlank()){toast("请输入问题");return}
-        val base=frozen?:readApiConfig()?:return
+        if(text.isBlank()){node.chat.reportSubmissionFailure(IllegalArgumentException("请输入问题"));return}
+        val base=frozen?:readApiConfig(node)?:return
         if(node.apiSnapshot?.connectionId != base.connectionId)node.webSearchOverride=null
         node.apiSnapshot=base
         node.searchDefault=base.webSearch
         node.status?.tooltipText=ProviderCapabilities.label(base)
         val c=base.copy(webSearch=node.webSearchOverride ?: base.webSearch)
-        if(node.kind=="audio"&&node.clip!=null&&node.clip!!.peak<.0001){toast("录音没有有效音量，请重新采集");return}
+        if(node.kind=="audio"&&node.clip!=null&&node.clip!!.peak<.0001){node.chat.reportSubmissionFailure(IllegalStateException("录音没有有效音量，请重新采集"));return}
         val submit=submit@{
             if(node.detached||nodes[node.kind]!==node)return@submit
             val image=if(node.kind=="photo"&&node.imageMode!=2)node.frame?.bitmap else null
             val evidence=when(node.kind){"photo"->if(image!=null)imageDescription(node) else "仅文字上下文";"audio"->"内部录音 ${String.format(Locale.getDefault(),"%.1f",node.clip?.seconds ?: 0f)} 秒 · 不附图";else->"选中文字与本段上下文"}
-            try{node.chat.submit(c,text,image,evidence,if(node.kind=="audio"&&node.chat.transcript.isBlank())node.clip?.file else null,useDefaultAudioOutput=useDefaultAudioOutput);node.draft="";node.input?.setText("");persistImage(node);refresh(node)}catch(e:Exception){toast(e.message?:"无法发送")}
+            try{node.chat.submit(c,text,image,evidence,if(node.kind=="audio"&&node.chat.transcript.isBlank())node.clip?.file else null,useDefaultAudioOutput=useDefaultAudioOutput);node.draft="";node.input?.setText("");persistImage(node);refresh(node)}catch(e:Exception){node.chat.reportSubmissionFailure(e)}
         }
         if(node.kind=="photo"&&node.imageMode==1)capture(node,false,true){submit()} else submit()
     }

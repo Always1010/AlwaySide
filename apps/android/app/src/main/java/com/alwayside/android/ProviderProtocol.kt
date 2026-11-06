@@ -39,7 +39,7 @@ internal class RequestCancellation {
     }
 }
 
-internal class ProviderException(message: String) : Exception(message)
+internal class ProviderException(message: String, val summary: String = "请求失败，请查看详情") : Exception(message)
 
 internal object ProviderProtocol {
     fun endpoint(baseUrl: String, route: String, query: Map<String, String> = emptyMap()): URL {
@@ -129,7 +129,7 @@ internal class EventStream(
         val line = StringBuilder()
         while (true) {
             cancellation.throwIfCancelled()
-            if (System.nanoTime() > deadlineNanos) throw ProviderException("请求超时，请手动重试")
+            if (System.nanoTime() > deadlineNanos) throw ProviderException("请求超时，请手动重试", "请求超时，可重试")
             val code = reader.read()
             if (code < 0) return null
             if (++total > maxTotal) throw ProviderException("服务返回内容过大")

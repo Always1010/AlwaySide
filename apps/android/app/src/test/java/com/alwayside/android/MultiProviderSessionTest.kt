@@ -131,6 +131,9 @@ class MultiProviderSessionTest {
         assertTrue(h.session.messages.isEmpty())
         assertEquals("Before search. ", h.session.partial)
         assertTrue(h.session.status.contains("再次调用原服务"))
+        assertEquals(ChatRequestPhase.PAUSED, h.session.phase)
+        assertFalse(h.session.notice!!.isError)
+        assertEquals(h.session.status, floatingConversationStatus("text", h.session.phase, h.session.status))
 
         val original = h.gateway.answers.single()
         h.current = ProviderConnections.select(h.current, otherAnswer.id)
@@ -171,6 +174,8 @@ class MultiProviderSessionTest {
         assertTrue(h.session.messages.isEmpty())
         assertTrue(h.session.status.contains("已达 3 次"))
         assertTrue(h.session.status.contains("仍未完成"))
+        assertEquals(ChatRequestPhase.FAILED, h.session.phase)
+        assertTrue(h.session.notice!!.isError)
         h.gateway.answers.drop(1).forEachIndexed { index, call ->
             assertEquals(listOf(mapOf("role" to "assistant", "round" to index + 1)), call.config.continuationMessages)
         }
@@ -193,6 +198,8 @@ class MultiProviderSessionTest {
         assertEquals(0, h.worker.pending)
         assertEquals(1, h.gateway.answers.size)
         assertEquals("连接或密钥已更新，请重新发送问题", h.session.status)
+        assertEquals(ChatRequestPhase.FAILED, h.session.phase)
+        assertTrue(h.session.notice!!.isError)
         assertEquals(listOf(true to false), h.credentialChecks.map { it.second to it.third })
     }
 

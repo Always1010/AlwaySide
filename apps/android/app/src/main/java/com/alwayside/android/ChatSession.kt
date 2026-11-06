@@ -38,7 +38,9 @@ internal class ChatSession(
     private var updatedAt = System.currentTimeMillis()
     private var cachedAudio: Pair<String, String>? = null
     val messages = mutableListOf<ChatMessage>()
-    var busy = false; private set
+    var phase = ChatRequestPhase.READY; private set
+    val busy: Boolean get() = phase == ChatRequestPhase.RUNNING
+    var notice: RequestNotice? = null; private set
     var partial = ""; private set
     var question = ""; private set
     var status = "等待提问"; private set
@@ -68,9 +70,15 @@ internal class ChatSession(
         // A question entered by the user must also reach the response model for transcript/translation presets.
         val requestConfig = if (audio != null && !useDefaultAudioOutput) config.copy(audioOutput = "interpret") else config
         val effectiveQuestion = if (audio != null && requestConfig.audioOutput == "translate") AUDIO_TRANSLATION_QUESTION else text
-        ChatPrompt.validateQuestion(effectiveQuestion)
-        if (audio == null || requestConfig.audioOutput != "transcript") require(config.apiKey.isNotBlank()) { "请先为问答连接填写 API Key" }
-        if (audio != null) require(ProviderConnections.transcription(requestConfig).apiKey.isNotBlank()) { "请先为转写连接填写 API Key" }
+        try {
+            ChatPrompt.validateQuestion(effectiveQuestion)
+            if (audio == null || requestConfig.audioOutput != "transcript") require(config.apiKey.isNotBlank()) { "请先为问答连接填写 API Key" }
+            if (audio != null) require(ProviderConnections.transcription(requestConfig).apiKey.isNotBlank()) { "请先为转写连接填写 API Key" }
+        } catch (error: Exception) {
+            requestProviderLabel = ProviderCapabilities.label(requestConfig)
+            reportSubmissionFailure(error)
+            throw error
+        }
         val audioKey = audio?.let { audioKey(it, requestConfig) }
         val known = if (audioKey != null) {
             if (cachedAudio?.first == audioKey) cachedAudio!!.second else ""
@@ -83,13 +91,16 @@ internal class ChatSession(
         val needsAnswer = request.audio == null || request.config.audioOutput != "transcript"
         val needsAudio = request.audio != null && request.transcript.isEmpty()
         if (!credentialsCurrent(request.config, needsAnswer, needsAudio)) {
-            retry = null; status = "连接或密钥已更新，请重新发送问题"; notifyChanged()
+            retry = null; phase = ChatRequestPhase.FAILED
+            status = "连接或密钥已更新，请重新发送问题"
+            notice = RequestNotice("连接或密钥已更新", status)
+            archive(); notifyChanged()
         } else start(request)
     } }
     private fun start(request: Request) {
         val token = ++epoch
         val cancel = RequestCancellation()
-        cancellation = cancel; retry = request; busy = true
+        cancellation = cancel; retry = request; phase = ChatRequestPhase.RUNNING; notice = null
         requestProviderLabel = ProviderCapabilities.label(request.config)
         partial = request.continuationPrefix; question = request.question; evidence = request.evidence
         transcript = request.transcript
@@ -106,7 +117,7 @@ internal class ChatSession(
                     cancel.throwIfCancelled()
                     val fixedWords = words
                     post {
-                        if (epoch == token) {
+                        if (epoch == token && busy) {
                             cachedAudio = audioKey(request.audio, request.config) to fixedWords
                             transcript = fixedWords
                             retry = request.copy(transcript = fixedWords)
@@ -126,7 +137,7 @@ internal class ChatSession(
                     if (now - lastUpdate > 80_000_000L) {
                         lastUpdate = now
                         val value = accumulated.toString()
-                        post { if (epoch == token) { partial = value; status = "正在回答…"; notifyChanged() } }
+                        post { if (epoch == token && busy) { partial = value; status = "正在回答…"; notifyChanged() } }
                     }
                 }
                 val answer = request.continuationPrefix + generated
@@ -138,7 +149,7 @@ internal class ChatSession(
                     messages.add(ChatMessage("user", request.question, request.evidence))
                     messages.add(ChatMessage("assistant", answer, searchSuggestions = suggestions))
                     while (messages.size > 40) { messages.removeAt(0); messages.removeAt(0) }
-                    transcript = words; partial = ""; question = ""; busy = false; retry = null; cancellation = null
+                    transcript = words; partial = ""; question = ""; phase = ChatRequestPhase.COMPLETED; notice = null; retry = null; cancellation = null
                     status = if (messages.size >= 24) "已完成 · 后续追问最多参考最近 24 条文字消息" else "已完成"
                     archive()
                     notifyChanged()
@@ -146,26 +157,34 @@ internal class ChatSession(
             } catch (e: ProviderPausedException) {
                 post {
                     if (epoch != token) return@post
-                    busy = false; cancellation = null
+                    phase = ChatRequestPhase.PAUSED; cancellation = null
                     partial = accumulated.toString()
                     if (request.continuationCount >= 3) {
-                        retry = null; status = "搜索续接已达 3 次，回答仍未完成，请缩小问题范围后重新发送"
+                        retry = null; phase = ChatRequestPhase.FAILED
+                        status = "搜索续接已达 3 次，回答仍未完成，请缩小问题范围后重新发送"
+                        notice = RequestNotice("回答未完成，请缩小问题范围", status)
                     } else {
                         retry = (retry ?: request).copy(config = request.config.copy(continuationMessages = e.messages),
                             continuationCount = request.continuationCount + 1, continuationPrefix = accumulated.toString())
                         status = "搜索尚未完成，点击继续生成；继续会再次调用原服务"
+                        notice = RequestNotice("搜索暂停，可继续生成", status, isError = false)
                     }
                     archive(); notifyChanged()
                 }
             } catch (e: Exception) {
                 post {
                     if (epoch != token) return@post
-                    busy = false; cancellation = null
+                    cancellation = null
+                    partial = accumulated.toString()
                     val pending = retry ?: request
                     val valid = !cancelled(e) || credentialsCurrent(pending.config,
                         pending.audio == null || pending.config.audioOutput != "transcript", pending.audio != null && pending.transcript.isEmpty())
                     if (!valid) retry = null
-                    status = if (!valid) "服务密钥已撤销或替换，请重新发送问题" else if (cancelled(e)) "已取消；可以手动重试" else safeError(e)
+                    phase = if (valid && cancelled(e)) ChatRequestPhase.CANCELLED else ChatRequestPhase.FAILED
+                    notice = if (!valid) RequestNotice("服务密钥已撤销或替换", "服务密钥已撤销或替换，请重新发送问题")
+                        else if (cancelled(e)) RequestNotice("已取消，可手动重试", "已取消；可以手动重试", isError = false)
+                        else RequestNotice.failure(e)
+                    status = notice!!.detail
                     archive()
                     notifyChanged()
                 }
@@ -174,12 +193,23 @@ internal class ChatSession(
     }
     fun cancel() {
         if (!busy) return
-        epoch++; cancellation?.cancel(); cancellation = null; busy = false
-        status = "已取消；部分文字未加入上下文，可手动重试"; archive(); notifyChanged()
+        epoch++; cancellation?.cancel(); cancellation = null; phase = ChatRequestPhase.CANCELLED
+        status = "已取消；部分文字未加入上下文，可手动重试"
+        notice = RequestNotice("已取消，可手动重试", status, isError = false)
+        archive(); notifyChanged()
     }
+    fun reportSubmissionFailure(error: Exception) {
+        if (busy) return
+        retry = null; phase = ChatRequestPhase.FAILED
+        notice = RequestNotice.failure(error, beforeSubmission = true)
+        status = notice!!.detail
+        notifyChanged()
+    }
+    fun dismissNotice() { notice = null; notifyChanged() }
     fun newConversation(saved: StoredConversation? = null, kind: String = "text") {
         if (busy) cancel()
-        epoch++; cancellation?.cancel(); cancellation = null; busy = false; retry = null
+        epoch++; cancellation?.cancel(); cancellation = null; retry = null; notice = null
+        phase = if (saved == null) ChatRequestPhase.READY else ChatRequestPhase.RESTORED
         id = saved?.id ?: UUID.randomUUID().toString()
         this.kind = saved?.kind ?: kind
         updatedAt = saved?.updatedAt ?: System.currentTimeMillis()
@@ -212,12 +242,6 @@ internal class ChatSession(
         return "${file.absolutePath}:${file.length()}:${file.lastModified()}:${target.connectionId}:${target.endpointId}:${target.credentialId}:${target.baseUrl}:${target.apiProtocol}:${target.transcriptionModel}:${target.credentialRevision}:${target.transcriptionPrompt}:${target.transcriptionLanguage}"
     }
     private fun cancelled(e: Exception) = e is java.util.concurrent.CancellationException || e is InterruptedException
-    private fun safeError(e: Exception): String = when (e) {
-        is java.net.SocketTimeoutException -> "请求超时；可手动重试"
-        is java.net.UnknownHostException -> "无法连接服务器，请检查网络和 API 地址"
-        is java.io.IOException -> "网络请求失败：${e.message.orEmpty().take(180)}"
-        else -> e.message?.take(180) ?: "请求失败，请检查配置后手动重试"
-    }
     private fun encodeImage(bitmap: Bitmap): String {
         val ratio = minOf(1.0, 2400.0 / maxOf(bitmap.width, bitmap.height))
         val scaled = if (ratio < 1) Bitmap.createScaledBitmap(bitmap,

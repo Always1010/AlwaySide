@@ -191,8 +191,8 @@ internal class AiProvider : AiGateway {
         try { cancellation.throwIfCancelled(); return block() }
         catch (error: CancellationException) { throw error }
         catch (error: ProviderException) { cancellation.throwIfCancelled(); throw error }
-        catch (_: SocketTimeoutException) { cancellation.throwIfCancelled(); throw ProviderException("网络请求超时，请手动重试") }
-        catch (_: IOException) { cancellation.throwIfCancelled(); throw ProviderException("网络连接失败，请检查网络与 API 地址后手动重试") }
+        catch (_: SocketTimeoutException) { cancellation.throwIfCancelled(); throw ProviderException("网络请求超时，请手动重试", "请求超时，可重试") }
+        catch (_: IOException) { cancellation.throwIfCancelled(); throw ProviderException("网络连接失败，请检查网络与 API 地址后手动重试", "连接失败，请检查网络和地址") }
         catch (_: JSONException) { cancellation.throwIfCancelled(); throw ProviderException("服务返回格式无效，请检查 API 兼容性") }
         catch (error: IllegalArgumentException) {
             cancellation.throwIfCancelled()

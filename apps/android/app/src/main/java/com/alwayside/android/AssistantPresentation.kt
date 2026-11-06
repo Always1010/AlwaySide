@@ -149,6 +149,8 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val response = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(0,context.dp(12),0,0) }
     val status = context.label("",11f,true).apply { textSize=11f;letterSpacing=0f;setPadding(0,context.dp(6),0,0) }
     val scroll = ScrollView(context).apply { addView(content);isFillViewport=true;isVerticalScrollBarEnabled=true }
+    // Empty in the tutorial; the service supplies request notices without coupling shared views to sessions.
+    val noticeSlot = FrameLayout(context)
     private val controls = LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(context.dp(8),0,context.dp(8),0) }
     val toggle = MaterialButton(context,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
         applyActionStyle();setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantAction)
@@ -194,6 +196,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         sourceCard.addView(sourceContent);content.addView(sourceCard,LinearLayout.LayoutParams(-1,-2))
         content.addView(response);content.addView(status)
         body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        body.addView(noticeSlot,LinearLayout.LayoutParams(-1,-2))
         val entry=FrameLayout(this)
         controls.addView(entry,LinearLayout.LayoutParams(0,dp(32),1f))
         entry.addView(toggle,FrameLayout.LayoutParams(-2,-1,Gravity.START or Gravity.CENTER_VERTICAL))

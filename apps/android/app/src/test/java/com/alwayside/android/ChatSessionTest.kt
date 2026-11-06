@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
 import java.util.ArrayDeque
@@ -11,6 +12,80 @@ import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.TimeUnit
 
 class ChatSessionTest {
+    @Test fun failuresBeforeAnyAnswerStayVisibleInEveryFloatingConversationAndRecoverOnRetry() {
+        val failures = listOf(
+            HttpTransport.failure(401) to "API 认证或权限失败",
+            HttpTransport.failure(403) to "API 认证或权限失败",
+            HttpTransport.failure(429) to "请求受限或额度不足",
+            HttpTransport.failure(503) to "服务暂时不可用",
+            java.net.UnknownHostException("offline") to "连接失败，请检查网络和地址",
+            java.net.SocketTimeoutException("timeout") to "请求超时，可重试",
+            java.io.IOException("connection reset") to "网络请求失败，可查看详情",
+        )
+        listOf("photo", "audio", "text").forEach { kind -> failures.forEach { (error, summary) ->
+            val h = Harness()
+            h.session.newConversation(kind = kind)
+            assertTrue(floatingConversationStatus(kind, h.session.phase, h.session.status).contains("已就绪"))
+            h.gateway.response = { throw error }
+            h.gateway.transcription = { throw error }
+            h.session.submit(h.config, "automatic question", null, kind, if (kind == "audio") File("clip.wav") else null)
+            assertEquals(ChatRequestPhase.RUNNING, h.session.phase)
+            assertNull(h.session.notice)
+            h.worker.runNext(); h.drainMain()
+
+            assertEquals(ChatRequestPhase.FAILED, h.session.phase)
+            assertFalse(h.session.busy)
+            assertTrue(h.session.canRetry)
+            assertTrue(h.session.messages.isEmpty())
+            assertEquals("", h.session.partial)
+            assertEquals(summary, h.session.notice!!.summary)
+            assertTrue(h.session.notice!!.isError)
+            assertEquals(h.session.status, h.session.notice!!.detail)
+            assertEquals(h.session.status, floatingConversationStatus(kind, h.session.phase, h.session.status))
+            assertEquals(h.session.status, h.saved.single().status)
+            h.gateway.calls.firstOrNull()?.onDelta?.invoke("late output after failure")
+            h.drainMain()
+            assertEquals("", h.session.partial)
+            assertEquals(h.session.notice!!.detail, h.session.status)
+
+            h.gateway.response = { "recovered answer" }
+            h.gateway.transcription = { "recovered transcript" }
+            h.session.retry()
+            assertEquals(ChatRequestPhase.RUNNING, h.session.phase)
+            assertNull(h.session.notice)
+            h.worker.runNext(); h.drainMain()
+            assertEquals(ChatRequestPhase.COMPLETED, h.session.phase)
+            assertNull(h.session.notice)
+            assertFalse(h.session.canRetry)
+            assertEquals("recovered answer", h.session.messages.last().text)
+        } }
+    }
+
+    @Test fun submissionValidationCannotLeaveAnOldRetryOrShowReadyAndNewConversationsClearNotices() {
+        val h = Harness()
+        h.gateway.response = { throw HttpTransport.failure(401) }
+        h.session.submit(h.config, "first", null, "text")
+        h.worker.runNext(); h.drainMain()
+        assertTrue(h.session.canRetry)
+        assertThrows(IllegalArgumentException::class.java) {
+            h.session.submit(h.config.copy(apiKey = ""), "second", null, "text")
+        }
+        assertEquals(ChatRequestPhase.FAILED, h.session.phase)
+        assertEquals("发送失败，请检查配置", h.session.notice!!.summary)
+        assertTrue(h.session.notice!!.detail.contains("API Key"))
+        assertFalse(h.session.canRetry)
+        assertEquals(h.session.status, floatingConversationStatus("text", h.session.phase, h.session.status))
+        h.session.dismissNotice()
+        assertNull(h.session.notice)
+        assertEquals(ChatRequestPhase.FAILED, h.session.phase)
+        assertFalse(floatingConversationStatus("text", h.session.phase, h.session.status).contains("已就绪"))
+        h.session.newConversation(kind = "audio")
+        assertEquals(ChatRequestPhase.READY, h.session.phase)
+        assertNull(h.session.notice)
+        assertTrue(floatingConversationStatus("audio", h.session.phase, h.session.status).startsWith("录音已就绪"))
+        assertTrue(floatingConversationStatus("audio", h.session.phase, h.session.status, awaitingAudioApproval = true).contains("尚未上传"))
+    }
+
     @Test fun manualAudioQuestionOverridesDefaultOutputAndRetryKeepsTheQuestion() {
         listOf("transcript", "translate", "interpret").forEach { output ->
             val h = Harness()
@@ -179,6 +254,9 @@ class ChatSessionTest {
         assertEquals("unsupported parameter", h.saved.single().status)
         h.session.retry()
         h.session.cancel()
+        assertEquals(ChatRequestPhase.CANCELLED, h.session.phase)
+        assertFalse(h.session.notice!!.isError)
+        assertEquals(h.session.status, floatingConversationStatus("photo", h.session.phase, h.session.status))
         assertTrue(h.saved.single().status.contains("已取消"))
         assertEquals(id, h.saved.single().id)
     }
@@ -278,6 +356,8 @@ class ChatSessionTest {
         assertEquals(1, h.saved.size)
         assertEquals("new evidence", h.saved.single().evidence)
         assertEquals("", h.saved.single().transcript)
+        assertEquals(ChatRequestPhase.COMPLETED, h.session.phase)
+        assertNull(h.session.notice)
     }
 
     @Test fun oldTranscriptAndCompletionCannotMutateRestoredConversation() {
@@ -346,6 +426,9 @@ class ChatSessionTest {
         assertTrue(h.session.canRetry)
         assertTrue(h.session.messages.isEmpty())
         assertTrue(h.saved.isNotEmpty())
+        assertEquals(ChatRequestPhase.FAILED, h.session.phase)
+        assertEquals("unfinished", h.session.partial)
+        assertEquals("explanation failed", h.session.notice!!.detail)
 
         settings = settings.copy(model = "changed-model", instructions = "changed instructions")
         assertFalse(settings == original)
