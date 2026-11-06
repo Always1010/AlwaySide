@@ -39,7 +39,7 @@ internal class SettingsScreen(
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
         GESTURES("快捷动作", "空闲与录音中的手势", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "窗口行为与自动提问", android.R.drawable.ic_menu_crop),
-        MEDIA("历史与媒体", "录音上限与媒体保留", android.R.drawable.ic_menu_recent_history),
+        MEDIA("历史与媒体", "历史上限、录音与媒体保留", android.R.drawable.ic_menu_recent_history),
         HELP("帮助与引导", "新手引导与使用准备", android.R.drawable.ic_menu_help),
     }
 
@@ -341,8 +341,10 @@ internal class SettingsScreen(
         check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
         section("历史音频", "完成录音后存于本机，可从历史回听。取消或丢弃的不保存，待确认录音需确认后保存。\n\n仅影响之后完成的录音，不补存旧音频；关闭不删除旧音频。\n\n删除会话时一并删除音频，总容量上限 512 MiB。")
         check("saveHistoryAudio", "随历史长期保留音频", config.saveHistoryAudio)
-        section("对话记录", "追问保存在原会话内，复用转写文字，不重复上传音频。\n\n未发送、取消或失败的会话也可从主页找到。")
-        note("问题、回答与转写随会话保存。")
+        section("对话记录", "普通历史默认保留 500 条，超出上限时删除最早的普通历史及其媒体。收藏不计入上限，不会因上限被删除。调低上限时会先显示将删除的条数，确认后生效。\n\n问题、回答与转写随会话保存。追问保存在原会话内，复用转写文字，不重复上传音频。未发送、取消或失败的会话也可从主页找到。")
+        try {
+            input("historyLimit", "普通历史上限（条）", "请输入大于 0 的整数", HistoryStore(this).historyLimit().toString(), numeric = true)
+        } catch (_: Exception) { note("无法读取历史上限，请重新打开此页。") }
     }
 
     private fun input(name: String, title: String, hintValue: String, initial: String = "", multiline: Boolean = false,
@@ -369,16 +371,19 @@ internal class SettingsScreen(
         val open = {
             finishEditing {
                 val start = try {
-                    if (name == "recordingMaxMinutes") interactionStore.load().recordingMaxMinutes.toString()
-                    else {
-                        val current = store.load()
-                        require(current.connectionId == renderedConnectionId) { "当前连接已改变，请重新打开设置页" }
-                        editorConnectionId = current.connectionId
-                        editorTranscriptionId = current.transcriptionConnectionId
-                        if (secret) "" else SettingsUpdate.TextField.valueOf(name).read(current)
+                    when (name) {
+                        "recordingMaxMinutes" -> interactionStore.load().recordingMaxMinutes.toString()
+                        "historyLimit" -> HistoryStore(this).historyLimit().toString()
+                        else -> {
+                            val current = store.load()
+                            require(current.connectionId == renderedConnectionId) { "当前连接已改变，请重新打开设置页" }
+                            editorConnectionId = current.connectionId
+                            editorTranscriptionId = current.transcriptionConnectionId
+                            if (secret) "" else SettingsUpdate.TextField.valueOf(name).read(current)
+                        }
                     }
                 } catch (_: Exception) {
-                    toast("无法读取配置，请先检查 API 管理")
+                    toast(if (name == "historyLimit") "无法读取历史上限，请重试" else "无法读取配置，请先检查 API 管理")
                     return@finishEditing
                 }
                 activeEdit = FieldEditState(name, start)
@@ -405,6 +410,32 @@ internal class SettingsScreen(
     }
 
     private fun saveText(name: String, draft: String, secret: Boolean, valueView: TextView, error: (String) -> Unit) {
+        if (name == "historyLimit") {
+            val limit = draft.trim().toIntOrNull()
+            if (limit == null || limit < 1) {
+                error("请输入 1～${Int.MAX_VALUE} 的整数")
+                return
+            }
+            val history = HistoryStore(this)
+            val save = {
+                try {
+                    history.setHistoryLimit(limit)
+                    valueView.text = limit.toString()
+                    closeEditor?.invoke()
+                    toast("已保存")
+                } catch (_: Exception) { error("保存失败，请重试") }
+            }
+            try {
+                if (limit < history.historyLimit()) {
+                    val removed = (history.list().count { !it.isFavorite } - limit).coerceAtLeast(0)
+                    MaterialAlertDialogBuilder(this).setTitle("调低普通历史上限？")
+                        .setMessage("将删除 $removed 条最早的普通历史，收藏不受影响。")
+                        .setNegativeButton("继续编辑", null)
+                        .setPositiveButton(if (removed > 0) "删除并保存" else "保存") { _, _ -> save() }.showTracked()
+                } else save()
+            } catch (_: Exception) { error("无法读取历史，未保存") }
+            return
+        }
         if (name == "recordingMaxMinutes") {
             val minutes = draft.trim().toIntOrNull()
             if (minutes == null || minutes !in 0..RecordingLimits.MAX_MINUTES) {
@@ -761,7 +792,7 @@ internal class SettingsScreen(
         dialogs += this
         setOnDismissListener { dialogs.remove(this) }
         show()
-        if (getButton(AlertDialog.BUTTON_POSITIVE)?.text?.toString() in setOf("移除", "删除", "重置", "覆盖", "放弃并返回", "放弃并离开")) {
+        if (getButton(AlertDialog.BUTTON_POSITIVE)?.text?.toString() in setOf("移除", "删除", "删除并保存", "重置", "覆盖", "放弃并返回", "放弃并离开")) {
             getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(dangerColor)
         }
         return this
