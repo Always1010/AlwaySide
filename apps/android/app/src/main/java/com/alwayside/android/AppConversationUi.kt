@@ -3,6 +3,8 @@ package com.alwayside.android
 import android.app.Activity
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
 import android.text.TextUtils
 import android.view.Gravity
@@ -13,7 +15,9 @@ import android.widget.Toast
 import android.widget.ScrollView
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.core.view.GravityCompat
+import androidx.core.view.ViewCompat
 import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import java.text.DateFormat
@@ -90,7 +94,13 @@ internal class HistoryListScreen(
         val label = if (running) "关闭悬浮球" else "打开悬浮球"
         toolbar.menu.findItem(5)?.apply {
             title = label; contentDescription = label; tooltipText = label
-            iconTintList = android.content.res.ColorStateList.valueOf(if (running) ACCENT else MUTED)
+            (actionView as? MaterialButton)?.apply {
+                accessible(label)
+                isSelected = running
+                backgroundTintList = ColorStateList.valueOf(if (running) ACCENT else Color.TRANSPARENT)
+                iconTint = ColorStateList.valueOf(if (running) ON_ACCENT else INK)
+                ViewCompat.setStateDescription(this, if (running) "已开启" else "已关闭")
+            }
         }
     }
 
@@ -192,7 +202,14 @@ internal class HistoryListScreen(
             toolbar.addIconAction(2,android.R.drawable.ic_menu_close_clear_cancel,"取消选择") { back() }
         } else {
             toolbar.addIconAction(3,android.R.drawable.ic_input_add,"新建文字对话") { onOpen(null) }
-            toolbar.addIconAction(5,R.drawable.ic_line_power,"打开悬浮球",onToggleAssistant)
+            toolbar.addIconAction(5,R.drawable.ic_line_power,"打开悬浮球",onToggleAssistant).apply {
+                actionView = activity.iconButton(R.drawable.ic_line_power, "打开悬浮球", onToggleAssistant).apply {
+                    isCheckable = false
+                    cornerRadius = activity.dp(20)
+                    insetTop = activity.dp(4); insetBottom = activity.dp(4)
+                    insetLeft = activity.dp(4); insetRight = activity.dp(4)
+                }
+            }
             updateAssistantAction()
             if (browse.favorites) toolbar.addIconAction(8, R.drawable.ic_line_search, "搜索收藏", ::searchFavorites)
             toolbar.addIconAction(4, R.drawable.ic_line_settings, "设置", onSettings)
