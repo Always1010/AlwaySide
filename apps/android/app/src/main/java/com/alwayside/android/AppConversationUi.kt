@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -22,6 +23,7 @@ import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import java.text.DateFormat
@@ -86,11 +88,27 @@ internal class HistoryListScreen(
             if (actionId == EditorInfo.IME_ACTION_SEARCH) { hideSearchKeyboard(); true } else false
         }
     }
+    private val newConversation = FloatingActionButton(activity).apply {
+        setImageDrawable(activity.prototypeIcon(R.drawable.ic_line_plus))
+        customSize = activity.dp(56)
+        shapeAppearanceModel = shapeAppearanceModel.toBuilder()
+            .setAllCornerSizes(activity.dp(28).toFloat()).build()
+        backgroundTintList = ColorStateList.valueOf(ACCENT)
+        imageTintList = ColorStateList.valueOf(ON_ACCENT)
+        compatElevation = activity.dp(4).toFloat()
+        accessible("新建文字对话")
+        setOnClickListener { onOpen(null) }
+    }
     val selecting: Boolean get() = selection.selecting
     val canGoBack: Boolean get() = selecting || browse.canGoBack || drawerLayout?.isDrawerOpen(GravityCompat.START) == true
 
     fun wrap(content: View): View = DrawerLayout(activity).apply {
-        addView(content, DrawerLayout.LayoutParams(-1, -1))
+        addView(FrameLayout(activity).apply {
+            addView(content, FrameLayout.LayoutParams(-1, -1))
+            addView(newConversation, FrameLayout.LayoutParams(activity.dp(56), activity.dp(56), Gravity.END or Gravity.BOTTOM).apply {
+                marginEnd = activity.dp(28); bottomMargin = activity.dp(88)
+            })
+        }, DrawerLayout.LayoutParams(-1, -1))
         val panel = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND)
             addView(activity.label("AlwaySide", 20f).apply {
@@ -220,6 +238,8 @@ internal class HistoryListScreen(
         val targetY = pendingScrollY ?: scrollView.scrollY
         pendingScrollY = null
         val visible = browse.visible(values)
+        newConversation.visibility = if (selecting) View.GONE else View.VISIBLE
+        rows.setPadding(activity.dp(16), activity.dp(8), activity.dp(16), activity.dp(if (selecting) 24 else 168))
         searchView.visibility = if (selecting) View.GONE else View.VISIBLE
         searchInput.hint = when {
             browse.tag != null -> "搜索“${browse.tag}”标签内的对话"
@@ -261,7 +281,6 @@ internal class HistoryListScreen(
             }
             toolbar.addIconAction(2,android.R.drawable.ic_menu_close_clear_cancel,"取消选择") { back() }
         } else {
-            toolbar.addIconAction(3,android.R.drawable.ic_input_add,"新建文字对话") { onOpen(null) }
             toolbar.addIconAction(5,R.drawable.ic_line_power,"打开悬浮球",onToggleAssistant).apply {
                 actionView = activity.iconButton(R.drawable.ic_line_power, "打开悬浮球", onToggleAssistant).apply {
                     isCheckable = false
@@ -283,7 +302,7 @@ internal class HistoryListScreen(
                 browse.query.isNotBlank() -> "没有找到匹配的对话。"
                 browse.tag != null || browse.untagged -> "这里还没有收藏会话。"
                 browse.favorites -> "还没有收藏。\n在对话中点击五角星即可收藏。"
-                else -> "还没有对话。\n从悬浮球截图、听一段，\n或点击上方加号，开始文字对话。"
+                else -> "还没有对话。\n从悬浮球截图、听一段，\n或点击右下方加号，开始文字对话。"
             }
             rows.addView(activity.label(empty, 12f, true).apply {
                 gravity = Gravity.CENTER; setLineSpacing(activity.dp(5).toFloat(), 1f)
