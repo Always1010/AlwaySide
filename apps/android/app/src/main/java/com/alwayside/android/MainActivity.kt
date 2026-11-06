@@ -287,6 +287,7 @@ class MainActivity : ThemedActivity() {
             root = history.wrap(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; setBackgroundColor(BACKGROUND)
                 addView(history.toolbar)
+                addView(history.searchView)
                 historyPermission = column().apply {
                     addView(label("实际使用悬浮球需要允许悬浮显示；新手引导不需要。", 12f, true))
                     action("准备实际使用", true, ::openPreparation)

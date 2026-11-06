@@ -24,10 +24,16 @@ class HistoryBrowseTest {
         assertEquals(listOf(untagged), browse.visible(all))
     }
 
-    @Test fun searchMatchesFavoriteContentAndTagsAndBackRestoresTheParentCollection() {
+    @Test fun searchRespectsEveryListScopeAndBackRestoresTheParentCollection() {
         val value = record("title", 1, listOf("开发"), "Kotlin cancellation")
         val ordinary = record("ordinary", text = "Kotlin cancellation")
-        val browse = HistoryBrowse().apply { showFavorites("开发"); query = "CANCELLATION" }
+        val browse = HistoryBrowse().apply { query = "CANCELLATION" }
+        assertEquals(listOf(ordinary, value), browse.visible(listOf(ordinary, value)))
+        browse.showFavorites(); browse.query = "CANCELLATION"
+        assertEquals(listOf(value), browse.visible(listOf(ordinary, value)))
+        browse.showFavorites(untagged = true); browse.query = "CANCELLATION"
+        assertTrue(browse.visible(listOf(ordinary, value)).isEmpty())
+        browse.showFavorites("开发"); browse.query = "CANCELLATION"
         assertEquals(listOf(value), browse.visible(listOf(ordinary, value)))
         assertTrue(browse.back()); assertEquals("开发", browse.tag); assertEquals("", browse.query)
         browse.query = "开发"

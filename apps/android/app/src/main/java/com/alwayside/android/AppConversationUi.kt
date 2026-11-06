@@ -6,9 +6,13 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.text.Editable
 import android.text.TextUtils
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -56,6 +60,32 @@ internal class HistoryListScreen(
         isFillViewport = true
         addView(rows)
     }
+    val searchView = TextInputLayout(activity).apply {
+        isHintEnabled = false
+        boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_FILLED
+        boxBackgroundColor = SURFACE
+        boxStrokeWidth = 0; boxStrokeWidthFocused = 0
+        val radius = activity.dp(26).toFloat()
+        setBoxCornerRadii(radius, radius, radius, radius)
+        setStartIconDrawable(R.drawable.ic_line_search)
+        setStartIconTintList(ColorStateList.valueOf(MUTED))
+        endIconMode = TextInputLayout.END_ICON_CLEAR_TEXT
+        setEndIconContentDescription("清空搜索")
+        setEndIconTintList(ColorStateList.valueOf(MUTED))
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(activity.dp(18), activity.dp(8), activity.dp(18), activity.dp(8))
+        }
+    }
+    private val searchInput = TextInputEditText(searchView.context).apply {
+        setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
+        setTextColor(INK); setHintTextColor(MUTED)
+        setSingleLine(); minHeight = activity.dp(52)
+        setPadding(activity.dp(48), activity.dp(12), activity.dp(48), activity.dp(12))
+        imeOptions = EditorInfo.IME_ACTION_SEARCH
+        setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) { hideSearchKeyboard(); true } else false
+        }
+    }
     val selecting: Boolean get() = selection.selecting
     val canGoBack: Boolean get() = selecting || browse.canGoBack || drawerLayout?.isDrawerOpen(GravityCompat.START) == true
 
@@ -84,7 +114,24 @@ internal class HistoryListScreen(
     }
 
     init {
+        searchView.addView(searchInput)
+        searchInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString().orEmpty()
+                if (query == browse.query) return
+                browse.query = query
+                selection.cancel(); pendingScrollY = 0
+                render(); onSelectionChanged()
+            }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
         refresh()
+    }
+
+    private fun hideSearchKeyboard() {
+        activity.getSystemService(InputMethodManager::class.java)
+            .hideSoftInputFromWindow(searchInput.windowToken, 0)
     }
 
     fun selectedIds(): List<String> = selection.snapshot()
@@ -173,6 +220,19 @@ internal class HistoryListScreen(
         val targetY = pendingScrollY ?: scrollView.scrollY
         pendingScrollY = null
         val visible = browse.visible(values)
+        searchView.visibility = if (selecting) View.GONE else View.VISIBLE
+        searchInput.hint = when {
+            browse.tag != null -> "搜索“${browse.tag}”标签内的对话"
+            browse.untagged -> "搜索未标记的收藏"
+            browse.favorites -> "搜索我的收藏"
+            else -> "搜索全部对话"
+        }
+        searchInput.contentDescription = "${searchInput.hint}，标题、正文或标签"
+        if (searchInput.text.toString() != browse.query) {
+            searchInput.setText(browse.query)
+            searchInput.setSelection(searchInput.length())
+        }
+        if (selecting) { searchInput.clearFocus(); hideSearchKeyboard() }
         toolbar.menu.clear();rows.removeAllViews()
         toolbar.title=if(selecting)"已选择 ${selection.snapshot().size} 项" else when {
             browse.tag != null -> browse.tag
@@ -211,20 +271,16 @@ internal class HistoryListScreen(
                 }
             }
             updateAssistantAction()
-            if (browse.favorites) toolbar.addIconAction(8, R.drawable.ic_line_search, "搜索收藏", ::searchFavorites)
             toolbar.addIconAction(4, R.drawable.ic_line_settings, "设置", onSettings)
         }
         if (!selecting && !browse.favorites) onIntro(rows)
-        if (browse.query.isNotBlank()) rows.addView(activity.settingsListRow("搜索：${browse.query}", showArrow = false) {
-            searchFavorites()
-        })
         if (readFailed) {
             rows.addView(activity.label("无法读取会话记录。可以重试，或明确清空损坏的本机记录。", 12f, true))
             rows.action("重试读取") { refresh() }
             rows.action("清空无法读取的记录") { confirmCorruptCleanup() }
         } else if (visible.isEmpty()) {
             val empty = when {
-                browse.query.isNotBlank() -> "没有找到匹配的收藏。"
+                browse.query.isNotBlank() -> "没有找到匹配的对话。"
                 browse.tag != null || browse.untagged -> "这里还没有收藏会话。"
                 browse.favorites -> "还没有收藏。\n在对话中点击五角星即可收藏。"
                 else -> "还没有对话。\n从悬浮球截图、听一段，\n或点击上方加号，开始文字对话。"
@@ -319,6 +375,7 @@ internal class HistoryListScreen(
     }
 
     private fun navigate(favorites: Boolean, tag: String? = null, untagged: Boolean = false) {
+        searchInput.clearFocus(); hideSearchKeyboard()
         selection.cancel()
         if (favorites) browse.showFavorites(tag, untagged) else browse.showAll()
         drawerLayout?.closeDrawer(GravityCompat.START)
@@ -360,19 +417,4 @@ internal class HistoryListScreen(
         }
     }
 
-    private fun searchFavorites() {
-        val layout = TextInputLayout(activity).apply {
-            hint = "标题、正文或标签"; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
-        }
-        val input = TextInputEditText(layout.context).apply { setSingleLine(); setText(browse.query) }
-        layout.addView(input)
-        MaterialAlertDialogBuilder(activity).setTitle("搜索收藏")
-            .setView(activity.column().apply { addView(layout) })
-            .setNegativeButton("取消", null).setNeutralButton("清除") { _, _ ->
-                browse.query = ""; selection.cancel(); pendingScrollY = 0; render(); onSelectionChanged()
-            }.setPositiveButton("搜索") { _, _ ->
-                browse.query = input.text.toString().trim(); selection.cancel(); pendingScrollY = 0
-                render(); onSelectionChanged()
-            }.show()
-    }
 }
