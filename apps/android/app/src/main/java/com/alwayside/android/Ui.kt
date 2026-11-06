@@ -130,23 +130,30 @@ internal fun View.accessible(name:String) {contentDescription=name;tooltipText=n
 /** Shared settings rows: used by the existing Settings page and service settings. */
 internal fun Context.settingsListRow(
     title: String, value: String = "", leading: View? = null, showArrow: Boolean = true,
+    inlineValue: Boolean = false,
     onClick: (() -> Unit)? = null,
 ): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
-        minimumHeight = dp(64); setPadding(dp(16), dp(14), dp(16), dp(14))
+        minimumHeight = dp(54); setPadding(dp(12), dp(10), dp(12), dp(10))
         if (onClick != null) {
             background = touchFeedback(); isClickable = true; isFocusable = true
             setOnClickListener { onClick() }
         }
-        contentDescription = listOf(title, value).filter(String::isNotBlank).joinToString("，")
+        contentDescription = if (inlineValue) null else listOf(title, value).filter(String::isNotBlank).joinToString("，")
         if (leading != null) addView(leading, LinearLayout.LayoutParams(dp(32), dp(32)).apply { rightMargin = dp(8) })
         addView(LinearLayout(this@settingsListRow).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(label(title, 16f))
+            orientation = if (inlineValue) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(label(title, 16f), LinearLayout.LayoutParams(if (inlineValue) 0 else -1, -2, if (inlineValue) 1f else 0f))
             if (value.isNotBlank()) addView(label(value, 14f, true).apply {
-                setPadding(0, dp(4), 0, 0); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
-            })
+                if (inlineValue) {
+                    maxWidth = (resources.displayMetrics.widthPixels * 0.45f).toInt()
+                    gravity = android.view.Gravity.END
+                    setPadding(dp(8), 0, 0, 0)
+                } else setPadding(0, dp(4), 0, 0)
+                maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(if (inlineValue) -2 else -1, -2))
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
         if (onClick != null && showArrow) addView(android.widget.ImageView(this@settingsListRow).apply {
             setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
@@ -156,7 +163,7 @@ internal fun Context.settingsListRow(
     }
 
 internal fun Context.settingsListGroup(content: View) = com.google.android.material.card.MaterialCardView(this).apply {
-    radius = dp(16).toFloat(); cardElevation = 0f; strokeWidth = 0; setCardBackgroundColor(SURFACE)
+    radius = dp(10).toFloat(); cardElevation = 0f; strokeWidth = 0; setCardBackgroundColor(SURFACE)
     addView(content, android.widget.FrameLayout.LayoutParams(-1, -2))
 }
 

@@ -374,7 +374,7 @@ internal class ServiceSettingsUi(
     }
 
     private fun renderApi(c: ServiceCatalog) {
-        section("API 密钥", "添加 API 密钥", help = "先选择服务商，再添加密钥并命名。同一家服务商可以保存多个密钥，每个密钥保存对应地址和接口信息；名称不能重复。列表行尾可编辑或删除 Key。") { openKey(c) }
+        section("API 密钥", "添加 API 密钥", help = "先选择服务商，再添加密钥并命名。同一家服务商可以保存多个密钥，每个密钥保存对应地址和接口信息；名称不能重复。点击条目编辑 Key，行尾可删除。") { openKey(c) }
         c.providers.filter { provider -> c.credentials.any { it.providerId == provider.id } }.forEach { provider ->
             section(provider.name)
             c.credentials.filter { it.providerId == provider.id }.forEach { credential ->
@@ -382,7 +382,7 @@ internal class ServiceSettingsUi(
                     openKey(c, credential)
                 }
                 addRow(managementRow(keyRow, "Key“${credential.name}”",
-                    edit = { openKey(c, credential) }, remove = { deleteKey(c, credential) }))
+                    edit = { openKey(c, credential) }, remove = { deleteKey(c, credential) }, showEdit = false))
             }
         }
         if (c.credentials.isEmpty()) {
@@ -632,11 +632,11 @@ internal class ServiceSettingsUi(
     }
 
     private fun row(title: String, detail: String = "", click: () -> Unit) = addRow(settingsListRow(title, detail, onClick = click))
-    private fun managementRow(content: View, name: String, edit: () -> Unit, remove: () -> Unit) = LinearLayout(this).apply {
+    private fun managementRow(content: View, name: String, edit: () -> Unit, remove: () -> Unit, showEdit: Boolean = true) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
         content.setPadding(content.paddingLeft, content.paddingTop, 0, content.paddingBottom)
         addView(content, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(iconButton(R.drawable.ic_line_edit, "编辑$name", edit))
+        if (showEdit) addView(iconButton(R.drawable.ic_line_edit, "编辑$name", edit))
         addView(iconButton(R.drawable.ic_line_trash, "删除$name", remove).apply {
             iconTint = ColorStateList.valueOf(MUTED)
         }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { rightMargin = dp(8) })

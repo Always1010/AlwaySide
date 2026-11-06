@@ -215,25 +215,13 @@ internal class SettingsScreen(
     }
 
     private fun promptPage(config: AppConfig) {
-        section("回复规则")
         input("instructions", "助手回答方式", "设置语气、格式及希望助手遵循的要求", config.instructions, multiline = true)
-        section("快捷提问")
         input("defaultQuestion", "截图问题", "截图后自动填入的问题", config.defaultQuestion, multiline = true)
         input("textQuestion", "选中文字问题", "选中文字后自动填入的问题", config.textQuestion, multiline = true)
         input("audioQuestion", "音频问题", "用于“原文 + 按音频问题回答”，可要求翻译、总结或提取要点", config.audioQuestion, multiline = true)
-        section("音频处理", "转写提示在音频转写配置中独立保存。此处的默认提示仅用于之后新建的转写配置。\n\n仅转写和翻译不使用「音频问题」；按问题回答时才使用。")
         input("transcriptionPrompt", "新转写配置的默认提示", "示例：专有名词、背景或语言；不修改已有转写配置", config.transcriptionPrompt, multiline = true)
-        lateinit var outputNote: TextView
-        choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions) { value ->
-            outputNote.text = audioOutputDescription(value)
-        }
-        outputNote = note(audioOutputDescription(config.audioOutput))
-    }
-
-    private fun audioOutputDescription(value: String): String = when (value) {
-        "transcript" -> "只转写，不生成回答。"
-        "translate" -> "将转写原文翻译成中文。"
-        else -> "根据转写原文和「音频问题」回答。"
+        choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions,
+            help = "仅原始转写：只转写，不生成回答。\n原文 + 中文翻译：将转写原文翻译成中文。\n原文 + 按音频问题回答：根据转写原文和「音频问题」回答。\n\n转写提示在音频转写配置中独立保存。此处的默认提示仅用于之后新建的转写配置，不修改已有配置。")
     }
 
     private fun showTemplateActions() {
@@ -320,44 +308,38 @@ internal class SettingsScreen(
 
     private fun mediaPage(config: InteractionConfig) {
         section("录音", "时长和上限策略从下次录音生效；0 表示不限时长。\n\n自动处理还需开启菜单中的「使用默认提问方式」；手动结束的行为在「结果窗口」设置。")
-        input("recordingMaxMinutes", "录音时长上限（分钟）", "1～${RecordingLimits.MAX_MINUTES} 分钟；0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
+        input("recordingMaxMinutes", "录音时长上限", "单位：分钟；1～${RecordingLimits.MAX_MINUTES}，0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
         choice("recordingLimitAction", "达到上限后", config.recordingLimitAction.value, RecordingLimitAction.choices,
             optionDescriptions = mapOf(
                 RecordingLimitAction.DISCARD.value to "停止并丢弃，不自动发送。",
                 RecordingLimitAction.PROMPT.value to "停止并等待确认；停止助手或应用退出后丢失。",
                 RecordingLimitAction.PROCESS.value to "停止后按音频默认输出处理，可能产生费用。",
             ))
-        section("历史截图", "保存首张原图和当前追问图片，可从历史查看并继续使用。\n\n仅影响之后保存的截图，不补存旧图。图片存于本机，删除会话时一并删除。")
-        check("saveHistoryImages", "随历史长期保留截图", config.saveHistoryImages)
-        section("历史音频", "完成录音后存于本机，可从历史回听。取消或丢弃的不保存，待确认录音需确认后保存。\n\n仅影响之后完成的录音，不补存旧音频；关闭不删除旧音频。\n\n删除会话时一并删除音频，总容量上限 512 MiB。")
-        check("saveHistoryAudio", "随历史长期保留音频", config.saveHistoryAudio)
-        section("对话记录", "普通历史默认保留 500 条，超出上限时删除最早的普通历史及其媒体。收藏不计入上限，不会因上限被删除。调低上限时会先显示将删除的条数，确认后生效。\n\n问题、回答与转写随会话保存。追问保存在原会话内，复用转写文字，不重复上传音频。未发送、取消或失败的会话也可从主页找到。")
+        section("历史记录", "普通历史默认保留 500 条，超出上限时删除最早的普通历史及其媒体。收藏不计入上限，不会因上限被删除。调低上限时会先显示将删除的条数，确认后生效。\n\n问题、回答与转写随会话保存。追问保存在原会话内，复用转写文字，不重复上传音频。未发送、取消或失败的会话也可从主页找到。")
+        check("saveHistoryImages", "长期保留截图", config.saveHistoryImages,
+            help = "保存首张原图和当前追问图片，可从历史查看并继续使用。\n\n仅影响之后保存的截图，不补存旧图。图片存于本机，删除会话时一并删除。")
+        check("saveHistoryAudio", "长期保留音频", config.saveHistoryAudio,
+            help = "完成录音后存于本机，可从历史回听。取消或丢弃的不保存，待确认录音需确认后保存。\n\n仅影响之后完成的录音，不补存旧音频；关闭不删除旧音频。\n\n删除会话时一并删除音频，总容量上限 512 MiB。")
         try {
-            input("historyLimit", "普通历史上限（条）", "请输入大于 0 的整数", HistoryStore(this).historyLimit().toString(), numeric = true)
+            input("historyLimit", "普通历史上限", "单位：条；请输入大于 0 的整数", HistoryStore(this).historyLimit().toString(), numeric = true)
         } catch (_: Exception) { note("无法读取历史上限，请重新打开此页。") }
     }
 
     private fun input(name: String, title: String, hintValue: String, initial: String = "", multiline: Boolean = false,
                       secret: Boolean = false, numeric: Boolean = false, decimal: Boolean = false) {
         val content = column().apply {
-            setPadding(dp(16), dp(8), dp(8), dp(16))
-            background = touchFeedback()
+            setPadding(0, 0, 0, 0)
             isClickable = true; isFocusable = true
         }
-        val valueView = label(if (secret) credentialStatus() else initial.ifBlank { "未设置" }).apply {
+        val valueView = label(if (secret) credentialStatus() else inputDisplay(name, initial)).apply {
             setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
             setTextColor(INK)
-            maxLines = if (multiline) 3 else 2
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
             setLineSpacing(dp(3).toFloat(), 1f)
         }
         valueViews[name] = valueView
         if (secret) credentialState = valueView
-        val header = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(44)
-            addView(label(title, 16f), LinearLayout.LayoutParams(0, -2, 1f))
-        }
         val open = {
             finishEditing {
                 val start = try {
@@ -389,14 +371,33 @@ internal class SettingsScreen(
                 panel.show()
             }
         }
-        content.addView(header, LinearLayout.LayoutParams(-1, -2))
-        content.addView(valueView, LinearLayout.LayoutParams(-1, -2).apply { rightMargin = dp(8); topMargin = dp(2) })
-        content.contentDescription = "编辑$title"
+        content.contentDescription = "编辑$title，${valueView.text}"
         content.setOnClickListener { open() }
-        // Every long field gets its own full-width card, preserving readable previews.
-        if (multiline) group = null
-        addRow(content)
-        if (multiline) group = null
+        if (multiline) {
+            group = null
+            content.addView(label(title, 13f, true).apply { textSize = 13f }, LinearLayout.LayoutParams(-1, -2))
+            valueView.apply {
+                background = outlinedCard(SURFACE, 8)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                minimumHeight = dp(48)
+            }
+            content.addView(valueView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+            body.addView(content, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+        } else {
+            val row = settingsListRow(title, inlineValue = true, showArrow = false, onClick = open)
+            val text = row.getChildAt(0) as LinearLayout
+            text.addView(valueView.apply {
+                textSize = 14f; setTextColor(MUTED); gravity = Gravity.END
+                maxWidth = (resources.displayMetrics.widthPixels * 0.4f).toInt()
+            }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+            addRow(row)
+        }
+    }
+
+    private fun inputDisplay(name: String, value: String): String = when (name) {
+        "recordingMaxMinutes" -> if (value == "0") "不限时长" else "$value 分钟"
+        "historyLimit" -> "$value 条"
+        else -> value.ifBlank { "未设置" }
     }
 
     private fun saveText(name: String, draft: String, secret: Boolean, valueView: TextView, error: (String) -> Unit) {
@@ -410,7 +411,7 @@ internal class SettingsScreen(
             val save = {
                 try {
                     history.setHistoryLimit(limit)
-                    valueView.text = limit.toString()
+                    valueView.text = inputDisplay(name, limit.toString())
                     closeEditor?.invoke()
                     toast("已保存")
                 } catch (_: Exception) { error("保存失败，请重试") }
@@ -433,7 +434,7 @@ internal class SettingsScreen(
                 return
             }
             if (persistInteraction { it.copy(recordingMaxMinutes = minutes) }) {
-                valueView.text = minutes.toString()
+                valueView.text = inputDisplay(name, minutes.toString())
                 closeEditor?.invoke()
             } else error("保存失败，请重试")
             return
@@ -469,11 +470,12 @@ internal class SettingsScreen(
 
     private fun credentialStatus() = if (savedCredential) "已保存" else "未设置"
 
-    private fun check(name: String, title: String, initial: Boolean) {
+    private fun check(name: String, title: String, initial: Boolean, help: String? = null) {
         val row = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(58); setPadding(dp(16), dp(5), dp(12), dp(5))
+            gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(54); setPadding(dp(12), dp(3), dp(12), dp(3))
         }
         row.addView(label(title, 16f), LinearLayout.LayoutParams(0, -2, 1f))
+        if (help != null) row.addView(settingsHelp(title, help))
         var restoring = false
         row.addView(MaterialSwitch(this).apply {
             isSaveEnabled = false; isChecked = initial; contentDescription = title
@@ -504,22 +506,12 @@ internal class SettingsScreen(
     }
 
     private fun choice(name: String, title: String, initial: String, options: Map<String, String>,
-                       optionDescriptions: Map<String, String> = emptyMap(), onSelected: ((String) -> Unit)? = null) {
+                       optionDescriptions: Map<String, String> = emptyMap(), help: String? = null,
+                       onSelected: ((String) -> Unit)? = null) {
         selections[name] = initial
-        val row = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(58); setPadding(dp(16), dp(10), dp(16), dp(10))
-            background = touchFeedback(); isClickable = true; isFocusable = true
-        }
-        row.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(label(title, 16f))
-            addView(label(options[initial] ?: initial, 14f, true).apply { tag = name; setPadding(0, dp(4), 0, 0) })
-        }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(12) })
-        row.addView(android.widget.ImageView(this).apply {
-            setImageDrawable(prototypeIcon(android.R.drawable.ic_media_next))
-            imageTintList = ColorStateList.valueOf(MUTED)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(16), dp(16)).apply { leftMargin = dp(8) })
+        val row = settingsListRow(title, options[initial] ?: initial, showArrow = help == null, inlineValue = true) {}
+        val valueView = ((row.getChildAt(0) as LinearLayout).getChildAt(1) as TextView)
+        if (help != null) row.addView(settingsHelp(title, help))
         row.setOnClickListener { finishEditing {
             val keys = options.keys.toList()
             val labels = keys.map { key ->
@@ -528,7 +520,7 @@ internal class SettingsScreen(
             MaterialAlertDialogBuilder(this).setTitle(title).setSingleChoiceItems(labels.toTypedArray(), keys.indexOf(selections[name])) { dialog, index ->
                 if (persistChoice(name, keys[index])) {
                     selections[name] = keys[index]
-                    row.findViewWithTag<TextView>(name).text = options[keys[index]]
+                    valueView.text = options[keys[index]]
                     onSelected?.invoke(keys[index])
                     dialog.dismiss()
                 }
@@ -739,14 +731,14 @@ internal class SettingsScreen(
                 .setPositiveButton("知道了", null).showTracked()
         })
         body.addView(heading, LinearLayout.LayoutParams(-1, -2).apply {
-            topMargin = if (body.childCount <= 1) dp(4) else dp(16)
-            bottomMargin = dp(8)
+            topMargin = if (body.childCount <= 1) 0 else dp(12)
+            bottomMargin = dp(4)
         })
     }
 
     private fun addRow(view: View) {
         val container = group ?: column().apply { setPadding(0, 0, 0, 0) }.also { content ->
-            body.addView(settingsListGroup(content), LinearLayout.LayoutParams(-1, -2).apply { if (body.childCount > 1) topMargin = dp(8) })
+            body.addView(settingsListGroup(content), LinearLayout.LayoutParams(-1, -2))
             group = content
         }
         if (container.childCount > 0) container.addView(divider().apply {
@@ -754,6 +746,11 @@ internal class SettingsScreen(
         })
         container.addView(view, LinearLayout.LayoutParams(-1, -2))
     }
+
+    private fun settingsHelp(title: String, help: String) = iconButton(R.drawable.ic_line_info, "查看${title}说明") {
+        MaterialAlertDialogBuilder(this).setTitle(title).setMessage(help)
+            .setPositiveButton("知道了", null).showTracked()
+    }.apply { iconTint = ColorStateList.valueOf(MUTED) }
 
     private fun note(text: String): TextView {
         val currentGroup = group
