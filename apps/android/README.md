@@ -24,21 +24,46 @@
 
 macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。
 
-## 一键打包并上传网盘（Windows）
+## 一键打包并交付
 
-在仓库根目录运行，只需传入版本号：
+在仓库根目录运行，传入版本号。Linux / macOS：
 
-```powershell
-.\package-apk.bat 1.1.2
+```sh
+./package-apk.sh 1.4.1
 ```
 
-脚本自动计算与 GitHub Release 相同的 `versionCode`，离线构建 Release APK，使用正式发布证书和原签名轮换链签名，然后上传到本地配置指定的网盘目录。产物名称包含版本号和时间，运行成功后打印完整网盘路径；本地 APK 与签名、交付记录保存在被 Git 忽略的 `.local/android-build/`。
+Windows：
 
-入口优先调用被 Git 忽略的 `.local/android/package-release-upload.py`，由该本地脚本设置 `JAVA_HOME` 和 `ALWAYSIDE_APK_SHARE`，再调用仓库中的 `tools/package_apk.py`。没有本地调用脚本时，也可先在当前进程环境中设置这两个变量再运行入口；真实路径和网盘地址只保存在本地，不写入项目文件。
+```powershell
+.\package-apk.bat 1.4.1
+```
 
-构建复用已有 Python、`.local/android-sdk/` 和 `.local/gradle-cache/`；正式签名文件使用 `.local/release-signing/` 下的 `alwayside-production.p12`、`production-credentials.json` 和 `alwayside.lineage`。这些工具、缓存和签名材料需要事先存在，脚本不安装依赖或修改系统环境配置，密钥与密码不进入版本控制或网盘。
+两个入口都优先调用被 Git 忽略的 `.local/android/package-release-upload.py`。本地调用脚本负责配置当前进程环境，再调用通用的 `tools/package_apk.py`；未提供本地调用脚本时，入口直接使用环境变量或命令参数。真实路径、共享地址和签名身份只能保存在本地，不得写入受跟踪文件。
 
-打包流程只额外检查正式证书和 V3 签名，避免误发测试签名包；不额外运行单元测试或完整 Lint，Release 构建本身保留 Gradle 默认的 `lintVitalRelease`。构建或签名失败即停止，不上传旧包。
+| 配置 | 环境变量或命令参数 |
+| --- | --- |
+| 已有 JDK | `JAVA_HOME` / `--java-home`，未指定时从 PATH 查找 Java |
+| 已有 Android SDK | `ANDROID_HOME` / `ANDROID_SDK_ROOT` / `--sdk` |
+| 交付目录 | `ALWAYSIDE_APK_SHARE` / `--dest`，必须显式配置 |
+| 正式密钥文件 | `ANDROID_KEYSTORE_PATH` / `--keystore` |
+| 签名轮换链 | `ANDROID_SIGNING_LINEAGE_PATH` / `--lineage` |
+| 预期证书 SHA-256 | `ALWAYSIDE_RELEASE_CERTIFICATE_SHA256` / `--certificate-sha256` |
+| 可选的本地凭据 JSON | `ALWAYSIDE_SIGNING_CREDENTIALS` / `--credentials` |
+| 构建缓存 | `GRADLE_USER_HOME` / `--gradle-user-home` |
+
+签名密码与别名使用 `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`；也可由本地凭据 JSON 提供同名字段，环境变量优先。密钥和凭据不进入版本控制或交付目录。
+
+需要已有 Python 3.10+、JDK 17 或以上，以及适合宿主系统与 CPU 架构的 SDK 原生工具。SDK、交付位置、密钥、轮换链和预期证书均无私人环境默认值；缺少配置时立即报错。可用 `--aapt2` 指定已有原生 AAPT2，脚本会将其传给 Gradle。脚本不安装工具或修改系统环境配置。
+
+只检查现有配置和工具：
+
+```sh
+./package-apk.sh 1.4.1 --check
+```
+
+脚本计算与 GitHub Release 相同的 `versionCode`，默认离线构建 Release APK，附带原签名轮换链，并校验正式证书、V3 签名、包名和版本。只有校验通过后才复制到配置的交付目录，并核对 SHA-256；失败即停止，不交付旧包或覆盖同名文件。本地产物及交付记录保存在被忽略的 `.local/android-build/`。
+
+默认缓存位于被忽略的 `.local/gradle-cache/`；离线模式要求 Wrapper 发行包及依赖缓存完整。准备好联网获取工程依赖时，可显式添加 `--online`。打包不额外运行单元测试或完整 Lint，Release 构建保留 Gradle 默认的 `lintVitalRelease`。其他参数见 `./package-apk.sh --help`。
 
 ## GitHub Release 自动发包
 
@@ -68,7 +93,7 @@ macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/ap
 在 PowerShell 中可用以下命令将现有 keystore 转成 Base64 并复制到剪贴板，将路径替换成自己的文件位置：
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes('D:\path\release.jks')) | Set-Clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path 'release.jks').Path)) | Set-Clipboard
 ```
 
 创建 Release 使用工作流自带的 `GITHUB_TOKEN` 和 `contents: write` 权限，无需额外配置个人访问令牌；仓库或组织策略需要允许该权限。
