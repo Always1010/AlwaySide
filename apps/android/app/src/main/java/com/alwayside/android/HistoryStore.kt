@@ -61,20 +61,20 @@ private class AndroidHistoryFiles(private val root: File) : HistoryFileAccess {
         return AtomicFile(if (name == HistoryFiles.LEGACY) File(root, "conversations.json") else File(directory, name))
     }
 
-    override fun read(name: String, maxBytes: Int): ByteArray? {
+    override fun read(name: String, maxBytes: Int?): ByteArray? {
         val file = target(name)
         val input = try { file.openRead() } catch (error: FileNotFoundException) {
             if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()) throw error
             return null
         }
         return input.use {
-            check(it.channel.size() <= maxBytes) { "历史文件超过大小上限" }
+            check(maxBytes == null || it.channel.size() <= maxBytes) { "历史文件超过大小上限" }
             val result = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
             while (true) {
                 val count = it.read(buffer)
                 if (count < 0) break
-                check(result.size().toLong() + count <= maxBytes) { "历史文件超过大小上限" }
+                check(maxBytes == null || result.size().toLong() + count <= maxBytes) { "历史文件超过大小上限" }
                 result.write(buffer, 0, count)
             }
             result.toByteArray()

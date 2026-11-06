@@ -15,9 +15,9 @@ class HistoryFilesTest {
         var reads = 0
         var rejectWrite: (String) -> Boolean = { false }
         var rejectDelete: (String) -> Boolean = { false }
-        override fun read(name: String, maxBytes: Int): ByteArray? {
+        override fun read(name: String, maxBytes: Int?): ByteArray? {
             reads++
-            return values[name]?.also { check(it.size <= maxBytes) { "Too large" } }
+            return values[name]?.also { check(maxBytes == null || it.size <= maxBytes) { "Too large" } }
         }
         override fun write(name: String, bytes: ByteArray) {
             if (rejectWrite(name)) throw IOException("disk full")
@@ -112,7 +112,7 @@ class HistoryFilesTest {
         assertArrayEquals(committedManifest, disk.values[HistoryFiles.MANIFEST])
     }
 
-    @Test fun aggregateBeyondThirtyTwoMiBDoesNotEvictFavoritesOrOrdinaryRecordsAndOversizeRecordFails() {
+    @Test fun recordsBeyondThirtyTwoMiBRemainCompleteWithoutEvictingOtherConversations() {
         val disk = Disk()
         var recordBytes = 17 * 1024 * 1024
         val files = HistoryFiles(disk, { map ->
@@ -122,13 +122,14 @@ class HistoryFilesTest {
         val empty = files.load()
         val next = HistoryState(listOf(value("favorite", 1).copy(favoriteAt = 1), value("ordinary", 2)))
         files.commit(empty, next)
-        assertTrue(disk.records().sumOf { disk.values.getValue(it).size.toLong() } > HistoryArchive.MAX_RECORD_BYTES)
+        assertTrue(disk.records().sumOf { disk.values.getValue(it).size.toLong() } > 32 * 1024 * 1024)
         assertEquals(next.conversations.sortedByDescending { it.updatedAt }, files.load().conversations)
-        recordBytes = HistoryArchive.MAX_RECORD_BYTES + 1
-        assertThrows(IllegalStateException::class.java) {
-            files.commit(next, next.copy(conversations = next.conversations + value("too-large", 3)))
-        }
-        assertEquals(2, repository(disk).load().conversations.size)
+        recordBytes = 32 * 1024 * 1024 + 1
+        val longConversation = value("long", 3).copy(messages = List(302) { ChatMessage("assistant", "消息 $it") })
+        files.commit(next, next.copy(conversations = next.conversations + longConversation))
+        val reloaded = repository(disk).load()
+        assertEquals(3, reloaded.conversations.size)
+        assertEquals(longConversation, reloaded.conversations.first())
     }
 
     @Test fun repeatedReadsUseCommittedSnapshotAndFailedWritesCannotReplaceIt() {

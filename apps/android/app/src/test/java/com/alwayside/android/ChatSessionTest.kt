@@ -565,6 +565,21 @@ class ChatSessionTest {
         }
     }
 
+    @Test fun longConversationKeepsEveryMessageWhileModelContextRemainsBounded() {
+        val h = Harness()
+        repeat(61) { index ->
+            h.session.submit(h.config, "question $index", null, "text")
+            h.worker.runNext(); h.drainMain()
+        }
+        assertEquals(122, h.session.messages.size)
+        assertEquals("question 0", h.session.messages.first().text)
+        assertEquals(h.session.messages, h.saved.single().messages)
+        assertEquals(24, h.gateway.calls.last().history.size)
+        assertEquals("question 48", h.gateway.calls.last().history.first().text)
+        h.session.newConversation(h.saved.single())
+        assertEquals(122, h.session.messages.size)
+    }
+
     private class Harness {
         val config = AppConfig(apiKey = "fixture-key")
         val gateway = FakeGateway()

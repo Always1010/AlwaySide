@@ -4,7 +4,7 @@ import java.util.UUID
 
 /** Each write is atomic. Immutable records become visible together at the manifest commit. */
 internal interface HistoryFileAccess {
-    fun read(name: String, maxBytes: Int): ByteArray?
+    fun read(name: String, maxBytes: Int? = null): ByteArray?
     fun write(name: String, bytes: ByteArray)
     fun delete(name: String)
     fun records(): List<String>
@@ -20,9 +20,9 @@ internal class HistoryFiles(
 
     fun load(): HistoryState {
         loaded?.let { return it }
-        val manifest = files.read(MANIFEST, HistoryArchive.MAX_FILE_BYTES)
+        val manifest = files.read(MANIFEST, HistoryArchive.MAX_INDEX_BYTES)
         if (manifest == null) {
-            val legacy = files.read(LEGACY, HistoryArchive.MAX_FILE_BYTES)
+            val legacy = files.read(LEGACY)
             val values = legacy?.let { HistoryArchive.decode(decode(it)) }.orEmpty().map {
                 it.copy(historyEnteredAt = it.historyEnteredAt.takeIf { time -> time > 0 } ?: it.updatedAt.coerceAtLeast(0))
             }
@@ -49,7 +49,7 @@ internal class HistoryFiles(
             val name = entry["file"] as? String ?: error("会话文件名错误")
             check(RECORD_NAME.matches(name)) { "会话文件名错误" }
             check(nextReferences.put(id, name) == null) { "会话编号重复" }
-            val bytes = files.read(name, HistoryArchive.MAX_RECORD_BYTES) ?: error("会话文件缺失，未修改历史记录")
+            val bytes = files.read(name) ?: error("会话文件缺失，未修改历史记录")
             HistoryArchive.decodeRecord(decode(bytes)).also {
                 check(it.id == id && it.tags.all { tag -> tag in tags }) { "会话索引不一致" }
             }
@@ -72,7 +72,6 @@ internal class HistoryFiles(
             val existing = references[value.id]
             val name = if (existing != null && old[value.id] == value) existing else {
                 val bytes = encode(HistoryArchive.record(value))
-                check(bytes.size <= HistoryArchive.MAX_RECORD_BYTES) { "完整会话超过 32 MiB，未保存" }
                 val fresh = UUID.randomUUID().toString() + ".json"
                 files.write(fresh, bytes)
                 fresh
@@ -81,7 +80,7 @@ internal class HistoryFiles(
         }
         val manifest = encode(linkedMapOf("version" to 2, "historyLimit" to next.historyLimit,
             "tags" to next.tags, "records" to nextReferences.map { (id, file) -> mapOf("id" to id, "file" to file) }))
-        check(manifest.size <= HistoryArchive.MAX_FILE_BYTES) { "历史索引过大，未保存" }
+        check(manifest.size <= HistoryArchive.MAX_INDEX_BYTES) { "历史索引过大，未保存" }
         files.write(MANIFEST, manifest)
         references = nextReferences
         loaded = snapshot(next)
@@ -95,7 +94,7 @@ internal class HistoryFiles(
     /** Explicit recovery must work even when the manifest, legacy archive, or a record is corrupt. */
     fun clear(onCommitted: () -> Unit = {}) {
         val current = loaded ?: runCatching {
-            files.read(MANIFEST, HistoryArchive.MAX_FILE_BYTES)?.let(decode)
+            files.read(MANIFEST, HistoryArchive.MAX_INDEX_BYTES)?.let(decode)
         }.getOrNull()?.let { root ->
             val limit = runCatching {
                 (root["historyLimit"] as? Number)?.toLong()?.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt()

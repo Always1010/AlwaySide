@@ -148,7 +148,6 @@ internal class ChatSession(
                     if (answerTitle.isBlank()) answerTitle = ConversationTitle.fromAnswer(answer)
                     messages.add(ChatMessage("user", request.question, request.evidence))
                     messages.add(ChatMessage("assistant", answer, searchSuggestions = suggestions))
-                    while (messages.size > 40) { messages.removeAt(0); messages.removeAt(0) }
                     transcript = words; partial = ""; question = ""; phase = ChatRequestPhase.COMPLETED; notice = null; retry = null; cancellation = null
                     status = if (messages.size >= 24) "已完成 · 后续追问最多参考最近 24 条文字消息" else "已完成"
                     archive()

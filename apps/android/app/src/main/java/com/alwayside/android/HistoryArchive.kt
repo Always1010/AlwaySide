@@ -1,11 +1,9 @@
 package com.alwayside.android
 
-/** Legacy archive reader and complete, independently bounded conversation records. */
+/** Legacy archive reader and complete conversation records. */
 internal object HistoryArchive {
     const val DEFAULT_HISTORY_LIMIT = 500
-    const val MAX_MESSAGES = 100
-    const val MAX_RECORD_BYTES = 32 * 1024 * 1024
-    const val MAX_FILE_BYTES = MAX_RECORD_BYTES // Version-one archive migration only.
+    const val MAX_INDEX_BYTES = 32 * 1024 * 1024
 
     fun record(value: StoredConversation): Map<String, Any?> {
         validate(value)
@@ -32,7 +30,6 @@ internal object HistoryArchive {
     fun decodeRecord(entry: Map<*, *>): StoredConversation {
         fun required(name: String) = entry[name] as? String ?: error("会话字段错误：$name")
         val rawMessages = entry["messages"] as? List<*> ?: error("会话消息格式错误")
-        check(rawMessages.size <= MAX_MESSAGES) { "会话消息超过上限" }
         val messages = rawMessages.map { item ->
             val message = item as? Map<*, *> ?: error("会话消息格式错误")
             ChatMessage(message["role"] as? String ?: error("会话角色错误"),
@@ -55,7 +52,6 @@ internal object HistoryArchive {
 
     fun validate(value: StoredConversation) {
         require(value.id.isNotBlank() && value.id.length <= 128) { "会话编号无效" }
-        require(value.messages.size <= MAX_MESSAGES) { "会话消息超过上限" }
         require(value.messages.all { it.role in setOf("user", "assistant", "system") }) { "会话角色无效" }
         require(value.kind in setOf("photo", "audio", "text")) { "会话类型无效" }
         require(value.favoriteAt >= 0 && value.historyEnteredAt >= 0) { "会话时间无效" }

@@ -33,9 +33,9 @@ class HistoryArchiveTest {
 
     @Test fun invalidStructureIsRejectedInsteadOfSilentlyDroppingMessages() {
         val valid = conversation("valid", 1)
-        val maximum = valid.copy(messages = List(100) { ChatMessage("assistant", "短消息") })
+        val maximum = valid.copy(messages = List(301) { ChatMessage("assistant", "短消息") })
         assertEquals(maximum, HistoryArchive.decodeRecord(HistoryArchive.record(maximum)))
-        val invalid = listOf(valid.copy(messages = List(101) { ChatMessage("assistant", "短消息") }),
+        val invalid = listOf(
             valid.copy(id = ""), valid.copy(id = "x".repeat(129)),
             valid.copy(messages = listOf(ChatMessage("tool", "未支持角色"))), valid.copy(kind = "unknown"),
             valid.copy(tags = listOf("重复", "重复")), valid.copy(favoriteAt = -1))
@@ -44,7 +44,6 @@ class HistoryArchiveTest {
         }
         val base = HistoryArchive.record(valid)
         val invalidRecords = listOf(
-            base + ("messages" to List(101) { mapOf("role" to "assistant", "text" to "短消息") }),
             base + ("id" to ""), base + ("messages" to listOf(mapOf("role" to "tool", "text" to "正文"))),
             base + ("kind" to "unknown"), base + ("tags" to listOf(3)),
         )
