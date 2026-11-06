@@ -63,12 +63,6 @@ internal class HistoryListScreen(
                 setPadding(activity.dp(28), activity.dp(30), activity.dp(24), activity.dp(24))
             })
             addView(ScrollView(activity).apply { addView(drawerRows) }, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(activity.settingsListRow("设置", leading = ImageView(activity).apply {
-                setImageDrawable(activity.prototypeIcon(R.drawable.ic_line_settings))
-                imageTintList = android.content.res.ColorStateList.valueOf(MUTED)
-            }, showArrow = false) {
-                closeDrawer(GravityCompat.START); onSettings()
-            })
         }
         addView(panel, DrawerLayout.LayoutParams(minOf(activity.dp(320), (activity.resources.displayMetrics.widthPixels * .86f).toInt()), -1, GravityCompat.START))
         setDrawerTitle(GravityCompat.START, "对话与收藏")
@@ -201,6 +195,7 @@ internal class HistoryListScreen(
             toolbar.addIconAction(5,R.drawable.ic_line_power,"打开悬浮球",onToggleAssistant)
             updateAssistantAction()
             if (browse.favorites) toolbar.addIconAction(8, R.drawable.ic_line_search, "搜索收藏", ::searchFavorites)
+            toolbar.addIconAction(4, R.drawable.ic_line_settings, "设置", onSettings)
         }
         if (!selecting && !browse.favorites) onIntro(rows)
         if (browse.query.isNotBlank()) rows.addView(activity.settingsListRow("搜索：${browse.query}", showArrow = false) {
