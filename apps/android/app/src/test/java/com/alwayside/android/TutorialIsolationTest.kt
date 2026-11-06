@@ -29,6 +29,7 @@ class TutorialIsolationTest {
         assertTrue(files.containsKey("AssistantBubbleView.class"))
         assertTrue(files.containsKey("LongPressSlideTutorial.class"))
         assertTrue(files.containsKey("BubbleTouchController.class"))
+        assertTrue(files.containsKey("BubbleHaptics.class"))
         for ((file, bytes) in files) {
             DataInputStream(bytes.inputStream()).use { input ->
                 assertEquals(0xCAFEBABE.toInt(), input.readInt())
@@ -57,13 +58,17 @@ class TutorialIsolationTest {
                 }
                 for (reference in classes.mapNotNull { strings[it] }) {
                     val type = reference.trimStart('[').removePrefix("L").removeSuffix(";")
-                    val allowed = type.length == 1 || type in resourceClasses || type == inMemoryAppearance || allowedPrefixes.any(type::startsWith)
+                    val hapticType = file.startsWith("BubbleHaptics") && type in hapticTypes
+                    val allowed = type.length == 1 || type in resourceClasses || type == inMemoryAppearance ||
+                        allowedPrefixes.any(type::startsWith) || hapticType
                     assertTrue("$file depends on forbidden capability $type", allowed)
                 }
                 for ((ownerIndex, methodIndex) in methods) {
                     val name = names[methodIndex]?.let { strings[it] } ?: continue
-                    assertFalse("$file calls forbidden side effect $name", name in forbiddenMethods)
                     val owner = classNames[ownerIndex]?.let { strings[it] }
+                    val hapticRead = file == "BubbleHaptics.class" && owner == "android/content/Context" &&
+                        name in setOf("getSystemService", "getContentResolver")
+                    assertFalse("$file calls forbidden side effect $name", name in forbiddenMethods && !hapticRead)
                     if (owner == inMemoryAppearance) {
                         // Shared presentation may read the selected theme already in memory,
                         // but cannot call mode(), save() or any preference/context accessor.
@@ -78,7 +83,7 @@ class TutorialIsolationTest {
         private val resourceClasses=setOf("com/alwayside/android/R","androidx/appcompat/R","android/R")
         private const val inMemoryAppearance = "com/alwayside/android/AppAppearance"
         private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction","AssistantBubbleView","AssistantPresentationKt","TapSequence",
-            "BubbleTouchController","BubbleGestureHintsView","BubbleGestureStateMachine","LongPressSlideTutorial","LongPressSlideLesson")
+            "BubbleTouchController","BubbleGestureHintsView","BubbleGestureStateMachine","LongPressSlideTutorial","LongPressSlideLesson","BubbleHaptics")
         private fun audited(name: String)=name.startsWith("Tutorial") || sharedClasses.any { name=="$it.class" || name.startsWith("$it$") }
         private val allowedPrefixes = listOf(
             "com/alwayside/android/Tutorial", "com/alwayside/android/UiKt", "com/alwayside/android/PrototypeIconsKt",
@@ -95,6 +100,14 @@ class TutorialIsolationTest {
             "startActivity", "startActivityForResult", "startService", "startForegroundService", "bindService",
             "sendBroadcast", "getSharedPreferences", "getSystemService", "getContentResolver", "requestPermissions",
             "openFileInput", "openFileOutput", "forName", "getDeclaredMethod", "loadClass",
+        )
+        // Only the audited haptic adapter may inspect touch preferences and request a touch effect.
+        private val hapticTypes = setOf(
+            "android/os/Build", "android/os/Build\$VERSION", "android/content/ContentResolver",
+            "android/provider/Settings", "android/provider/Settings\$System",
+            "android/os/VibrationAttributes", "android/os/VibrationAttributes\$Builder", "android/os/VibrationEffect",
+            "android/os/Vibrator", "android/os/VibratorManager",
+            "android/media/AudioAttributes", "android/media/AudioAttributes\$Builder",
         )
     }
 }

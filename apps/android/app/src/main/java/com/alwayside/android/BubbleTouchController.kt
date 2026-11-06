@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -22,6 +21,7 @@ internal class BubbleTouchController(
     private val onArmedChanged: (Boolean) -> Unit = {},
     private val onPreview: (dx: Float, dy: Float) -> Unit = { _, _ -> },
     private val onCancel: () -> Unit = {},
+    private val hapticFeedback: () -> Unit = { BubbleHaptics.longPress(view) },
 ) : View.OnTouchListener, View.OnAttachStateChangeListener {
     private val handler = Handler(Looper.getMainLooper())
     private var machine: BubbleGestureStateMachine? = null
@@ -152,11 +152,9 @@ internal class BubbleTouchController(
 
     private fun notifyReachedArm(state: BubbleGestureStateMachine,
         previous: BubbleGestureStateMachine.Phase, now: Long) {
-        if (!hapticSent && state.slideEnabled && previous == BubbleGestureStateMachine.Phase.PRESSING &&
-            now >= state.armedAt && state.phase != BubbleGestureStateMachine.Phase.MOVING) {
+        if (BubbleHaptics.reachedHold(state, previous, now, hapticSent)) {
             hapticSent = true
-            // No ignore-setting flags: Android honors the user's haptic preference.
-            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            hapticFeedback()
         }
     }
 
