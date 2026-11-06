@@ -1,5 +1,6 @@
 package com.alwayside.android
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Resources
@@ -10,6 +11,7 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
+import androidx.appcompat.view.menu.MenuBuilder
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.textview.MaterialTextView
@@ -124,6 +126,12 @@ internal fun MaterialToolbar.addIconAction(id:Int,iconRes:Int,label:String,onCli
     contentDescription=label;tooltipText=label
     setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
     setOnMenuItemClickListener{onClick();true}
+}
+/** AppCompat overflow rows hide icons unless their menu explicitly opts in. */
+@SuppressLint("RestrictedApi")
+internal fun MaterialToolbar.addOverflowIconAction(id:Int,iconRes:Int,label:String,onClick:()->Unit):MenuItem {
+    (menu as MenuBuilder).setOptionalIconsVisible(true)
+    return addIconAction(id,iconRes,label,onClick).apply { setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER) }
 }
 internal fun View.accessible(name:String) {contentDescription=name;tooltipText=name}
 
