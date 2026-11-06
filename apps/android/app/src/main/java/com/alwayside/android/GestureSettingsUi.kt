@@ -3,12 +3,9 @@ package com.alwayside.android
 import android.content.Context
 import android.view.Gravity
 import android.view.View
-import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 
@@ -20,6 +17,7 @@ internal class GestureSettingsUi(
     private val load: () -> InteractionConfig,
     private val save: ((InteractionConfig) -> InteractionConfig) -> Boolean,
     private val showDialog: (MaterialAlertDialogBuilder) -> AlertDialog,
+    private val showChoiceSheet: (SettingsChoiceSheet) -> Unit,
     private val onTutorial: () -> Unit,
 ) {
     private var feedback: Toast? = null
@@ -107,99 +105,56 @@ internal class GestureSettingsUi(
         update: (InteractionConfig, Int) -> InteractionConfig,
         format: (Int) -> String,
     ) {
-        showDialog(MaterialAlertDialogBuilder(context).setTitle(title)
-            .setSingleChoiceItems(values.map { format(it) + if (it == default) "（默认）" else "" }.toTypedArray(),
-                values.indexOf(selected(config))) { dialog, index ->
-                if (save { update(it, values[index]) }) {
-                    dialog.dismiss(); refresh()
-                } else {
-                    val actual = runCatching { load() }.getOrDefault(config)
-                    val savedIndex = values.indexOf(selected(actual))
-                    (dialog as? AlertDialog)?.listView?.apply {
-                        clearChoices(); if (savedIndex >= 0) setItemChecked(savedIndex, true)
-                    }
-                }
-            }.setNegativeButton("取消", null))
+        showChoiceSheet(SettingsChoiceSheet(context, title,
+            values.map { format(it) + if (it == default) "（默认）" else "" },
+            values.indexOf(selected(config))) { index ->
+            if (save { update(it, values[index]) }) {
+                refresh(); true
+            } else false
+        })
     }
 
-    private fun showFunction(function: GestureFunction) = with(context) {
+    private fun showFunction(function: GestureFunction) {
         val initialConfig = load()
         val initial = initialConfig.resolvedBindings()
-        val gestures = GestureBindings.visibleGestures(initialConfig.longPressSlide).toSet()
-        val selected = initial.filter { it.action == function.action && it.gesture in gestures }
-            .mapTo(mutableSetOf()) { it.gesture }
-        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        gestures.forEach { gesture ->
-            val conflicts = GestureBindings.conflicts(initial, function.action, gesture, function.states)
-            val checkbox = MaterialCheckBox(this).apply {
-                isChecked = gesture in selected
-                isClickable = false; isFocusable = false; isSaveEnabled = false
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }
-            val name = label(gesture.title, 15f).apply { textSize = 15f }
-            rows.addView(LinearLayout(this).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                minimumHeight = dp(48); setPadding(dp(16), 0, dp(16), 0)
-                background = touchFeedback()
-                isClickable = true; isFocusable = true; isSaveEnabled = false
-                contentDescription = gesture.title
-                addView(name, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(checkbox, LinearLayout.LayoutParams(dp(48), dp(48)))
-                fun updateCheck() {
-                    val blocked = gesture !in selected && conflicts.isNotEmpty()
-                    checkbox.isChecked = gesture in selected
-                    checkbox.isEnabled = !blocked
-                    name.alpha = if (blocked) 0.38f else 1f
-                }
-                accessibilityDelegate = object : View.AccessibilityDelegate() {
-                    override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
-                        super.onInitializeAccessibilityNodeInfo(host, info)
-                        info.className = "android.widget.CheckBox"
-                        info.isCheckable = gesture in selected || conflicts.isEmpty()
-                        info.isChecked = gesture in selected
-                    }
-                }
-                updateCheck()
-                setOnClickListener {
-                    if (gesture !in selected && conflicts.isNotEmpty()) {
-                        val owners = conflicts.map { GestureBindings.title(it.action) }.distinct()
-                            .joinToString("、") { "「$it」" }
-                        showFeedback("${gesture.title}已用于$owners")
-                    } else {
-                        if (!selected.remove(gesture)) selected.add(gesture)
-                        updateCheck()
-                        sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
-                    }
-                }
-            }, LinearLayout.LayoutParams(-1, -2))
+        val gestures = GestureBindings.visibleGestures(initialConfig.longPressSlide)
+        val visible = gestures.toSet()
+        val selected = gestures.indices.filterTo(mutableSetOf()) { index ->
+            initial.any { it.action == function.action && it.gesture == gestures[index] }
         }
-        val picker = showDialog(MaterialAlertDialogBuilder(this).setTitle(function.title)
-            .setView(ScrollView(this).apply { isSaveEnabled = false; addView(rows) })
-            .setNegativeButton("取消", null).setPositiveButton("保存", null))
-        picker.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        val conflicts = gestures.map { gesture ->
+            GestureBindings.conflicts(initial, function.action, gesture, function.states)
+        }
+        val multiChoice = SettingsMultiChoice(selected, onBlockedClick = { index ->
+            val owners = conflicts[index].map { GestureBindings.title(it.action) }.distinct()
+                .joinToString("、") { "「$it」" }
+            showFeedback("${gestures[index].title}已用于$owners")
+        }, onSave = saveSelection@{ indices ->
             // Keep the draft local and preserve untouched and hidden mappings exactly as loaded.
             val latest = runCatching { load().resolvedBindings() }.getOrNull()
             if (latest != initial) {
                 showFeedback("手势绑定已变化，请关闭后重新选择")
-                return@setOnClickListener
+                return@saveSelection false
             }
+            val chosen = indices.mapTo(mutableSetOf()) { gestures[it] }
             val updated = runCatching {
-                GestureBindings.updateSelection(initial, function.action, gestures, selected)
+                GestureBindings.updateSelection(initial, function.action, visible, chosen)
             }.getOrElse {
                 showFeedback("手势已被占用，请重新选择")
-                return@setOnClickListener
+                return@saveSelection false
             }
-            if (updated == initial) {
-                picker.dismiss()
-                return@setOnClickListener
-            }
+            if (updated == initial) return@saveSelection true
             val saved = save { value ->
                 require(value.resolvedBindings() == initial) { "手势绑定已变化，请重新选择" }
                 value.copy(bindings = GestureBindings.updateSelection(
-                    value.resolvedBindings(), function.action, gestures, selected))
+                    value.resolvedBindings(), function.action, visible, chosen))
             }
-            if (saved) { picker.dismiss(); refresh() }
-        }
+            if (saved) refresh()
+            saved
+        })
+        showChoiceSheet(SettingsChoiceSheet(context, function.title, gestures.map { it.title },
+            disabledIndices = conflicts.indices.filterTo(mutableSetOf()) { conflicts[it].isNotEmpty() },
+            multiChoice = multiChoice))
     }
 
     private fun confirmReset() {

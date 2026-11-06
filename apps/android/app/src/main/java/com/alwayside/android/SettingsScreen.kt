@@ -284,6 +284,7 @@ internal class SettingsScreen(
         body.addView(content, LinearLayout.LayoutParams(-1, -2))
         GestureSettingsUi(this, content, config, load = interactionStore::load,
             save = ::persistInteraction, showDialog = { it.showTracked() },
+            showChoiceSheet = { it.showTracked() },
             onTutorial = {
                 if (ProbeState.serviceRunning) MaterialAlertDialogBuilder(this)
                     .setTitle("先关闭真实悬浮球")
@@ -525,9 +526,7 @@ internal class SettingsScreen(
                     true
                 } else false
             }
-            choiceSheets += sheet
-            sheet.setOnDismissListener { choiceSheets.remove(sheet) }
-            sheet.show()
+            sheet.showTracked()
         } }
         addRow(row)
     }
@@ -778,6 +777,13 @@ internal class SettingsScreen(
             getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(dangerColor)
         }
         return this
+    }
+
+    private fun SettingsChoiceSheet.showTracked() {
+        if (disposed) return
+        choiceSheets += this
+        setOnDismissListener { choiceSheets.remove(this) }
+        show()
     }
 
     private fun dismissDialogs() {
