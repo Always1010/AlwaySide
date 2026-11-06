@@ -17,6 +17,7 @@ internal class GestureSettingsUi(
     private val load: () -> InteractionConfig,
     private val save: ((InteractionConfig) -> InteractionConfig) -> Boolean,
     private val showDialog: (MaterialAlertDialogBuilder) -> AlertDialog,
+    private val onTutorial: () -> Unit,
 ) {
     fun render() = with(context) {
         content.removeAllViews()
@@ -83,9 +84,10 @@ internal class GestureSettingsUi(
     }
 
     private fun showHelp() {
-        showDialog(MaterialAlertDialogBuilder(context).setTitle("长按滑动")
+        val dialog = showDialog(MaterialAlertDialogBuilder(context).setTitle("长按滑动")
             .setMessage("开启后，按住悬浮球等待提示，可向上、向下或向屏幕内侧滑动。方向位移成立立即执行；原地松手或持续不动直到选择时间结束，执行长按动作。普通拖动仍用于移动悬浮球。\n\n长按等待决定何时进入选择；滑动选择时间决定可选择多久。系统无障碍长按时间更长时，以系统设置为准。\n\n关闭后保留方向手势绑定，重新开启即可使用。")
-            .setPositiveButton("知道了", null))
+            .setNegativeButton("关闭", null).setPositiveButton("体验", null))
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { dialog.dismiss(); onTutorial() }
     }
 
     private fun showTiming(title: String, range: IntRange, initial: Int, hold: Boolean) {

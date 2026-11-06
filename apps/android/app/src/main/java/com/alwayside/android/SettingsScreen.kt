@@ -294,7 +294,14 @@ internal class SettingsScreen(
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(content, LinearLayout.LayoutParams(-1, -2))
         GestureSettingsUi(this, content, config, load = interactionStore::load,
-            save = ::persistInteraction, showDialog = { it.showTracked() }).render()
+            save = ::persistInteraction, showDialog = { it.showTracked() },
+            onTutorial = {
+                if (ProbeState.serviceRunning) MaterialAlertDialogBuilder(this)
+                    .setTitle("先关闭真实悬浮球")
+                    .setMessage("请先在首页关闭悬浮球，再体验模拟手势，避免误触真实功能。")
+                    .setPositiveButton("知道了", null).showTracked()
+                else LongPressSlideTutorial.show(activity, interactionStore.load(), showDialog = { it.showTracked() })
+            }).render()
     }
 
     private fun windowPage(config: AppConfig, interaction: InteractionConfig) {

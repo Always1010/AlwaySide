@@ -27,6 +27,7 @@ class TutorialIsolationTest {
         assertTrue("Shared window components must also remain isolated",files.containsKey("AssistantWindowViews.class"))
         assertTrue(files.containsKey("AssistantMenuViews.class"))
         assertTrue(files.containsKey("AssistantBubbleView.class"))
+        assertTrue(files.containsKey("LongPressSlideTutorial.class"))
         assertTrue(files.containsKey("BubbleTouchController.class"))
         for ((file, bytes) in files) {
             DataInputStream(bytes.inputStream()).use { input ->
@@ -77,7 +78,7 @@ class TutorialIsolationTest {
         private val resourceClasses=setOf("com/alwayside/android/R","androidx/appcompat/R","android/R")
         private const val inMemoryAppearance = "com/alwayside/android/AppAppearance"
         private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction","AssistantBubbleView","AssistantPresentationKt","TapSequence",
-            "BubbleTouchController","BubbleGestureHintsView","BubbleGestureStateMachine")
+            "BubbleTouchController","BubbleGestureHintsView","BubbleGestureStateMachine","LongPressSlideTutorial","LongPressSlideLesson")
         private fun audited(name: String)=name.startsWith("Tutorial") || sharedClasses.any { name=="$it.class" || name.startsWith("$it$") }
         private val allowedPrefixes = listOf(
             "com/alwayside/android/Tutorial", "com/alwayside/android/UiKt", "com/alwayside/android/PrototypeIconsKt",

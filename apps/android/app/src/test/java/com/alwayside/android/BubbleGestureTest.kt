@@ -92,4 +92,17 @@ class BubbleGestureTest {
         assertFalse(GestureBindings.valid(changed + changed.first()))
     }
 
+    @Test fun practiceRequiresTheRightGestureAndDistinguishesReleaseFromTimeout() {
+        val lesson = LongPressSlideLesson()
+        lesson.next(); assertEquals(0, lesson.index)
+        assertFalse(lesson.accept(BubbleGesture.HOLD, true))
+        assertTrue(lesson.accept(BubbleGesture.HOLD, false)); lesson.next()
+        for (direction in listOf(BubbleGesture.UP, BubbleGesture.DOWN, BubbleGesture.INWARD)) {
+            assertFalse(lesson.accept(BubbleGesture.HOLD, false))
+            assertTrue(lesson.accept(direction, false)); lesson.next()
+        }
+        assertFalse(lesson.accept(BubbleGesture.HOLD, false))
+        assertTrue(lesson.accept(BubbleGesture.HOLD, true)); lesson.next()
+        assertTrue(lesson.complete)
+    }
 }
