@@ -9,6 +9,16 @@ internal data class PromptPreset(
     val transcriptionPrompt: String? = null,
     val audioOutput: String? = null,
 ) {
+    fun validate() {
+        require(instructions.length <= 32000 && (transcriptionPrompt?.length ?: 0) <= 32000) {
+            "助手回答方式和转写提示不能超过 32000 字符"
+        }
+        require(listOfNotNull(defaultQuestion, audioQuestion, textQuestion).all { it.length <= ChatPrompt.MAX_QUESTION_CHARS }) {
+            "默认问题不能超过 ${ChatPrompt.MAX_QUESTION_CHARS} 字符"
+        }
+        require(audioOutput == null || audioOutput in setOf("transcript", "translate", "interpret")) { "音频输出方式无效" }
+    }
+
     fun mergeInto(current: AppConfig): AppConfig = current.copy(
         instructions = instructions,
         defaultQuestion = defaultQuestion,

@@ -146,9 +146,7 @@ internal class SettingsStore(context: Context) {
 
     fun savePreset(name: String, preset: PromptPreset) = synchronized(lock) {
         require(name.isNotBlank() && name.length <= 60) { "Preset name is invalid" }
-        require(listOfNotNull(preset.instructions, preset.defaultQuestion, preset.audioQuestion, preset.textQuestion,
-            preset.transcriptionPrompt).all { it.length <= 32000 })
-        require(preset.audioOutput == null || preset.audioOutput in setOf("transcript", "translate", "interpret"))
+        preset.validate()
         val data = JSONObject(prefs.getString("presets", "{}") ?: "{}")
         require(data.has(name) || data.length() < 20) { "At most 20 presets" }
         data.put(name, JSONObject().put("instructions", preset.instructions)
@@ -197,10 +195,10 @@ internal class SettingsStore(context: Context) {
         private val lock = Any()
         private const val KEY_ALIAS = "alwayside_api_key_v1"
         fun validate(config: AppConfig) {
+            PromptPreset.capture(config).validate()
             config.serviceCatalog?.let { catalog ->
                 catalog.validate()
                 ProviderProtocol.validateOptions(config)
-                require(listOf(config.instructions, config.defaultQuestion, config.audioQuestion, config.transcriptionPrompt, config.textQuestion).all { it.length <= 32000 }) { "单项提示词不能超过 32000 字符" }
                 return
             }
             require(runCatching { ProviderProtocol.endpoint(config.baseUrl, "responses") }.isSuccess) {
@@ -212,7 +210,6 @@ internal class SettingsStore(context: Context) {
             require(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(config.apiVersion)) { "API 版本请使用 YYYY-MM-DD" }
             require(config.workspaceId.length <= 200 && config.workspaceId.none { it.code < 33 || it.code > 126 }) { "Workspace ID 无效" }
             ProviderProtocol.validateOptions(config)
-            require(listOf(config.instructions, config.defaultQuestion, config.audioQuestion, config.transcriptionPrompt, config.textQuestion).all { it.length <= 32000 }) { "单项提示词不能超过 32000 字符" }
             require(config.apiKey.length <= 4096 && config.apiKey.none { it.code < 33 || it.code > 126 }) { "API Key 请使用不含空白的有效凭证，最多 4096 字符" }
         }
     }

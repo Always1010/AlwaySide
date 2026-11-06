@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PromptPresetTest {
+    @Test fun configuredQuestionsAndTemplatesRespectTheSendingBudget() {
+        val boundary = "问".repeat(ChatPrompt.MAX_QUESTION_CHARS)
+        val preset = PromptPreset("说明".repeat(16000), boundary, boundary, boundary, "提".repeat(32000))
+        preset.validate()
+        ChatPrompt.validateQuestion(boundary)
+        listOf(preset.copy(defaultQuestion = boundary + "问"), preset.copy(audioQuestion = boundary + "问"),
+            preset.copy(textQuestion = boundary + "问")).forEach { invalid ->
+            assertThrows(IllegalArgumentException::class.java) { invalid.validate() }
+        }
+        // Empty values retain the existing explicit-clear/legacy-template behavior.
+        PromptPreset("", "", "", null).validate()
+    }
+
     @Test fun legacyTemplateKeepsNewFieldsFromCurrentDraft() {
         val draft = AppConfig(textQuestion = "draft text", transcriptionPrompt = "draft names", audioOutput = "transcript")
         val merged = PromptPreset("old instructions", "old image", "old audio").mergeInto(draft)
