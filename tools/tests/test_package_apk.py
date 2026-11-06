@@ -24,7 +24,7 @@ class PackageDeliveryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.paths = package.BuildPaths(
             java=self.root / "jdk/bin/java", sdk=self.root / "sdk", gradle_cache=self.root / "gradle",
             destination=self.root / "share", keystore=self.root / "signing/key.p12",
@@ -76,8 +76,10 @@ class PackageDeliveryTests(unittest.TestCase):
 
         with patch.object(package, "ROOT", self.root), patch.object(package, "preflight"), \
                 patch.object(package, "signing_environment", return_value=self.signing_env()), \
-                patch.object(package.subprocess, "run", side_effect=build_or_sign) as run, \
-                patch.object(package.subprocess, "check_output", side_effect=[SIGNATURE, BADGING]):
+                patch.object(package, "subprocess") as processes:
+            # Isolate APK commands without intercepting platform's own subprocess calls.
+            processes.run.side_effect = build_or_sign
+            processes.check_output.side_effect = [SIGNATURE, BADGING]
             target = package.package_and_upload("1.4.1", self.paths)
         record_file = next((self.root / ".local/android-build").glob("*/delivery.json"))
         record = json.loads(record_file.read_text())
@@ -85,8 +87,9 @@ class PackageDeliveryTests(unittest.TestCase):
         self.assertEqual(package.sha256(target), record["sha256"])
         self.assertEqual(record["versionCode"], 1004001)
         self.assertNotIn("fixture-password", record_file.read_text())
-        self.assertIn("--offline", run.call_args_list[0].args[0])
-        self.assertIn("--lineage", run.call_args_list[1].args[0])
+        self.assertIn("--offline", processes.run.call_args_list[0].args[0])
+        self.assertIn("--lineage", processes.run.call_args_list[1].args[0])
+        self.assertEqual(processes.check_output.call_count, 2)
         self.assertEqual(list(self.paths.destination.glob("*.uploading-*")), [])
 
     def test_wrong_certificate_signature_or_version_blocks_delivery(self):
