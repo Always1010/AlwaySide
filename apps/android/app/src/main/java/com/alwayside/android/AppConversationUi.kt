@@ -62,7 +62,7 @@ internal class HistoryListScreen(
         isFillViewport = true
         addView(rows)
     }
-    val searchView = TextInputLayout(activity).apply {
+    private val searchField = TextInputLayout(activity).apply {
         isHintEnabled = false
         boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_FILLED
         boxBackgroundColor = SURFACE
@@ -74,11 +74,8 @@ internal class HistoryListScreen(
         endIconMode = TextInputLayout.END_ICON_CLEAR_TEXT
         setEndIconContentDescription("清空搜索")
         setEndIconTintList(ColorStateList.valueOf(MUTED))
-        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-            setMargins(activity.dp(18), activity.dp(8), activity.dp(18), activity.dp(8))
-        }
     }
-    private val searchInput = TextInputEditText(searchView.context).apply {
+    private val searchInput = TextInputEditText(searchField.context).apply {
         setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
         setTextColor(INK); setHintTextColor(MUTED)
         setSingleLine(); minHeight = activity.dp(52)
@@ -87,6 +84,27 @@ internal class HistoryListScreen(
         setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) { hideSearchKeyboard(); true } else false
         }
+    }
+    private val dateFilter = activity.iconButton(R.drawable.ic_line_sliders, "按时间筛选", ::openDateFilter).apply {
+        cornerRadius = activity.dp(24)
+        setToggleCheckedStateOnClick(false)
+    }
+    private val dateFilterIndicator = View(activity).apply {
+        background = card(ACCENT, activity.dp(3).toFloat())
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    val searchView = LinearLayout(activity).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(activity.dp(18), activity.dp(8), activity.dp(18), activity.dp(8))
+        }
+        addView(searchField, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(FrameLayout(activity).apply {
+            addView(dateFilter, FrameLayout.LayoutParams(-1, -1))
+            addView(dateFilterIndicator, FrameLayout.LayoutParams(activity.dp(6), activity.dp(6), Gravity.TOP or Gravity.END).apply {
+                topMargin = activity.dp(8); marginEnd = activity.dp(8)
+            })
+        }, LinearLayout.LayoutParams(activity.dp(48), activity.dp(48)).apply { marginStart = activity.dp(8) })
     }
     private val newConversation = FloatingActionButton(activity).apply {
         setImageDrawable(activity.prototypeIcon(R.drawable.ic_line_plus))
@@ -132,7 +150,7 @@ internal class HistoryListScreen(
     }
 
     init {
-        searchView.addView(searchInput)
+        searchField.addView(searchInput)
         searchInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -150,6 +168,15 @@ internal class HistoryListScreen(
     private fun hideSearchKeyboard() {
         activity.getSystemService(InputMethodManager::class.java)
             .hideSoftInputFromWindow(searchInput.windowToken, 0)
+    }
+
+    private fun openDateFilter() {
+        searchInput.clearFocus(); hideSearchKeyboard()
+        activity.showHistoryDateFilter(browse.dateRange) { range ->
+            browse.dateRange = range
+            selection.cancel(); pendingScrollY = 0
+            render(); onSelectionChanged()
+        }
     }
 
     fun selectedIds(): List<String> = selection.snapshot()
@@ -241,6 +268,13 @@ internal class HistoryListScreen(
         newConversation.visibility = if (selecting) View.GONE else View.VISIBLE
         rows.setPadding(activity.dp(16), activity.dp(8), activity.dp(16), activity.dp(if (selecting) 24 else 168))
         searchView.visibility = if (selecting) View.GONE else View.VISIBLE
+        val range = browse.dateRange
+        dateFilter.isSelected = range != null
+        dateFilter.backgroundTintList = ColorStateList.valueOf(if (range != null) TONAL_SURFACE else Color.TRANSPARENT)
+        dateFilter.iconTint = ColorStateList.valueOf(if (range != null) ACCENT else MUTED)
+        dateFilter.accessible(if (range != null) "时间筛选：${range.displayLabel()}，点击修改" else "按时间筛选")
+        ViewCompat.setStateDescription(dateFilter, if (range != null) "已设置时间范围" else "未筛选")
+        dateFilterIndicator.visibility = if (range != null) View.VISIBLE else View.GONE
         searchInput.hint = when {
             browse.tag != null -> "搜索“${browse.tag}”标签内的对话"
             browse.untagged -> "搜索未标记的收藏"
@@ -299,7 +333,7 @@ internal class HistoryListScreen(
             rows.action("清空无法读取的记录") { confirmCorruptCleanup() }
         } else if (visible.isEmpty()) {
             val empty = when {
-                browse.query.isNotBlank() -> "没有找到匹配的对话。"
+                browse.query.isNotBlank() || browse.dateRange != null -> "没有找到匹配的对话。"
                 browse.tag != null || browse.untagged -> "这里还没有收藏会话。"
                 browse.favorites -> "还没有收藏。\n在对话中点击五角星即可收藏。"
                 else -> "还没有对话。\n从悬浮球截图、听一段，\n或点击右下方加号，开始文字对话。"

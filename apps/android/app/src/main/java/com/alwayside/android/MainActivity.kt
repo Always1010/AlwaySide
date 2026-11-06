@@ -88,6 +88,7 @@ class MainActivity : ThemedActivity() {
         restoredHistoryBrowse = if (savedInstanceState != null) HistoryBrowse(
             savedInstanceState.getBoolean("history_favorites"), savedInstanceState.getString("history_tag"),
             savedInstanceState.getBoolean("history_untagged"), savedInstanceState.getString("history_query").orEmpty(),
+            HistoryDateRange.restore(savedInstanceState.getString("history_date_start"), savedInstanceState.getString("history_date_end")),
         ) else retained?.historyBrowse ?: HistoryBrowse()
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
@@ -473,6 +474,8 @@ class MainActivity : ThemedActivity() {
         outState.putString("history_tag", browse.tag)
         outState.putBoolean("history_untagged", browse.untagged)
         outState.putString("history_query", browse.query)
+        outState.putString("history_date_start", browse.dateRange?.start?.toString())
+        outState.putString("history_date_end", browse.dateRange?.end?.toString())
         chatScreen?.let { chat -> outState.putBundle("chat",Bundle().also { chat.saveState(it) }) }
             ?: pendingChatState?.let { outState.putBundle("chat",it) }
         outState.putBoolean("assistant_start_attempted",assistantStartAttempted)
