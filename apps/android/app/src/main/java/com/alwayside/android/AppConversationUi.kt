@@ -10,6 +10,7 @@ import android.text.Editable
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -24,6 +25,7 @@ import androidx.core.view.ViewCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import java.text.DateFormat
@@ -55,6 +57,8 @@ internal class HistoryListScreen(
     private var readFailed = false
     private var pendingScrollY: Int? = null
     private var drawerLayout: DrawerLayout? = null
+    private var openedSwipe: HistorySwipeRow? = null
+    private var dismissedSwipeOnTouch = false
     private val drawerRows = activity.column().apply { setPadding(activity.dp(12), 0, activity.dp(12), activity.dp(12)) }
     private val tagDialogs = CollectionTagDialogs(activity, ::refresh)
     val toolbar:MaterialToolbar=activity.materialToolbar("全部对话")
@@ -136,9 +140,19 @@ internal class HistoryListScreen(
         setOnClickListener { onOpen(null) }
     }
     val selecting: Boolean get() = selection.selecting
-    val canGoBack: Boolean get() = selecting || browse.canGoBack || drawerLayout?.isDrawerOpen(GravityCompat.START) == true
+    val canGoBack: Boolean get() = openedSwipe != null || selecting || browse.canGoBack || drawerLayout?.isDrawerOpen(GravityCompat.START) == true
 
-    fun wrap(content: View): View = DrawerLayout(activity).apply {
+    fun wrap(content: View): View = object : DrawerLayout(activity) {
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                dismissedSwipeOnTouch = false
+                openedSwipe?.let { if (!it.contains(event.rawX, event.rawY)) dismissedSwipeOnTouch = closeSwipe() }
+            }
+            val handled = super.dispatchTouchEvent(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) dismissedSwipeOnTouch = false
+            return handled
+        }
+    }.apply {
         addView(FrameLayout(activity).apply {
             addView(content, FrameLayout.LayoutParams(-1, -1))
             addView(newConversation, FrameLayout.LayoutParams(activity.dp(56), activity.dp(56), Gravity.END or Gravity.BOTTOM).apply {
@@ -163,11 +177,15 @@ internal class HistoryListScreen(
     }
 
     fun prepareToLeave() {
+        closeSwipe()
         drawerLayout?.closeDrawer(GravityCompat.START)
         if (selection.cancel()) { render(); onSelectionChanged() }
     }
 
     init {
+        scrollView.setOnScrollChangeListener { _: View, _: Int, y: Int, _: Int, oldY: Int ->
+            if (y != oldY) closeSwipe()
+        }
         searchField.addView(searchInput)
         searchInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -223,6 +241,7 @@ internal class HistoryListScreen(
     }
 
     fun back(): Boolean {
+        if (closeSwipe()) return true
         if (drawerLayout?.isDrawerOpen(GravityCompat.START) == true) {
             drawerLayout?.closeDrawer(GravityCompat.START); return true
         }
@@ -251,10 +270,43 @@ internal class HistoryListScreen(
     }
 
     private fun changed() { render(); onSelectionChanged() }
+    private fun closeSwipe(): Boolean {
+        val row = openedSwipe ?: return false
+        openedSwipe = null
+        row.close(); onSelectionChanged()
+        return true
+    }
+
+    private fun favoriteConversation(value: StoredConversation) {
+        closeSwipe()
+        runCatching { store.setFavorite(value.id, !value.isFavorite) }.onSuccess {
+            Toast.makeText(activity, if (value.isFavorite) "已取消收藏，重新加入普通历史保留队列" else "已收藏", Toast.LENGTH_SHORT).show()
+            refresh()
+        }.onFailure { failed() }
+    }
+
+    private fun moreConversation(value: StoredConversation) {
+        closeSwipe()
+        val dialog = BottomSheetDialog(activity)
+        val body = activity.column()
+        body.addView(activity.label("会话操作", 20f))
+        fun entry(icon: Int, title: String, run: () -> Unit) {
+            body.addView(activity.settingsListRow(title,
+                leading = activity.iconButton(icon, title) { dialog.dismiss(); run() }.apply {
+                    isClickable = false; isFocusable = false; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, showArrow = false, onClick = { dialog.dismiss(); run() }))
+        }
+        entry(R.drawable.ic_line_tag, if (value.isFavorite) "设置标签" else "收藏并设置标签") {
+            tagDialogs.editTags(listOf(value.id), collectMissing = !value.isFavorite)
+        }
+        entry(R.drawable.ic_line_check, "选择此会话") { selection.select(value.id); changed() }
+        dialog.setContentView(body); dialog.show()
+    }
     private fun failed() = Toast.makeText(activity, "操作未全部完成，请重试并检查本机存储", Toast.LENGTH_LONG).show()
 
-    private fun confirmDeletion() {
-        val deletion = HistoryDeletion(selection.snapshot())
+    private fun confirmDeletion(ids: List<String> = selection.snapshot()) {
+        closeSwipe()
+        val deletion = HistoryDeletion(ids)
         if (deletion.ids.isEmpty()) return
         val favorites = values.count { it.id in deletion.ids && it.isFavorite }
         MaterialAlertDialogBuilder(activity).setTitle("删除选中的 ${deletion.ids.size} 段会话？")
@@ -282,6 +334,7 @@ internal class HistoryListScreen(
     }
 
     private fun render() {
+        closeSwipe()
         val targetY = pendingScrollY ?: scrollView.scrollY
         pendingScrollY = null
         val visible = browse.visible(values)
@@ -349,7 +402,7 @@ internal class HistoryListScreen(
                     selection.cancel(); onSelectionChanged()
                 }
             }
-            action(R.drawable.ic_line_trash, "删除选中的会话", run = ::confirmDeletion)
+            action(R.drawable.ic_line_trash, "删除选中的会话") { confirmDeletion() }
             toolbar.addIconAction(2,android.R.drawable.ic_menu_close_clear_cancel,"取消选择") { back() }
         } else {
             toolbar.addIconAction(5,R.drawable.ic_line_power,"打开悬浮球",onToggleAssistant).apply {
@@ -399,9 +452,13 @@ internal class HistoryListScreen(
             isChecked = checked
             accessible(if (selecting) "$title，${if (checked) "已选择" else "未选择"}，点按切换选择"
                 else "打开会话：$title；长按选择")
-            setOnLongClickListener { selection.select(value.id); changed(); true }
+            setOnLongClickListener {
+                performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                closeSwipe(); selection.select(value.id); changed(); true
+            }
             setOnClickListener {
-                if (selecting) { selection.toggle(value.id); changed() } else onOpen(value.id)
+                if (selecting) { selection.toggle(value.id); changed() }
+                else if (!closeSwipe() && !dismissedSwipeOnTouch) onOpen(value.id)
             }
         }
         val entry = LinearLayout(activity).apply {
@@ -461,8 +518,23 @@ internal class HistoryListScreen(
             marginStart = activity.dp(8); topMargin = activity.dp(2)
         })
         card.addView(entry)
-        HistoryRowTouch(card)
-        rows.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = activity.dp(8) })
+        val row = if (selecting) card else HistorySwipeRow(activity, card, value.isFavorite,
+            onFavorite = { favoriteConversation(value) }, onMore = { moreConversation(value) },
+            onDelete = { confirmDeletion(listOf(value.id)) },
+            onOpened = { opened ->
+                if (openedSwipe !== opened) {
+                    closeSwipe(); openedSwipe = opened; onSelectionChanged()
+                }
+            }, onClosed = { closed ->
+                if (openedSwipe === closed) { openedSwipe = null; onSelectionChanged() }
+            })
+        HistoryRowTouch(card, row as? HistorySwipeRow)
+        if (!selecting) {
+            ViewCompat.addAccessibilityAction(card, if (value.isFavorite) "取消收藏" else "收藏") { _, _ -> favoriteConversation(value); true }
+            ViewCompat.addAccessibilityAction(card, "更多会话操作") { _, _ -> moreConversation(value); true }
+            ViewCompat.addAccessibilityAction(card, "删除会话") { _, _ -> confirmDeletion(listOf(value.id)); true }
+        }
+        rows.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = activity.dp(8) })
     }
 
     private fun navigate(favorites: Boolean, tag: String? = null, untagged: Boolean = false) {

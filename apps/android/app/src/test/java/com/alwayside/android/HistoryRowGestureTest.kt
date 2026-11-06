@@ -31,4 +31,33 @@ class HistoryRowGestureTest {
         gesture.move(2f, 3f)
         assertTrue(gesture.up())
     }
+
+    @Test fun horizontalSwipeLocksDirectionAndCannotClickOrHold() {
+        val gesture = HistoryRowGesture(8f, 500)
+        gesture.down(0f, 0f, 0, swipe = true)
+        gesture.move(30f, 3f)
+        assertEquals(HistoryRowGesture.Phase.SWIPE, gesture.phase)
+        gesture.move(-40f, 100f)
+        assertEquals(HistoryRowGesture.Phase.SWIPE, gesture.phase)
+        assertEquals(-40f, gesture.dx)
+        assertFalse(gesture.hold(1000))
+        assertFalse(gesture.up())
+        gesture.down(0f, 0f, 0, swipe = true)
+        gesture.move(10f, 12f)
+        gesture.move(100f, 12f)
+        assertEquals(HistoryRowGesture.Phase.SCROLL, gesture.phase)
+    }
+
+    @Test fun selectionAndEdgeGesturesDisableSwipeAndHoldingCannotTurnIntoSwipe() {
+        val gesture = HistoryRowGesture(8f, 500)
+        gesture.down(0f, 0f, 0, swipe = false)
+        gesture.move(40f, 1f)
+        assertEquals(HistoryRowGesture.Phase.SCROLL, gesture.phase)
+        assertFalse(gesture.up())
+        gesture.down(0f, 0f, 0, swipe = true)
+        assertTrue(gesture.hold(700))
+        gesture.move(100f, 0f)
+        assertEquals(HistoryRowGesture.Phase.HOLD, gesture.phase)
+        assertFalse(gesture.up())
+    }
 }
