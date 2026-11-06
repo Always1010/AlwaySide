@@ -32,13 +32,55 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
     var working = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sparkle = context.prototypeIcon(R.drawable.ic_line_sparkles).apply { setTint(Color.WHITE) }
+    private var gesturePhase = BubbleGestureStateMachine.Phase.IDLE
+    private var gestureProgress = 0f
+    private var gestureDx = 0f
+    private var gestureDy = 0f
+    private var gestureSlide = false
+    private var phaseStartedAt = 0L
+
+    fun setGestureFeedback(phase: BubbleGestureStateMachine.Phase, progress: Float,
+        dx: Float = 0f, dy: Float = 0f, slideEnabled: Boolean = true) {
+        if (phase != gesturePhase) phaseStartedAt = SystemClock.uptimeMillis()
+        gesturePhase = phase; gestureProgress = progress.coerceIn(0f, 1f)
+        gestureDx = dx; gestureDy = dy; gestureSlide = slideEnabled
+        invalidate()
+    }
+
+    fun resetGestureFeedback() = setGestureFeedback(BubbleGestureStateMachine.Phase.IDLE, 0f)
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val radius = context.dp(size) / 2f
         val x = width / 2f; val y = height / 2f
-        paint.color = color; paint.alpha = if(recording)245 else (opacity * 2.55f).toInt()
+        val pressing = gesturePhase == BubbleGestureStateMachine.Phase.PRESSING
+        val armed = gesturePhase == BubbleGestureStateMachine.Phase.ARMED
+        val feedback = pressing || armed
+        val animated = android.animation.ValueAnimator.areAnimatorsEnabled()
+        val elapsed = (SystemClock.uptimeMillis() - phaseStartedAt).coerceAtLeast(0)
+        val pressFraction = if (animated) (elapsed / 100f).coerceAtMost(1f) else 1f
+        val scale = when {
+            pressing -> 1f - .06f * pressFraction
+            armed && animated -> {
+                val t = (elapsed / 150f).coerceAtMost(1f)
+                if (t < .5f) .94f + .10f * sin(t * Math.PI).toFloat()
+                else 1f + .04f * sin(t * Math.PI).toFloat()
+            }
+            else -> 1f
+        }
+        var scaleX = scale; var scaleY = scale
+        if (armed) {
+            val amount = (maxOf(abs(gestureDx), abs(gestureDy)) / context.dp(48)).coerceIn(0f, 1f) * .06f
+            if (abs(gestureDx) > abs(gestureDy)) { scaleX += amount; scaleY -= amount / 2 }
+            else { scaleY += amount; scaleX -= amount / 2 }
+        }
+        val save = canvas.save()
+        canvas.scale(scaleX, scaleY, x, y)
+        val normalAlpha = if(recording)245 else (opacity * 2.55f).toInt()
+        paint.color = color
+        paint.alpha = if (feedback) (normalAlpha + (255 - normalAlpha) * if (pressing) pressFraction else 1f).toInt() else normalAlpha
         paint.style = Paint.Style.FILL; canvas.drawCircle(x,y,radius,paint)
-        paint.color = Color.WHITE; paint.alpha = if(recording)255 else (opacity * 2.55f).toInt()
+        paint.color = Color.WHITE; paint.alpha = if(recording || feedback)255 else (opacity * 2.55f).toInt()
         if(recording) {
             val phase = SystemClock.uptimeMillis() / 180.0
             for(i in -1..1) {
@@ -49,11 +91,24 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
         } else {
             val r=radius*.57f
             sparkle.alpha=paint.alpha;sparkle.setBounds((x-r).toInt(),(y-r).toInt(),(x+r).toInt(),(y+r).toInt());sparkle.draw(canvas)
-            if(working) {
+            if(working && !feedback) {
                 paint.style=Paint.Style.STROKE;paint.strokeWidth=context.dp(1).toFloat()
                 canvas.drawArc(x-radius-2,y-radius-2,x+radius+2,y+radius+2,(SystemClock.uptimeMillis()%1800)/5f,90f,false,paint)
                 paint.style=Paint.Style.FILL
             }
+        }
+        canvas.restoreToCount(save)
+        if (feedback && gestureSlide) {
+            // Keep the progress ring inside the 48dp touch target, including the largest ball.
+            val ringRadius = (radius + context.dp(3)).coerceAtMost(minOf(width, height) / 2f - context.dp(1))
+            paint.style = Paint.Style.STROKE; paint.strokeWidth = context.dp(1).coerceAtLeast(1).toFloat()
+            paint.color = if (ringRadius <= radius) Color.WHITE else color
+            paint.alpha = if (armed) (60 + 130 * gestureProgress).toInt() else 60
+            canvas.drawCircle(x, y, ringRadius, paint)
+            paint.alpha = if (armed) (255 * gestureProgress).toInt() else 245
+            canvas.drawArc(x-ringRadius,y-ringRadius,x+ringRadius,y+ringRadius,-90f,
+                360f * if (animated) gestureProgress else 1f,false,paint)
+            paint.style = Paint.Style.FILL
         }
     }
 }

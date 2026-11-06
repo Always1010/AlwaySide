@@ -6,6 +6,8 @@ import android.content.SharedPreferences
 internal object AssistantActions {
     const val SCREEN = "screen"
     const val AUDIO = "audio"
+    const val START_AUDIO = "start_audio"
+    const val END_AUDIO = "end_audio"
     const val MENU = "menu"
     const val CROP = "crop"
     const val LAST = "last"
@@ -43,14 +45,23 @@ internal data class InteractionConfig(
     val recordingLimitAction: RecordingLimitAction = RecordingLimitAction.DISCARD,
     val useDefaultQuestion: Boolean = true,
     val menuWebSearch: Boolean? = null,
+    val longPressSlide: Boolean = false,
+    val longPressMillis: Int = 600,
+    val slideWindowMillis: Int = 1500,
+    val bindings: List<GestureBinding>? = null,
 ) {
+    fun resolvedBindings() = bindings ?: GestureBindings.legacy(this)
+    fun gestureAction(gesture: BubbleGesture, recording: Boolean): String {
+        if (gesture.directional && !longPressSlide) return AssistantActions.NONE
+        return resolvedBindings().firstOrNull { it.gesture == gesture && it.recording == recording }?.action ?: AssistantActions.NONE
+    }
     fun autoAsk(kind: String): Boolean = useDefaultQuestion && when (kind) {
         "photo" -> autoAskImage
         "audio" -> autoAskAudio
         else -> autoAskText
     }
 
-    fun action(taps: Int, recording: Boolean): String = when {
+    fun action(taps: Int, recording: Boolean): String = if (bindings != null) gestureAction(BubbleGesture.taps(taps), recording) else when {
         recording && taps == 1 -> recordingSingleAction
         recording && taps == 2 -> recordingDoubleAction
         recording && taps == 3 -> recordingTripleAction
@@ -93,21 +104,36 @@ internal class InteractionPreferences(private val context: Context) {
             prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
             if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
         )
-        if (version >= InteractionDefaults.VERSION) return loaded
+        fun withBindings(value: InteractionConfig): InteractionConfig {
+            val rules = if (prefs.getInt("gestureBindingsVersion", 0) == 1) buildList {
+                for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
+                    val saved = prefs.getString("binding_${recording}_${gesture.name}", null)
+                    if (GestureBindings.functions.any { it.action == saved }) add(GestureBinding(gesture, recording, saved!!))
+                }
+            } else GestureBindings.legacy(value)
+            return value.copy(bindings = rules, longPressSlide = prefs.getBoolean("longPressSlide", false),
+                longPressMillis = prefs.getInt("longPressMillis", 600).coerceIn(400, 1500),
+                slideWindowMillis = prefs.getInt("slideWindowMillis", 1500).coerceIn(500, 3000))
+        }
+        if (version >= InteractionDefaults.VERSION) return withBindings(loaded)
         val upgraded = InteractionDefaults.upgrade(loaded)
         val edit = prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
         if (upgraded != loaded) edit.putString("singleAction", upgraded.singleAction).putString("longAction", upgraded.longAction)
         // Persist only the default-policy upgrade; all other appearance, media and user mappings stay intact.
         edit.commit()
-        return upgraded
+        return withBindings(upgraded)
     }
     fun save(value: InteractionConfig) {
         require(value.ballSize in 18..48 && value.ballOpacity in 15..100)
         require(value.recordingMaxMinutes in 0..RecordingLimits.MAX_MINUTES)
+        require(value.longPressMillis in 400..1500 && value.slideWindowMillis in 500..3000)
+        require(GestureBindings.valid(value.resolvedBindings()))
         require((listOf(value.singleAction, value.doubleAction, value.tripleAction, value.longAction,
             value.recordingSingleAction, value.recordingDoubleAction, value.recordingTripleAction,
             value.recordingLongAction)).all { it in AssistantActions.choices })
         val edit=prefs.edit().putInt("gestureDefaultsVersion", InteractionDefaults.VERSION)
+            .putInt("gestureBindingsVersion", 1).putBoolean("longPressSlide", value.longPressSlide)
+            .putInt("longPressMillis", value.longPressMillis).putInt("slideWindowMillis", value.slideWindowMillis)
             .putInt("ballSize", value.ballSize).putInt("ballOpacity", value.ballOpacity)
             .putInt("ballColor", value.ballColor).putString("singleAction", value.singleAction)
             .putString("doubleAction", value.doubleAction).putString("tripleAction", value.tripleAction)
@@ -122,6 +148,11 @@ internal class InteractionPreferences(private val context: Context) {
             .putBoolean("collapseFollowUpByDefault", value.collapseFollowUpByDefault)
             .putBoolean("saveHistoryAudio", value.saveHistoryAudio)
             .putBoolean("useDefaultQuestion", value.useDefaultQuestion)
+        for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
+            val key = "binding_${recording}_${gesture.name}"
+            val binding = value.resolvedBindings().firstOrNull { it.gesture == gesture && it.recording == recording }
+            if (binding == null) edit.remove(key) else edit.putString(key, binding.action)
+        }
         if (value.menuWebSearch == null) edit.remove("menuWebSearch") else edit.putBoolean("menuWebSearch", value.menuWebSearch)
         check(edit.commit()) { "无法保存交互设置" }
     }

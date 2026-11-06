@@ -27,6 +27,7 @@ class TutorialIsolationTest {
         assertTrue("Shared window components must also remain isolated",files.containsKey("AssistantWindowViews.class"))
         assertTrue(files.containsKey("AssistantMenuViews.class"))
         assertTrue(files.containsKey("AssistantBubbleView.class"))
+        assertTrue(files.containsKey("BubbleTouchController.class"))
         for ((file, bytes) in files) {
             DataInputStream(bytes.inputStream()).use { input ->
                 assertEquals(0xCAFEBABE.toInt(), input.readInt())
@@ -75,14 +76,18 @@ class TutorialIsolationTest {
     companion object {
         private val resourceClasses=setOf("com/alwayside/android/R","androidx/appcompat/R","android/R")
         private const val inMemoryAppearance = "com/alwayside/android/AppAppearance"
-        private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction","AssistantBubbleView","AssistantPresentationKt","TapSequence")
+        private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction","AssistantBubbleView","AssistantPresentationKt","TapSequence",
+            "BubbleTouchController","BubbleGestureHintsView","BubbleGestureStateMachine")
         private fun audited(name: String)=name.startsWith("Tutorial") || sharedClasses.any { name=="$it.class" || name.startsWith("$it$") }
         private val allowedPrefixes = listOf(
             "com/alwayside/android/Tutorial", "com/alwayside/android/UiKt", "com/alwayside/android/PrototypeIconsKt",
+            "com/alwayside/android/InteractionConfig", "com/alwayside/android/GestureBinding", "com/alwayside/android/BubbleGesture",
             *sharedClasses.map { "com/alwayside/android/$it" }.toTypedArray(),
             "com/alwayside/android/R$", "android/app/Activity", "android/content/Context", "android/content/res/",
-            "android/graphics/", "android/view/", "android/widget/", "android/text/", "android/os/SystemClock",
+            "android/graphics/", "android/view/", "android/widget/", "android/text/", "android/animation/", "android/os/SystemClock", "android/os/Handler", "android/os/Looper",
             "androidx/appcompat/R$", "com/google/android/material/", "android/R$",
+            "androidx/appcompat/app/AlertDialog", "android/content/DialogInterface",
+            "android/util/DisplayMetrics",
             "java/lang/", "java/util/", "kotlin/", "org/jetbrains/annotations/",
         )
         private val forbiddenMethods = setOf(

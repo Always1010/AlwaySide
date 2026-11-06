@@ -44,6 +44,8 @@ class AssistantService : Service() {
     private var bubble: FrameLayout? = null
     private var bubbleVisual: AssistantBubbleView? = null
     private var bubbleLayout: WindowManager.LayoutParams? = null
+    private var bubbleTouch: BubbleTouchController? = null
+    private var gestureHints: BubbleGestureHintsView? = null
     private var menu: View? = null
     private var menuBlurListener: java.util.function.Consumer<Boolean>? = null
     private val apiPreferences by lazy { getSharedPreferences("assistant_settings", MODE_PRIVATE) }
@@ -71,10 +73,14 @@ class AssistantService : Service() {
     private var lastKind = "photo"
     private val taps = TapSequence()
     private var burstRecording = false
+    private var burstConfig = InteractionConfig()
     private var lastFinished: String? = null
     private val settleTaps = Runnable {
         val count = taps.settle()
-        if (count > 0 && alive) dispatchAction(config.action(count, burstRecording))
+        if (count > 0 && alive) {
+            if ((recorder != null) != burstRecording) toast("录音状态已改变，请重新操作")
+            else dispatchAction(burstConfig.gestureAction(BubbleGesture.taps(count), burstRecording))
+        }
     }
     private val preferencesListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         val updated = preferences.load()
@@ -105,7 +111,9 @@ class AssistantService : Service() {
             bubbleVisual?.invalidate()
             val recording = recorder != null
             bubble?.contentDescription = (if(recording)"AlwaySide 正在录音。" else "AlwaySide。") +
-                listOf(1 to "单击",2 to "双击",3 to "三击",4 to "长按").joinToString("，") { (count,label) -> "$label：${AssistantActions.choices[config.action(count,recording)]}" }
+                BubbleGesture.entries.filter { !it.directional || config.longPressSlide }.joinToString("，") { gesture ->
+                    "${gesture.title}：${GestureBindings.title(config.gestureAction(gesture, recording))}"
+                }
             val current = recorder
             if (current != null) ProbeState.lastEvent = String.format(Locale.getDefault(), "正在听 %.1f 秒%s", current.seconds, if (finishingAudio) "，正在结束" else "")
             main.postDelayed(this, 250)
@@ -219,7 +227,7 @@ class AssistantService : Service() {
             showBubble()
             val requestedAction=if(permissionRequest!=null)intent?.getStringExtra("requestedAction") else null
             val continuation=permissionRequest?.continuation
-            if(requestedAction in setOf(AssistantActions.SCREEN,AssistantActions.CROP,AssistantActions.AUDIO)) {
+            if(requestedAction in setOf(AssistantActions.SCREEN,AssistantActions.CROP,AssistantActions.AUDIO,AssistantActions.START_AUDIO)) {
                 // The permission bridge delivers only as it leaves, with its close animation disabled.
                 // A screenshot additionally waits for two compositor frames before sampling a fresh frame.
                 main.post { if(alive) { if(continuation!=null)continuation() else dispatchAction(requestedAction!!) } }
@@ -265,7 +273,10 @@ class AssistantService : Service() {
     private fun screenSize(): Pair<Int, Int> = if (Build.VERSION.SDK_INT >= 30) windows.maximumWindowMetrics.bounds.let { it.width() to it.height() }
         else android.util.DisplayMetrics().also { windows.defaultDisplay.getRealMetrics(it) }.let { it.widthPixels to it.heightPixels }
     private fun remove(view: View?) { if (view != null) runCatching { windows.removeView(view) } }
-    private fun removeBubble() { cancelGestures(); remove(bubble); bubble = null; bubbleVisual = null; bubbleLayout = null }
+    private fun removeBubble() {
+        cancelGestures(); bubbleTouch?.dispose(); bubbleTouch = null; removeGestureHints()
+        remove(bubble); bubble = null; bubbleVisual = null; bubbleLayout = null
+    }
     private fun removeMenu() {
         if(Build.VERSION.SDK_INT>=31)menuBlurListener?.let { runCatching { windows.removeCrossWindowBlurEnabledListener(it) } }
         menuBlurListener=null
@@ -287,7 +298,34 @@ class AssistantService : Service() {
             override fun onViewDetachedFromWindow(root:View) { dispatcher?.unregisterOnBackInvokedCallback(back);dispatcher=null }
         })
     }
-    private fun cancelGestures() { main.removeCallbacks(settleTaps); taps.cancel() }
+    private fun cancelGestures() { main.removeCallbacks(settleTaps); taps.cancel(); bubbleTouch?.cancel(); removeGestureHints() }
+
+    private fun removeGestureHints() { remove(gestureHints); gestureHints = null }
+
+    private fun showGestureHints(snapshot: InteractionConfig, recording: Boolean) {
+        removeGestureHints()
+        val ball = bubbleLayout ?: return
+        val size = screenSize()
+        val left = ball.x + ball.width / 2 < size.first / 2
+        fun title(gesture: BubbleGesture): String {
+            val action = snapshot.gestureAction(gesture, recording)
+            return if (action == AssistantActions.NONE) "未分配"
+                else if (recording && action in setOf(AssistantActions.SCREEN, AssistantActions.CROP)) "结束录音后可用"
+                else GestureBindings.title(action)
+        }
+        val hints = BubbleGestureHintsView(uiContext,
+            listOf(BubbleGesture.UP, BubbleGesture.DOWN, BubbleGesture.INWARD).associateWith(::title), left, title(BubbleGesture.HOLD))
+        hints.measure(View.MeasureSpec.makeMeasureSpec((size.first - dp(16)).coerceAtLeast(dp(48)), View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec((size.second - dp(16)).coerceAtLeast(dp(48)), View.MeasureSpec.AT_MOST))
+        val layout = params(hints.measuredWidth, hints.measuredHeight, false).apply {
+            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            alpha = .8f
+            x = (ball.x + ball.width / 2 - hints.anchorX).coerceIn(0, (size.first - width).coerceAtLeast(0))
+            y = (ball.y + ball.height / 2 - hints.anchorY).coerceIn(0, (size.second - height).coerceAtLeast(0))
+        }
+        try { windows.addView(hints, layout); gestureHints = hints; hints.showAnimated() }
+        catch (_: RuntimeException) { remove(hints) }
+    }
 
     private fun requestAppearanceRefresh() {
         appearancePending = true
@@ -343,48 +381,52 @@ class AssistantService : Service() {
             x = if (position.first) 0 else (size.first - dp(48)).coerceAtLeast(0)
             y = (position.second * size.second).toInt().coerceIn(dp(8), (size.second - dp(100)).coerceAtLeast(dp(8)))
         }
-        var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var dragged = false; var held = false
-        val longPress = Runnable {
-            if (!dragged && bubble === view) {
-                held = true; cancelGestures(); dispatchAction(config.action(4, recorder != null))
-            }
-        }
+        var startX = layout.x; var startY = layout.y
+        var touchRecording = recorder != null
+        var touchConfig = config
         view.setOnClickListener { dispatchAction(config.action(1, recorder != null)) }
-        view.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    config = preferences.load()
-                    downX = event.rawX; downY = event.rawY; startX = layout.x; startY = layout.y; dragged = false; held = false
-                    main.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX - downX; val dy = event.rawY - downY
-                    if (!held && (abs(dx) > ViewConfiguration.get(this).scaledTouchSlop || abs(dy) > ViewConfiguration.get(this).scaledTouchSlop)) {
-                        dragged = true; main.removeCallbacks(longPress); cancelGestures(); removeMenu()
-                    }
-                    if (dragged && bubble === view) {
-                        layout.x = (startX + dx).toInt().coerceIn(0, (size.first - layout.width).coerceAtLeast(0))
-                        layout.y = (startY + dy).toInt().coerceIn(dp(8), (size.second - dp(100)).coerceAtLeast(dp(8)))
-                        windows.updateViewLayout(view, layout)
-                    }
-                }
-                MotionEvent.ACTION_UP -> {
-                    main.removeCallbacks(longPress)
-                    if (dragged) {
-                        layout.x = if (layout.x + layout.width / 2 < size.first / 2) 0 else (size.first - layout.width).coerceAtLeast(0)
-                        preferences.saveBall(layout.x == 0, layout.y.toFloat() / size.second)
-                        if (bubble === view) windows.updateViewLayout(view, layout)
-                    } else if (!held) {
-                        main.removeCallbacks(settleTaps)
-                        val count = taps.tap(SystemClock.uptimeMillis())
-                        if (count == 1) burstRecording = recorder != null
-                        if (count == 3) settleTaps.run() else main.postDelayed(settleTaps, taps.gapMillis)
-                    }
-                }
-                MotionEvent.ACTION_CANCEL -> { main.removeCallbacks(longPress); cancelGestures() }
-            }
-            true
+        view.setOnLongClickListener { dispatchAction(config.gestureAction(BubbleGesture.HOLD, recorder != null)); true }
+        view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            view.systemGestureExclusionRects = if (config.longPressSlide) listOf(Rect(0, 0, view.width, view.height)) else emptyList()
         }
+        bubbleTouch = BubbleTouchController(view, glyph, config = {
+            main.removeCallbacks(settleTaps)
+            config = preferences.load(); touchConfig = config; touchRecording = recorder != null
+            startX = layout.x; startY = layout.y
+            config
+        }, onLeft = { layout.x + layout.width / 2 < size.first / 2 }, onGesture = { gesture ->
+            if (alive && bubble === view) {
+                if (touchRecording != (recorder != null)) {
+                    cancelGestures(); toast("录音状态已改变，请重新操作")
+                } else if (gesture == BubbleGesture.SINGLE) {
+                    if (taps.pending && burstRecording != touchRecording) taps.cancel()
+                    val count = taps.tap(SystemClock.uptimeMillis())
+                    if (count == 1) { burstRecording = touchRecording; burstConfig = touchConfig }
+                    if (count == 3) settleTaps.run() else main.postDelayed(settleTaps, taps.gapMillis)
+                } else {
+                    cancelGestures()
+                    val action = touchConfig.gestureAction(gesture, touchRecording)
+                    if (gesture.directional && action == AssistantActions.NONE) toast("此方向未绑定功能")
+                    else dispatchAction(action)
+                }
+            }
+        }, onMove = { dx, dy ->
+            main.removeCallbacks(settleTaps); taps.cancel(); removeMenu()
+            if (bubble === view) {
+                layout.x = (startX + dx).toInt().coerceIn(0, (size.first - layout.width).coerceAtLeast(0))
+                layout.y = (startY + dy).toInt().coerceIn(dp(8), (size.second - dp(100)).coerceAtLeast(dp(8)))
+                runCatching { windows.updateViewLayout(view, layout) }
+            }
+        }, onMoveEnd = {
+            layout.x = if (layout.x + layout.width / 2 < size.first / 2) 0 else (size.first - layout.width).coerceAtLeast(0)
+            preferences.saveBall(layout.x == 0, layout.y.toFloat() / size.second)
+            if (bubble === view) runCatching { windows.updateViewLayout(view, layout) }
+        }, onArmedChanged = { armed ->
+            if (armed) { main.removeCallbacks(settleTaps); taps.cancel(); showGestureHints(touchConfig, touchRecording) }
+            else removeGestureHints()
+        }, onPreview = { dx, dy -> gestureHints?.preview(dx, dy) }, onCancel = {
+            main.removeCallbacks(settleTaps); taps.cancel(); removeGestureHints()
+        })
         try { windows.addView(view, layout); bubble = view; bubbleVisual = glyph; bubbleLayout = layout }
         catch (_: RuntimeException) { toast("悬浮权限不可用，请从应用重新开启"); stopSelf() }
     }
@@ -395,6 +437,8 @@ class AssistantService : Service() {
             AssistantActions.SCREEN -> captureNew(false)
             AssistantActions.CROP -> captureNew(true)
             AssistantActions.AUDIO -> if (recorder != null) finishRecording(false) else startRecording()
+            AssistantActions.START_AUDIO -> if (recorder == null) startRecording() else toast("已经在录音中")
+            AssistantActions.END_AUDIO -> if (recorder != null) finishRecording(false) else toast("当前没有录音")
             AssistantActions.CANCEL_AUDIO -> cancelRecording(true)
             AssistantActions.MENU -> showMenu()
             AssistantActions.LAST -> nodes[lastKind]?.let { showWindow(it) } ?: toast("还没有悬浮会话，先截图或听一段")
@@ -923,7 +967,7 @@ class AssistantService : Service() {
         nodes["audio"]?.takeIf{it.awaitingAudioApproval}?.let {
             showWindow(it);toast("上一段录音已达上限，请先选择转写或丢弃");return
         }
-        if(projection==null || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestCaptureConsent(AssistantActions.AUDIO);return}
+        if(projection==null || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestCaptureConsent(AssistantActions.START_AUDIO);return}
         val source=projection?:return
         if(nodes["audio"]?.chat?.busy==true){toast("请先等待或取消当前音频回答");showWindow(nodes.getValue("audio"));return}
         removeMenu();hideUnpinned();stopPlayback();audioManual=false

@@ -4,6 +4,7 @@ package com.alwayside.android
 internal class TapSequence(val gapMillis: Long = 280) {
     private var count = 0
     private var last = Long.MIN_VALUE
+    val pending: Boolean get() = count > 0
     fun tap(now: Long): Int {
         count = if (count > 0 && now - last in 0..gapMillis) count + 1 else 1
         last = now

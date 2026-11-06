@@ -37,7 +37,7 @@ internal class SettingsScreen(
         PROMPTS("提示词", "默认问题与音频输出", android.R.drawable.ic_menu_edit),
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
-        GESTURES("快捷动作", "空闲与录音中的手势", android.R.drawable.ic_menu_directions),
+        GESTURES("快捷动作", "功能绑定与长按滑动", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "窗口行为与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "历史上限、录音与媒体保留", android.R.drawable.ic_menu_recent_history),
         HELP("帮助与引导", "新手引导与使用准备", android.R.drawable.ic_menu_help),
@@ -291,27 +291,10 @@ internal class SettingsScreen(
     }
 
     private fun gesturePage(config: InteractionConfig) {
-        section("空闲时", "单击和双击会短暂等待，以识别连续点击。拖动只移动悬浮球。")
-        choice("singleAction", "单击", config.singleAction, AssistantActions.choices)
-        choice("doubleAction", "双击", config.doubleAction, AssistantActions.choices)
-        choice("tripleAction", "三击", config.tripleAction, AssistantActions.choices)
-        choice("longAction", "长按", config.longAction, AssistantActions.choices)
-        section("录音中", "取消录音会直接丢弃，不上传。\n\n「开始／结束录音并处理」会结束录音，再按自动处理设置执行。")
-        choice("recordingSingleAction", "单击", config.recordingSingleAction, AssistantActions.choices)
-        choice("recordingDoubleAction", "双击", config.recordingDoubleAction, AssistantActions.choices)
-        choice("recordingTripleAction", "三击", config.recordingTripleAction, AssistantActions.choices)
-        choice("recordingLongAction", "长按", config.recordingLongAction, AssistantActions.choices)
-        action("恢复默认手势") {
-            MaterialAlertDialogBuilder(this).setTitle("恢复默认快捷动作？")
-                .setMessage("仅恢复空闲与录音中的八项动作。")
-                .setNegativeButton("取消", null).setPositiveButton("恢复默认") { _, _ ->
-                    val d = InteractionConfig()
-                    if (persistInteraction { it.copy(singleAction = d.singleAction, doubleAction = d.doubleAction,
-                        tripleAction = d.tripleAction, longAction = d.longAction,
-                        recordingSingleAction = d.recordingSingleAction, recordingDoubleAction = d.recordingDoubleAction,
-                        recordingTripleAction = d.recordingTripleAction, recordingLongAction = d.recordingLongAction) }) showPage(page)
-                }.showTracked()
-        }
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(content, LinearLayout.LayoutParams(-1, -2))
+        GestureSettingsUi(this, content, config, load = interactionStore::load,
+            save = ::persistInteraction, showDialog = { it.showTracked() }).render()
     }
 
     private fun windowPage(config: AppConfig, interaction: InteractionConfig) {

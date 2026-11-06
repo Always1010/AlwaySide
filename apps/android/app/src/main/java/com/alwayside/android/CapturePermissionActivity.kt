@@ -28,7 +28,7 @@ class CapturePermissionActivity : ThemedActivity() {
         setContentView(column().apply {
             setBackgroundColor(BACKGROUND); gravity = Gravity.CENTER_VERTICAL; fitsSystemWindows = true
             addView(label("AlwaySide", 20f))
-            addView(label(if (requestedAction == "audio") "允许系统授权后，开始听一段。" else "允许系统授权后，截取当前画面。", 12f, true).apply {
+            addView(label(if (requestedAction in setOf("audio", AssistantActions.START_AUDIO)) "允许系统授权后，开始听一段。" else "允许系统授权后，截取当前画面。", 12f, true).apply {
                 setPadding(0, dp(10), 0, 0)
             })
             layoutParams = LinearLayout.LayoutParams(-1, -1)
@@ -44,12 +44,12 @@ class CapturePermissionActivity : ThemedActivity() {
 
     private fun requestNextPermission() {
         if (!ProbeState.serviceRunning) { stage = "done"; finishPermissionFlow(); return }
-        if (requestedAction !in setOf("screen", "crop", "audio")) {
+        if (requestedAction !in setOf("screen", "crop", "audio", AssistantActions.START_AUDIO)) {
             cancel("无法识别采集操作，请重试")
             return
         }
         try {
-            if (requestedAction == "audio" && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            if (requestedAction in setOf("audio", AssistantActions.START_AUDIO) && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 stage = "audio"
                 requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 21)
                 return
