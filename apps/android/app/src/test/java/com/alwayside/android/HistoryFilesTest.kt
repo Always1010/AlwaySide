@@ -13,15 +13,18 @@ class HistoryFilesTest {
     private class Disk : HistoryFileAccess {
         val values = linkedMapOf<String, ByteArray>()
         var reads = 0
+        val readNames = mutableListOf<String>()
+        val writeNames = mutableListOf<String>()
         var rejectWrite: (String) -> Boolean = { false }
         var rejectDelete: (String) -> Boolean = { false }
         override fun read(name: String, maxBytes: Int?): ByteArray? {
-            reads++
+            reads++; readNames.add(name)
             return values[name]?.also { check(maxBytes == null || it.size <= maxBytes) { "Too large" } }
         }
         override fun write(name: String, bytes: ByteArray) {
             if (rejectWrite(name)) throw IOException("disk full")
             values[name] = bytes
+            writeNames.add(name)
         }
         override fun delete(name: String) {
             if (rejectDelete(name)) throw IOException("delete failed")
@@ -132,14 +135,15 @@ class HistoryFilesTest {
         assertEquals(longConversation, reloaded.conversations.first())
     }
 
-    @Test fun repeatedReadsUseCommittedSnapshotAndFailedWritesCannotReplaceIt() {
+    @Test fun repeatedSummaryReadsUseCommittedIndexAndFailedWritesCannotReplaceIt() {
         val disk = Disk()
         val files = repository(disk)
         val empty = files.load()
         val initial = HistoryState(listOf(value("a", 1)))
         files.commit(empty, initial)
         val readCount = disk.reads
-        repeat(10) { assertEquals(initial, files.load()) }
+        val summary = initial.copy(conversations = initial.conversations.map(HistorySummary::of))
+        repeat(10) { assertEquals(summary, files.loadIndex()) }
         assertEquals(readCount, disk.reads)
         val next = initial.copy(historyLimit = 600)
         disk.rejectWrite = { it == HistoryFiles.MANIFEST }
@@ -209,4 +213,58 @@ class HistoryFilesTest {
         files.clear()
         assertTrue(disk.records().isEmpty())
     }
+    @Test fun collectionEditsAndVersionThreeStartupReadOnlySummariesWhileBodiesRemainComplete() {
+        val disk = Disk()
+        val original = value("large", 1).copy(messages = List(302) { ChatMessage("assistant", "完整消息 $it" + "文".repeat(1000)) })
+        val files = repository(disk)
+        val empty = files.load()
+        files.commit(empty, HistoryState(listOf(original)))
+        val committedRecord = disk.records().single()
+        val bytes = disk.values.getValue(committedRecord).clone()
+        disk.readNames.clear(); disk.writeNames.clear()
+        val reopened = repository(disk)
+        val index = reopened.loadIndex()
+        assertEquals(listOf(HistoryFiles.MANIFEST), disk.readNames)
+        assertEquals(HistorySummary.of(original), index.conversations.single())
+        assertTrue(index.conversations.single().messages.isEmpty())
+        assertEquals(180, index.conversations.single().evidence.length)
+        reopened.change { HistoryCollection.createTag(it, "工作") }
+        reopened.change { HistoryCollection.favorite(it, original.id, true, 5) }
+        reopened.change { HistoryCollection.setTags(it, original.id, listOf("工作")) }
+        reopened.change { HistoryCollection.renameTag(it, "工作", "学习") }
+        assertEquals(listOf(HistoryFiles.MANIFEST), disk.readNames)
+        assertTrue(disk.writeNames.all { it == HistoryFiles.MANIFEST })
+        assertArrayEquals(bytes, disk.values[committedRecord])
+        val loaded = repository(disk).find(original.id)!!
+        assertEquals(original.copy(favoriteAt = 5, tags = listOf("学习")), loaded)
+        assertEquals(302, loaded.messages.size)
+    }
+
+    @Test fun versionTwoMigrationIsAtomicAndReadsEachBodyOnceWithoutRewritingIt() {
+        val disk = Disk()
+        val originals = listOf(value("a", 1), value("b", 2))
+        val names = originals.mapIndexed { position, value ->
+            val name = "00000000-0000-0000-0000-" + position.toString().padStart(12, '0') + ".json"
+            disk.values[name] = encode(HistoryArchive.record(value))
+            mapOf("id" to value.id, "file" to name)
+        }
+        val manifest = encode(mapOf("version" to 2, "historyLimit" to 700, "tags" to emptyList<String>(), "records" to names))
+        disk.values[HistoryFiles.MANIFEST] = manifest
+        disk.rejectWrite = { it == HistoryFiles.MANIFEST }
+        val files = repository(disk)
+        assertThrows(IOException::class.java) { files.loadIndex() }
+        assertArrayEquals(manifest, disk.values[HistoryFiles.MANIFEST])
+        disk.rejectWrite = { false }; disk.readNames.clear(); disk.writeNames.clear()
+        val index = files.loadIndex()
+        assertEquals(700, index.historyLimit)
+        assertEquals(originals.sortedByDescending { it.updatedAt }.map(HistorySummary::of), index.conversations)
+        assertEquals(3, disk.readNames.size)
+        assertEquals(listOf(HistoryFiles.MANIFEST), disk.writeNames)
+        assertEquals(3, (decode(disk.values.getValue(HistoryFiles.MANIFEST))["version"] as Number).toInt())
+        disk.readNames.clear()
+        assertEquals(index, repository(disk).loadIndex())
+        assertEquals(listOf(HistoryFiles.MANIFEST), disk.readNames)
+        assertEquals(originals.sortedByDescending { it.updatedAt }, repository(disk).load().conversations)
+    }
+
 }

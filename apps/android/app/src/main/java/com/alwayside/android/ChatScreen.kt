@@ -434,7 +434,7 @@ internal class ChatScreen(
 
     private fun refreshCollectionState() {
         if (!ready) return
-        runCatching { collectionStore.find(session.conversationId) }
+        runCatching { collectionStore.summary(session.conversationId) }
             .onSuccess { favorite = it?.isFavorite == true }
         renderCollectionActions()
     }
@@ -454,10 +454,10 @@ internal class ChatScreen(
     private fun toggleFavorite() {
         if (!ready) return
         runCatching {
-            var stored = collectionStore.find(session.conversationId)
+            var stored = collectionStore.summary(session.conversationId)
             if (stored == null) {
                 collectionStore.save(session.snapshot())
-                stored = collectionStore.find(session.conversationId)
+                stored = collectionStore.summary(session.conversationId)
             }
             collectionStore.setFavorite(session.conversationId, stored?.isFavorite != true)
             favorite = stored?.isFavorite != true

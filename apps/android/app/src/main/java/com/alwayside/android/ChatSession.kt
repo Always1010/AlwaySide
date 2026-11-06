@@ -19,13 +19,15 @@ internal class ChatSession(
     private val saveHistory: (StoredConversation) -> Unit,
     private val changed: () -> Unit,
     private val credentialsCurrent: (AppConfig, Boolean, Boolean) -> Boolean = { _, _, _ -> true },
+    private val saveHistoryAsync: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null,
 ) {
     constructor(context: Context, changed: () -> Unit) : this(
         AiProvider(), androidDispatcher(), Executors.newSingleThreadExecutor(),
         HistoryStore(context)::save, changed,
-        credentialValidator(context),
+        credentialValidator(context), HistoryStore(context)::saveAsync,
     )
     private var observer: (() -> Unit)? = null
+    private var closed = false
     fun setObserver(observer: (() -> Unit)?) { this.observer = observer }
     private fun notifyChanged() { changed(); observer?.invoke() }
     private fun post(action: () -> Unit) = dispatch(action)
@@ -233,9 +235,20 @@ internal class ChatSession(
     }
     private fun archive() {
         updatedAt = maxOf(System.currentTimeMillis(), updatedAt + 1)
-        runCatching { saveHistory(snapshot()) }.onFailure { status += " · 本地历史保存失败" }
+        val value = snapshot()
+        val asynchronous = saveHistoryAsync
+        if (asynchronous == null) {
+            runCatching { saveHistory(value) }.onFailure { status += " · 本地历史保存失败" }
+        } else asynchronous(value) {
+            post {
+                if (!closed && id == value.id && updatedAt == value.updatedAt) {
+                    status += " · 本地历史保存失败"
+                    notifyChanged()
+                }
+            }
+        }
     }
-    fun close() { if (busy) cancel(); epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
+    fun close() { if (busy) cancel(); closed = true; epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
     private fun audioKey(file: File, config: AppConfig): String {
         val target = ProviderConnections.transcription(config)
         return "${file.absolutePath}:${file.length()}:${file.lastModified()}:${target.connectionId}:${target.endpointId}:${target.credentialId}:${target.baseUrl}:${target.apiProtocol}:${target.transcriptionModel}:${target.credentialRevision}:${target.transcriptionPrompt}:${target.transcriptionLanguage}"

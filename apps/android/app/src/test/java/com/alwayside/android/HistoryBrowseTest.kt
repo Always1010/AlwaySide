@@ -109,4 +109,23 @@ class HistoryBrowseTest {
         assertNull(HistoryDateRange.restore(range.end.toString(), range.start.toString()))
         assertThrows(IllegalArgumentException::class.java) { HistoryDateRange(range.end, range.start) }
     }
+    @Test fun backgroundSearchReadsOnlyScopedBodiesAndKeepsOnlySummariesIncludingDeepTextMatches() {
+        val deep = record("deep", 3, listOf("工作"), "文".repeat(500) + "needle")
+        val title = record("needle title", 2, listOf("工作"))
+        val outside = record("outside", text = "needle")
+        val values = listOf(deep, title, outside)
+        val summaries = values.map(HistorySummary::of)
+        val reads = mutableListOf<String>()
+        val browse = HistoryBrowse(favorites = true, tag = "工作", query = "NEEDLE")
+        val found = HistorySearch.run(browse, summaries, { id ->
+            reads.add(id); values.find { it.id == id }
+        })
+        assertEquals(listOf("deep"), reads)
+        assertEquals(listOf("deep", "needle title"), found.map { it.id })
+        assertTrue(found.all { it.messages.isEmpty() && it.transcript.isEmpty() && it.sourceText.isEmpty() })
+        assertThrows(java.util.concurrent.CancellationException::class.java) {
+            HistorySearch.run(browse, summaries, { error("An obsolete query must not read a body") }, { true })
+        }
+    }
+
 }

@@ -5,25 +5,34 @@ import android.util.AtomicFile
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileNotFoundException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 /** Local archive outside Android backup; favorites never participate in automatic retention. */
 internal class HistoryStore(context: Context) {
     private val media = ConversationMediaStore(context)
-    private val files = synchronized(lock) {
-        val root = context.noBackupFilesDir.canonicalFile
-        repositories.getOrPut(root.path) {
-            HistoryFiles(AndroidHistoryFiles(root),
+    private val repository = context.noBackupFilesDir.canonicalFile.let { root ->
+        // Looking up an existing repository must not wait behind an unrelated long body write.
+        repositories.computeIfAbsent(root.path) {
+            Repository(HistoryFiles(AndroidHistoryFiles(root),
                 { WireJson.encode(it).toByteArray(Charsets.UTF_8) },
-                { WireJson.decode(it.toString(Charsets.UTF_8)) })
+                { WireJson.decode(it.toString(Charsets.UTF_8)) }), HistoryPendingWrites(lock, writer))
         }
     }
 
-    fun list(): List<StoredConversation> = synchronized(lock) { files.load().conversations }
-    fun find(id: String): StoredConversation? = synchronized(lock) { files.load().conversations.find { it.id == id } }
-    fun historyLimit(): Int = synchronized(lock) { files.load().historyLimit }
-    fun tags(): List<String> = synchronized(lock) { files.load().tags }
+    private val files get() = repository.files
+    fun index(): HistoryState = files.cachedIndex() ?: synchronized(lock) { files.loadIndex() }
+    /** Display summaries; use find for the complete body of a single conversation. */
+    fun list(): List<StoredConversation> = index().conversations
+    fun summary(id: String): StoredConversation? = index().conversations.find { it.id == id }
+    fun find(id: String): StoredConversation? = synchronized(lock) { files.find(id) }
+    fun historyLimit(): Int = index().historyLimit
+    fun tags(): List<String> = index().tags
 
-    fun save(value: StoredConversation) = change { HistoryCollection.save(it, value, System.currentTimeMillis()) }
+    fun save(value: StoredConversation) = change(value.id) { HistoryCollection.save(it, value, System.currentTimeMillis()) }
+    fun saveAsync(value: StoredConversation, failed: (Exception) -> Unit) {
+        repository.pending.submit(value.id, { save(value) }, failed, value.updatedAt)
+    }
     fun setHistoryLimit(limit: Int) = change {
         require(limit > 0) { "历史数量须大于 0" }
         HistoryCollection.retain(it.copy(historyLimit = limit))
@@ -38,22 +47,28 @@ internal class HistoryStore(context: Context) {
     fun createTag(name: String) = change { HistoryCollection.createTag(it, name.trim()) }
     fun renameTag(old: String, new: String) = change { HistoryCollection.renameTag(it, old, new.trim()) }
     fun deleteTag(name: String) = change { HistoryCollection.deleteTag(it, name) }
-    fun delete(id: String) = change { it.copy(conversations = it.conversations.filterNot { value -> value.id == id }) }
+    fun delete(id: String) = synchronized(lock) {
+        change { it.copy(conversations = it.conversations.filterNot { value -> value.id == id }) }
+        repository.pending.invalidate(id)
+    }
     fun clear() = synchronized(lock) {
-        files.clear { media.clear() }
+        files.clear { repository.pending.invalidateAll(); media.clear() }
     }
 
-    private fun change(transform: (HistoryState) -> HistoryState) = synchronized(lock) {
-        val old = files.load()
-        val next = transform(old)
-        files.commit(old, next)
+    private fun change(bodyId: String? = null, transform: (HistoryState) -> HistoryState) = synchronized(lock) {
+        val (old, next) = files.change(bodyId, transform)
         val remaining = next.conversations.map { it.id }.toSet()
-        old.conversations.filterNot { it.id in remaining }.forEach { media.delete(it.id) }
+        old.conversations.filterNot { it.id in remaining }.forEach {
+            repository.pending.invalidate(it.id)
+            media.delete(it.id)
+        }
     }
 
     private companion object {
         val lock = Any()
-        val repositories = mutableMapOf<String, HistoryFiles>()
+        val writer = Executors.newSingleThreadExecutor()
+        data class Repository(val files: HistoryFiles, val pending: HistoryPendingWrites)
+        val repositories = ConcurrentHashMap<String, Repository>()
     }
 }
 

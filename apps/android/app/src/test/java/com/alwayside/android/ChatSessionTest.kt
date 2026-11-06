@@ -580,14 +580,27 @@ class ChatSessionTest {
         assertEquals(122, h.session.messages.size)
     }
 
-    private class Harness {
+    @Test fun lateAsynchronousArchiveFailureCannotChangeANewConversation() {
+        val failed = mutableListOf<(Exception) -> Unit>()
+        val h = Harness { _, report -> failed.add(report) }
+        h.session.submit(h.config, "old question", null, "text")
+        h.worker.runNext(); h.drainMain()
+        assertTrue(failed.isNotEmpty())
+        h.session.newConversation()
+        failed.forEach { it(IllegalStateException("storage full")) }
+        h.drainMain()
+        assertEquals("新会话", h.session.status)
+        assertTrue(h.session.messages.isEmpty())
+    }
+
+    private class Harness(async: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null) {
         val config = AppConfig(apiKey = "fixture-key")
         val gateway = FakeGateway()
         val worker = ManualExecutor()
         val posted = ArrayDeque<() -> Unit>()
         private val archive = linkedMapOf<String, StoredConversation>()
         val saved: List<StoredConversation> get() = archive.values.toList()
-        val session = ChatSession(gateway, { posted.addLast(it) }, worker, { archive[it.id] = it }, {})
+        val session = ChatSession(gateway, { posted.addLast(it) }, worker, { archive[it.id] = it }, {}, saveHistoryAsync = async)
 
         fun drainMain() {
             var count = 0

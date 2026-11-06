@@ -687,7 +687,7 @@ class AssistantService : Service() {
         val body=presentation.body;val header=presentation.header;val sourceContent=presentation.sourceContent
         node.pin=presentation.pin;node.content=presentation.content;node.response=presentation.response;node.status=presentation.status
         node.favorite=presentation.favorite
-        runCatching { HistoryStore(this).find(node.chat.conversationId) }
+        runCatching { HistoryStore(this).summary(node.chat.conversationId) }
             .onSuccess { node.isFavorite=it?.isFavorite==true }
             .onFailure { node.favorite?.isEnabled=false;toast("无法读取收藏状态，请重新打开小窗") }
         updateFavorite(node)
@@ -814,8 +814,8 @@ class AssistantService : Service() {
         if(node.awaitingAudioApproval){toast("请先保留或丢弃本段录音");return}
         runCatching {
             val store=HistoryStore(this)
-            var stored=store.find(node.chat.conversationId)
-            if(stored==null){store.save(node.chat.snapshot());stored=store.find(node.chat.conversationId)}
+            var stored=store.summary(node.chat.conversationId)
+            if(stored==null){store.save(node.chat.snapshot());stored=store.summary(node.chat.conversationId)}
             val favorite=stored?.isFavorite!=true
             store.setFavorite(node.chat.conversationId,favorite)
             node.isFavorite=favorite
@@ -954,10 +954,10 @@ class AssistantService : Service() {
                 input.use{
                     runCatching{
                         val history=HistoryStore(this);val media=ConversationMediaStore(this)
-                        if(history.find(id)!=null){
+                        if(history.summary(id)!=null){
                             media.saveAudio(id,it,length)
                             // A deletion may have completed while the recording was being copied.
-                            if(history.find(id)==null)media.deleteAudio(id)
+                            if(history.summary(id)==null)media.deleteAudio(id)
                         }
                     }.onFailure{error->main.post{if(alive)toast("音频未保存：${error.message?:"存储失败"}")}}
                 }
@@ -975,9 +975,9 @@ class AssistantService : Service() {
         mediaWorker.execute{
             runCatching{
                 val history=HistoryStore(this);val media=ConversationMediaStore(this)
-                if(preferences.load().saveHistoryImages&&history.find(id)!=null){
+                if(preferences.load().saveHistoryImages&&history.summary(id)!=null){
                     media.saveImages(id,original,bitmap)
-                    if(!preferences.load().saveHistoryImages||history.find(id)==null)media.deleteImage(id)
+                    if(!preferences.load().saveHistoryImages||history.summary(id)==null)media.deleteImage(id)
                 }
             }.onFailure{error->main.post{if(alive)toast("回答可继续，但图片未保存：${error.message?:"存储失败"}")}}
         }

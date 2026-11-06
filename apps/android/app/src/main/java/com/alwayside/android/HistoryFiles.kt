@@ -16,10 +16,14 @@ internal class HistoryFiles(
     private val decode: (ByteArray) -> Map<String, Any?>,
 ) {
     private var references = emptyMap<String, String>()
-    private var loaded: HistoryState? = null
+    // Only display summaries live for the lifetime of the process. Full bodies are read on demand.
+    @Volatile private var index: HistoryState? = null
 
-    fun load(): HistoryState {
-        loaded?.let { return it }
+    /** Read-only display data, published only after a complete manifest load or successful commit. */
+    fun cachedIndex(): HistoryState? = index
+
+    fun loadIndex(): HistoryState {
+        index?.let { return it }
         val manifest = files.read(MANIFEST, HistoryArchive.MAX_INDEX_BYTES)
         if (manifest == null) {
             val legacy = files.read(LEGACY)
@@ -28,13 +32,14 @@ internal class HistoryFiles(
             }
             val state = HistoryState(values, values.flatMap { it.tags }.distinct())
             references = emptyMap()
-            // Even an empty migration leaves a manifest, so failed legacy deletion can never resurrect data.
+            // An empty manifest also prevents a failed legacy deletion from resurrecting data.
             commit(HistoryState(), state, force = true)
             if (legacy != null) files.delete(LEGACY)
-            return checkNotNull(loaded)
+            return checkNotNull(index)
         }
         val root = decode(manifest)
-        check((root["version"] as? Number)?.toDouble() == 2.0) { "不支持的历史记录版本" }
+        val version = (root["version"] as? Number)?.toDouble()
+        check(version == 2.0 || version == 3.0) { "不支持的历史记录版本" }
         val limitNumber = (root["historyLimit"] as? Number)?.toLong() ?: error("历史数量格式错误")
         check(limitNumber in 1..Int.MAX_VALUE.toLong()) { "历史数量须为正整数" }
         val tags = (root["tags"] as? List<*>)?.map { it as? String ?: error("标签格式错误") }
@@ -49,51 +54,102 @@ internal class HistoryFiles(
             val name = entry["file"] as? String ?: error("会话文件名错误")
             check(RECORD_NAME.matches(name)) { "会话文件名错误" }
             check(nextReferences.put(id, name) == null) { "会话编号重复" }
-            val bytes = files.read(name) ?: error("会话文件缺失，未修改历史记录")
-            HistoryArchive.decodeRecord(decode(bytes)).also {
-                check(it.id == id && it.tags.all { tag -> tag in tags }) { "会话索引不一致" }
+            val value = if (version == 2.0) {
+                // Upgrade one record at a time; never build or retain a collection of bodies.
+                val bytes = files.read(name) ?: error("会话文件缺失，未修改历史记录")
+                HistorySummary.of(HistoryArchive.decodeRecord(decode(bytes)))
+            } else {
+                val summary = HistoryArchive.decodeRecord(entry["summary"] as? Map<*, *> ?: error("会话摘要缺失"))
+                check(summary.messages.isEmpty() && summary.transcript.isEmpty() && summary.sourceText.isEmpty()
+                    && summary.evidence.length <= 180 && summary.status.length <= 180) { "会话摘要格式错误" }
+                summary
             }
+            value.also { check(it.id == id && it.tags.all { tag -> tag in tags }) { "会话索引不一致" } }
         }
+        val state = snapshot(HistoryState(values, tags, limitNumber.toInt()))
         references = nextReferences
-        return snapshot(HistoryState(values, tags, limitNumber.toInt())).also { loaded = it }
+        // Do not mark a failed migration as loaded, or subsequent writes could hide its failure.
+        if (version == 2.0) persist(state, emptyMap()) else index = state
+        return checkNotNull(index)
     }
 
+    /** Explicit full export/test compatibility; the returned bodies are never cached. */
+    fun load(): HistoryState {
+        val state = loadIndex()
+        return state.copy(conversations = state.conversations.map { readRecord(it) })
+    }
+
+    fun find(id: String): StoredConversation? = loadIndex().conversations.find { it.id == id }?.let(::readRecord)
+
+    private fun readRecord(summary: StoredConversation): StoredConversation {
+        val name = references[summary.id] ?: error("会话索引缺失")
+        val bytes = files.read(name) ?: error("会话文件缺失，未修改历史记录")
+        val body = HistoryArchive.decodeRecord(decode(bytes))
+        check(body.id == summary.id && body.updatedAt == summary.updatedAt
+            && body.title == summary.title && body.kind == summary.kind) { "会话索引不一致" }
+        // Collection metadata is authoritative in v3 and need not rewrite the immutable body.
+        return HistorySummary.restore(body, summary)
+    }
+
+    /** Collection edits operate entirely on summaries. Only an incoming saved body is rewritten. */
+    fun change(bodyId: String? = null, transform: (HistoryState) -> HistoryState): Pair<HistoryState, HistoryState> {
+        val previous = loadIndex()
+        val next = transform(previous)
+        if (previous == next) return previous to previous
+        val bodies = if (bodyId == null) emptyMap() else
+            next.conversations.filter { it.id == bodyId }.associateBy { it.id }
+        persist(next, bodies)
+        return previous to checkNotNull(index)
+    }
+
+    /** Full-state compatibility for imports and transactional storage tests. */
     fun commit(previous: HistoryState, next: HistoryState, force: Boolean = false) {
         if (!force && previous == next) return
+        val old = previous.conversations.associateBy { it.id }
+        val changed = next.conversations.filter { references[it.id] == null || old[it.id] != it }.associateBy { it.id }
+        persist(next, changed)
+    }
+
+    private fun persist(next: HistoryState, bodies: Map<String, StoredConversation>) {
         require(next.historyLimit > 0) { "历史数量须大于 0" }
         next.tags.forEach(HistoryCollection::validateTag)
         check(next.tags.distinct().size == next.tags.size) { "标签重复" }
         check(next.conversations.map { it.id }.distinct().size == next.conversations.size) { "会话编号重复" }
-        val old = previous.conversations.associateBy { it.id }
+        // Full-state imports may include unchanged bodies as well as changed ones. Every index entry
+        // must be reduced to a summary, even when its existing immutable body file can be reused.
+        val summaries = next.conversations.map(HistorySummary::of)
         val nextReferences = linkedMapOf<String, String>()
-        next.conversations.forEach { value ->
+        summaries.forEach { value ->
             HistoryArchive.validate(value)
             check(value.tags.all { it in next.tags }) { "标签不存在" }
-            val existing = references[value.id]
-            val name = if (existing != null && old[value.id] == value) existing else {
-                val bytes = encode(HistoryArchive.record(value))
+            val body = bodies[value.id]
+            val name = if (body == null) references[value.id] ?: error("会话文件缺失") else {
+                val bytes = encode(HistoryArchive.record(body))
                 val fresh = UUID.randomUUID().toString() + ".json"
                 files.write(fresh, bytes)
                 fresh
             }
             nextReferences[value.id] = name
         }
-        val manifest = encode(linkedMapOf("version" to 2, "historyLimit" to next.historyLimit,
-            "tags" to next.tags, "records" to nextReferences.map { (id, file) -> mapOf("id" to id, "file" to file) }))
+        val state = snapshot(next.copy(conversations = summaries))
+        val manifest = encode(linkedMapOf("version" to 3, "historyLimit" to state.historyLimit,
+            "tags" to state.tags, "records" to state.conversations.map { summary ->
+                mapOf("id" to summary.id, "file" to nextReferences.getValue(summary.id),
+                    "summary" to HistoryArchive.record(summary))
+            }))
         check(manifest.size <= HistoryArchive.MAX_INDEX_BYTES) { "历史索引过大，未保存" }
         files.write(MANIFEST, manifest)
         references = nextReferences
-        loaded = snapshot(next)
-        // Cleanup happens only after the complete next collection is committed. Failed writes stay invisible.
-        // Orphan removal must not turn a committed save into a failure or skip the caller's media cleanup.
+        index = state
+        // Failed record/manifest writes stay invisible. Cleanup cannot turn a committed save into a failure.
         val live = nextReferences.values.toSet()
         runCatching { files.records() }.getOrDefault(emptyList())
             .filter { RECORD_NAME.matches(it) && it !in live }.forEach { runCatching { files.delete(it) } }
     }
 
-    /** Explicit recovery must work even when the manifest, legacy archive, or a record is corrupt. */
+    /** Recovery never needs to read a missing/corrupt body and preserves readable collection settings. */
     fun clear(onCommitted: () -> Unit = {}) {
-        val current = loaded ?: runCatching {
+        val current = index ?: runCatching {
             files.read(MANIFEST, HistoryArchive.MAX_INDEX_BYTES)?.let(decode)
         }.getOrNull()?.let { root ->
             val limit = runCatching {
@@ -106,14 +162,11 @@ internal class HistoryFiles(
             }.getOrDefault(emptyList())
             HistoryState(tags = tags, historyLimit = limit)
         } ?: HistoryState()
-        // The empty manifest stays authoritative even if removal of the old archive later fails.
-        commit(current, current.copy(conversations = emptyList()), force = true)
+        persist(current.copy(conversations = emptyList()), emptyMap())
         try {
             files.delete(LEGACY)
             files.records().filter { RECORD_NAME.matches(it) }.forEach(files::delete)
-        } finally {
-            onCommitted()
-        }
+        } finally { onCommitted() }
     }
 
     private fun snapshot(state: HistoryState): HistoryState = state.copy(

@@ -47,7 +47,7 @@ internal class CollectionTagDialogs(private val activity: Activity, private val 
     }
 
     fun editTags(ids: List<String>, collectMissing: Boolean = false, onSaved: () -> Unit = {}) {
-        val records = try { ids.mapNotNull(store::find) } catch (error: Exception) { failed(error); return }
+        val records = try { ids.mapNotNull(store::summary) } catch (error: Exception) { failed(error); return }
         if (records.isEmpty()) return
         if (!collectMissing && records.any { !it.isFavorite }) return
         val collecting = collectMissing && records.any { !it.isFavorite }
