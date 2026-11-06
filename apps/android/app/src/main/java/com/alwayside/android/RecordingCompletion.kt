@@ -37,8 +37,10 @@ internal enum class RecordingDisposition { FAILED, DISCARD, PROMPT, PROCESS, REA
 internal fun recordingDisposition(reachedLimit: Boolean, action: RecordingLimitAction,
                                   autoAskAudio: Boolean, manualQuestion: Boolean,
                                   useDefaultQuestion: Boolean = true,
-                                  captureFailed: Boolean = false): RecordingDisposition =
+                                  captureFailed: Boolean = false,
+                                  retainForPreview: Boolean = false): RecordingDisposition =
     if (captureFailed) RecordingDisposition.FAILED
+    else if (retainForPreview) RecordingDisposition.READY
     else if (reachedLimit) when (action) {
         RecordingLimitAction.DISCARD -> RecordingDisposition.DISCARD
         RecordingLimitAction.PROMPT -> RecordingDisposition.PROMPT

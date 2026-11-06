@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RecordingCompletionTest {
+    @Test fun enteringPreviewRetainsAudioWithoutAutomaticProcessingEvenIfTheLimitJustWon() {
+        RecordingLimitAction.entries.forEach { action ->
+            listOf(false, true).forEach { reachedLimit ->
+                assertEquals(RecordingDisposition.READY, recordingDisposition(reachedLimit, action, true,
+                    manualQuestion = false, retainForPreview = true))
+                assertEquals(RecordingDisposition.FAILED, recordingDisposition(reachedLimit, action, true,
+                    manualQuestion = false, captureFailed = true, retainForPreview = true))
+            }
+        }
+    }
+
     @Test fun captureFailureNeverProcessesOrRetainsPartialAudio() {
         RecordingLimitAction.entries.forEach { action ->
             listOf(false, true).forEach { reachedLimit ->

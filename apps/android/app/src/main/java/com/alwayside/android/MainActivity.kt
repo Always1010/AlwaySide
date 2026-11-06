@@ -16,6 +16,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /** One application window for history, settings and conversations. */
 class MainActivity : ThemedActivity() {
@@ -45,18 +47,21 @@ class MainActivity : ThemedActivity() {
     private var restoredHistoryBrowse = HistoryBrowse()
     private var backCallback: android.window.OnBackInvokedCallback? = null
     private var retainedChatOffered = false
+    private var previewOwner = Any()
+    private var previewForeground = true
+    private var previewRecordingAccepted = false
+    private var previewEntryDialog: AlertDialog? = null
+    private var slideLesson: LongPressSlideLesson? = null
+    private var slideDialog: AlertDialog? = null
     private val assistantStateListener: () -> Unit = {
         historyScreen?.updateAssistantAction()
         if(navigation.current == AppPage.PREPARATION)preparationScreen?.refresh()
-        if(ProbeState.serviceRunning && navigation.current == AppPage.TUTORIAL) {
-            toast("真实悬浮球已开启，已退出新手引导；请关闭后再继续查看")
-            exitTutorial()
-        }
     }
     private data class RetainedApp(
         val pages: List<String>, val chat: ChatScreen.RetainedConversation?,
         val settingsPage: String?, val historyY: Int, val historySelection: List<String>,
         val historyBrowse: HistoryBrowse,
+        val previewOwner: Any, val slideLesson: LongPressSlideLesson?,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,6 +69,10 @@ class MainActivity : ThemedActivity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         @Suppress("DEPRECATION")
         val retained = lastNonConfigurationInstance as? RetainedApp
+        previewOwner = retained?.previewOwner ?: Any()
+        slideLesson = retained?.slideLesson ?: savedInstanceState?.takeIf { it.containsKey("slide_lesson") }?.let {
+            LongPressSlideLesson(it.getInt("slide_lesson"), it.getBoolean("slide_passed"))
+        }
         val entry = AppEntry.take(intent)
         guidePreferences.initialize(onboarding.contains("overlay_prompted") || onboarding.contains("assistant_enabled") ||
             SettingsStore(this).hasSavedConfiguration())
@@ -99,6 +108,8 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun present(view: View) {
+        if (navigation.current !in setOf(AppPage.SETTINGS, AppPage.PREPARATION_SETTINGS)) dismissSlidePreview(clearLesson = true)
+        syncPreview()
         if(container.childCount != 1 || container.getChildAt(0) !== view) {
             hideKeyboard()
             (view.parent as? ViewGroup)?.removeView(view)
@@ -176,16 +187,12 @@ class MainActivity : ThemedActivity() {
 
     private fun createSettings(page: String? = null) {
         restoredSettingsPage=page
-        settingsScreen=SettingsScreen(this,::present,::navigateBack,page,::openTutorial,::openPreparation,::openHelp)
+        settingsScreen=SettingsScreen(this,::present,::navigateBack,page,::openTutorial,::openPreparation,::openHelp,::openSlidePreview)
     }
 
     private fun openHelp() { hideKeyboard();navigation.openHelp();showCurrent() }
 
-    private fun openTutorial() {
-        if(ProbeState.serviceRunning) {
-            toast("请先在首页关闭真实悬浮球，再进入新手引导，避免误触真实功能")
-            return
-        }
+    private fun openTutorial(): Unit = requestPreview {
         val progress=guidePreferences.load().start()
         guidePreferences.save(progress)
         hideKeyboard(); tutorialFlow=TutorialFlow(progress.step,progress.completedLessons); tutorialScreen=null
@@ -193,7 +200,7 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun showTutorial() {
-        if(ProbeState.serviceRunning) { exitTutorial(); return }
+        syncPreview()
         val screen=tutorialScreen ?: TutorialScreen(this,tutorialFlow,::navigateBack,::exitTutorial,
             { step -> guidePreferences.save(guidePreferences.load().advance(step,tutorialFlow.completedLessons)) },::openPreparation).also { tutorialScreen=it }
         present(screen.view)
@@ -207,6 +214,63 @@ class MainActivity : ThemedActivity() {
     private fun openPreparation() {
         hideKeyboard(); tutorialScreen=null
         navigation.openPreparation();showCurrent()
+    }
+
+    private fun requestPreview(enter: () -> Unit) {
+        if (!ProbeState.recording || previewRecordingAccepted) { enter(); return }
+        if (previewEntryDialog?.isShowing == true) return
+        val dialog = MaterialAlertDialogBuilder(this).setTitle("正在录音")
+            .setMessage("结束并保留当前录音后进入模拟体验，不会自动转写或发送。")
+            .setNegativeButton("继续录音") { _, _ -> cancelPreviewEntry() }
+            .setPositiveButton("结束并体验") { _, _ ->
+                AssistantPreview.finishRecording?.invoke()
+                previewRecordingAccepted = true
+                enter()
+            }
+            .setOnCancelListener { cancelPreviewEntry() }.create()
+        previewEntryDialog = dialog
+        dialog.setOnDismissListener { if (previewEntryDialog === dialog) previewEntryDialog = null }
+        dialog.show()
+    }
+
+    private fun cancelPreviewEntry() {
+        dismissSlidePreview(clearLesson = true)
+        if (navigation.current == AppPage.TUTORIAL) { tutorialScreen = null; navigation.openHelp(); showCurrent() }
+        syncPreview()
+    }
+
+    private fun syncPreview() {
+        val wanted = previewForeground && (navigation.current == AppPage.TUTORIAL || slideLesson != null)
+        if (wanted && ProbeState.recording && !previewRecordingAccepted && !AssistantPreview.overlays.owns(previewOwner)) {
+            requestPreview { syncPreview(); showSlidePreview() }
+            return
+        }
+        AssistantPreview.overlays.setActive(previewOwner, wanted)
+        if (!wanted) previewRecordingAccepted = false
+    }
+
+    private fun openSlidePreview(): Unit = requestPreview {
+        slideLesson = LongPressSlideLesson()
+        syncPreview(); showSlidePreview()
+    }
+
+    private fun showSlidePreview() {
+        val lesson = slideLesson ?: return
+        if (!previewForeground || !AssistantPreview.overlays.owns(previewOwner) || slideDialog != null) return
+        val dialog = LongPressSlideTutorial.show(this, InteractionPreferences(this).load(), lesson = lesson)
+        slideDialog = dialog
+        dialog.setOnDismissListener {
+            if (slideDialog === dialog) {
+                slideDialog = null
+                if (previewForeground && !isChangingConfigurations) { slideLesson = null; syncPreview() }
+            }
+        }
+    }
+
+    private fun dismissSlidePreview(clearLesson: Boolean) {
+        if (clearLesson) slideLesson = null
+        val dialog = slideDialog; slideDialog = null
+        dialog?.dismiss()
     }
 
     private fun showPreparation() {
@@ -268,7 +332,8 @@ class MainActivity : ThemedActivity() {
             AppPage.PREPARATION -> showPreparation()
             AppPage.HELP -> present(HelpScreen(this,::navigateBack,::openTutorial,::openPreparation,guidePreferences.load().completedLessons.size==TutorialLesson.entries.size).view)
             AppPage.PREPARATION_SETTINGS -> {
-                val screen=preparationSettings ?: SettingsScreen(this,::present,::navigateBack,preparationSettingsPage).also { preparationSettings=it }
+                val screen=preparationSettings ?: SettingsScreen(this,::present,::navigateBack,preparationSettingsPage,
+                    onSlideTutorial=::openSlidePreview).also { preparationSettings=it }
                 screen.show()
             }
         }
@@ -353,11 +418,17 @@ class MainActivity : ThemedActivity() {
 
     override fun onStart() {
         super.onStart()
+        previewForeground = true
+        syncPreview(); showSlidePreview()
         ProbeState.addServiceListener(assistantStateListener)
         assistantStateListener()
     }
 
     override fun onStop() {
+        previewForeground = false
+        dismissSlidePreview(clearLesson = false)
+        previewEntryDialog?.dismiss(); previewEntryDialog = null
+        if (!isChangingConfigurations) syncPreview()
         if (!isChangingConfigurations) chatScreen?.let { chat ->
             val state = Bundle().also { chat.saveState(it) }
             if (chat.returnToFloating()) {
@@ -371,7 +442,7 @@ class MainActivity : ThemedActivity() {
 
     override fun onResume() {
         super.onResume()
-        if(navigation.current == AppPage.TUTORIAL)return
+        if(navigation.current == AppPage.TUTORIAL || slideLesson != null || previewEntryDialog != null)return
         if(navigation.hasChat && chatScreen == null) {
             restoreChat()
             if(navigation.current == AppPage.CHAT)showCurrent()
@@ -390,6 +461,7 @@ class MainActivity : ThemedActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        slideLesson?.let { outState.putInt("slide_lesson", it.index); outState.putBoolean("slide_passed", it.passed) }
         outState.putStringArrayList("pages",ArrayList(navigation.snapshot()))
         outState.putString("tutorial_step",tutorialFlow.step.name)
         outState.putString("settings_page",settingsScreen?.pageName() ?: restoredSettingsPage)
@@ -413,10 +485,13 @@ class MainActivity : ThemedActivity() {
     override fun onRetainNonConfigurationInstance(): Any {
         val retained=chatScreen?.retain() ?: pendingRetainedChat;retainedChatOffered=retained!=null
         return RetainedApp(navigation.snapshot(),retained,settingsScreen?.pageName() ?: restoredSettingsPage,historyScroll?.scrollY ?: historyY,
-            historyScreen?.selectedIds() ?: restoredHistorySelection, historyScreen?.browse ?: restoredHistoryBrowse)
+            historyScreen?.selectedIds() ?: restoredHistorySelection, historyScreen?.browse ?: restoredHistoryBrowse,previewOwner,slideLesson)
     }
 
     override fun onDestroy() {
+        dismissSlidePreview(clearLesson = false)
+        previewEntryDialog?.dismiss(); previewEntryDialog = null
+        if (!isChangingConfigurations) AssistantPreview.overlays.setActive(previewOwner, false)
         if(Build.VERSION.SDK_INT>=33)backCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
         settingsScreen?.dispose();settingsScreen=null
         preparationSettings?.dispose();preparationSettings=null

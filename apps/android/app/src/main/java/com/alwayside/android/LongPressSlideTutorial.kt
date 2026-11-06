@@ -22,8 +22,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 internal object LongPressSlideTutorial {
     @SuppressLint("ClickableViewAccessibility")
     fun show(activity: Activity, config: InteractionConfig,
-        showDialog: (MaterialAlertDialogBuilder) -> AlertDialog = { it.show() }): AlertDialog = with(activity) {
-        val lesson = LongPressSlideLesson()
+        showDialog: (MaterialAlertDialogBuilder) -> AlertDialog = { it.show() },
+        lesson: LongPressSlideLesson = LongPressSlideLesson()): AlertDialog = with(activity) {
         val localConfig = config.copy(longPressSlide = true)
         val hold = maxOf(config.longPressMillis.toLong(), ViewConfiguration.getLongPressTimeout().toLong())
         val handler = Handler(Looper.getMainLooper())

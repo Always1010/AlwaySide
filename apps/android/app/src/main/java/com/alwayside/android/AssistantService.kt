@@ -67,6 +67,15 @@ class AssistantService : Service() {
     private var recorder: PlaybackRecorder? = null
     private var finishingAudio = false
     private var audioManual = false
+    private var audioForPreview = false
+    private var overlaysSuspended = false
+    private var previewWindows = emptyList<Triple<FloatingConversation, View, WindowManager.LayoutParams>>()
+    private var previewSelector: Pair<View, WindowManager.LayoutParams>? = null
+    private val deferredPreviewWindows = linkedMapOf<String, Pair<FloatingConversation, Boolean>>()
+    private val previewListener: () -> Unit = {
+        if (AssistantPreview.overlays.active) suspendPreviewWindows()
+        else if (overlaysSuspended) restorePreviewWindows()
+    }
     private val capturePermissionGate = CapturePermissionGate()
     private val requestingConsent: Boolean get() = capturePermissionGate.isPending
     private var player: MediaPlayer? = null
@@ -189,6 +198,10 @@ class AssistantService : Service() {
         preferences.addListener(preferencesListener)
         apiPreferences.registerOnSharedPreferenceChangeListener(apiPreferencesListener)
         ActiveConversationBridge.detachHandler = ::detachToApplication
+        AssistantPreview.finishRecording = {
+            if (recorder != null) { audioForPreview = true; finishRecording(true) }
+        }
+        AssistantPreview.overlays.addListener(previewListener)
         ProbeState.serviceRunning = true
         cacheDir.listFiles()?.filter { it.name.startsWith("listening-") && it.extension == "wav" && !ActiveConversationBridge.isAudioRetained(it) }?.forEach { it.delete() }
         main.post(ticker)
@@ -211,6 +224,7 @@ class AssistantService : Service() {
                 foreground(projection != null);showBubble();return START_NOT_STICKY
             }
             if (intent?.action == START || intent?.action == TEXT) AssistantControl.setEnabled(this, true)
+            if (AssistantPreview.overlays.active) { foreground(projection != null); return START_NOT_STICKY }
             foreground(intent?.action == SHARE || projection != null)
             if (intent?.action == SHARE && projection == null) {
                 @Suppress("DEPRECATION")
@@ -341,6 +355,7 @@ class AssistantService : Service() {
     }
 
     private fun showGestureHints(snapshot: InteractionConfig, recording: Boolean) {
+        if (AssistantPreview.overlays.active) return
         removeGestureHints()
         val ball = bubbleLayout ?: return
         val size = screenSize()
@@ -369,7 +384,7 @@ class AssistantService : Service() {
     private fun applyPendingAppearance() {
         // A new overlay during snapshot's two hidden compositor frames would contaminate the image.
         // Keep a live crop selector intact too; its next completed/cancelled action applies the change.
-        if (!appearancePending || !alive || gathering || selector != null || requestingConsent) return
+        if (!appearancePending || !alive || AssistantPreview.overlays.active || gathering || selector != null || requestingConsent) return
         appearancePending = false
         uiContext.baseContext = AppAppearance.themedContext(this)
         val hadMenu = menu != null
@@ -404,8 +419,58 @@ class AssistantService : Service() {
         if (hadMenu) showMenu(preserveWindows = true)
     }
 
+    private fun suspendPreviewWindows() {
+        if (!alive || overlaysSuspended) return
+        overlaysSuspended = true
+        // Invalidate pending real capture/consent and touch callbacks before displaying a simulation.
+        capturePermissionGate.cancel(); captureEpoch++
+        gathering = false; captureOwner = null; restoreCaptureWindows = null
+        removeMenu(); removeBubble(); stopPlayback()
+        previewWindows = nodes.values.mapNotNull { node ->
+            val root = node.root ?: return@mapNotNull null
+            val layout = node.layout ?: return@mapNotNull null
+            Triple(node, root, WindowManager.LayoutParams().apply { copyFrom(layout) })
+        }
+        previewSelector = selector?.let { view ->
+            (view.layoutParams as? WindowManager.LayoutParams)?.let { layout ->
+                view to WindowManager.LayoutParams().apply { copyFrom(layout) }
+            }
+        }
+        (previewWindows.map { it.second } + listOfNotNull(previewSelector?.first)).forEach { root ->
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken, 0)
+            root.clearFocus()
+            if (root.isAttachedToWindow) windows.removeViewImmediate(root)
+        }
+    }
+
+    private fun restorePreviewWindows() {
+        overlaysSuspended = false
+        val shown = previewWindows; previewWindows = emptyList()
+        val crop = previewSelector; previewSelector = null
+        val deferred = deferredPreviewWindows.values.toList(); deferredPreviewWindows.clear()
+        if (!alive) return
+        if (!AssistantControl.isEnabled(this) || !Settings.canDrawOverlays(this)) { stopSelf(); return }
+        shown.forEach { (node, root, layout) ->
+            if (!node.detached && nodes[node.kind] === node && node.root === root && !root.isAttachedToWindow) {
+                clamp(layout)
+                layout.softInputMode = (layout.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST) or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                runCatching { windows.addView(root, layout); node.layout = layout; refresh(node) }
+                    .onFailure { hideWindow(node, false); toast("小窗恢复失败，可从悬浮球重新打开") }
+            }
+        }
+        crop?.let { (root, layout) ->
+            if (selector === root && !root.isAttachedToWindow) {
+                runCatching { windows.addView(root, layout) }.onFailure { removeSelector() }
+            }
+        }
+        deferred.forEach { (node, focusQuestion) ->
+            if (!node.detached && nodes[node.kind] === node) showWindow(node, focusQuestion = focusQuestion)
+        }
+        applyPendingAppearance(); showBubble()
+    }
+
     private fun showBubble() {
-        if (!alive || bubble != null || selector != null || gathering || requestingConsent) return
+        if (!alive || AssistantPreview.overlays.active || bubble != null || selector != null || gathering || requestingConsent) return
         val size = screenSize()
         val position = preferences.ballPosition()
         val view = FrameLayout(uiContext).apply { isClickable = true; isFocusable = true; accessible("AlwaySide，快捷手势可在设置中修改") }
@@ -464,7 +529,7 @@ class AssistantService : Service() {
         catch (_: RuntimeException) { toast("悬浮权限不可用，请从应用重新开启"); stopSelf() }
     }
     private fun dispatchAction(action: String) {
-        if (!alive) return
+        if (!alive || AssistantPreview.overlays.active) return
         removeMenu()
         when (action) {
             AssistantActions.SCREEN -> captureNew(false)
@@ -484,7 +549,7 @@ class AssistantService : Service() {
         startActivity(AppEntry.intent(this,page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     private fun requestCaptureConsent(action: String, continuation: (() -> Unit)? = null) {
-        if(!alive || requestingConsent)return
+        if(!alive || AssistantPreview.overlays.active || requestingConsent)return
         val requestId=capturePermissionGate.begin(continuation)
         removeMenu();hideUnpinned()
         try {
@@ -500,7 +565,7 @@ class AssistantService : Service() {
         }
     }
     private fun showMenu(preserveWindows: Boolean = false) {
-        if (gathering || selector != null) return
+        if (AssistantPreview.overlays.active || gathering || selector != null) return
         if (!preserveWindows) hideUnpinned()
         removeMenu(); showBubble()
         val body = OutsideFrame { removeMenu() }.apply {
@@ -590,6 +655,7 @@ class AssistantService : Service() {
     private fun icon(resource: Int, description: String, run: () -> Unit) = uiContext.iconButton(resource,description,run)
     private fun showWindow(node: FloatingConversation, restoredLayout: WindowManager.LayoutParams? = null, focusQuestion: Boolean = false) {
         if (!alive || node.detached || gathering) return
+        if (AssistantPreview.overlays.active) { deferredPreviewWindows[node.kind] = node to focusQuestion; return }
         removeMenu();removeSelector();if(restoredLayout==null)hideUnpinned(node);hideWindow(node,stopAudio=restoredLayout==null);lastKind=node.kind
         config=preferences.load()
         // Theme/configuration rebuilds retain the current state; a fresh invocation uses the preference.
@@ -923,6 +989,7 @@ class AssistantService : Service() {
     private fun submitDefault(node:FloatingConversation){val c=readApiConfig(node)?:return;node.automaticFirstQuestion=true;sendQuestion(node,when(node.kind){"photo"->c.defaultQuestion;"audio"->c.audioQuestion;else->c.textQuestion},c,useDefaultAudioOutput=true)}
     private fun readApiConfig(node:FloatingConversation):AppConfig?=try{SettingsStore(this).load()}catch(_:Exception){node.chat.reportSubmissionFailure(IllegalStateException("无法读取 API 配置，请在设置中重新保存密钥"));null}
     private fun sendQuestion(node:FloatingConversation,text:String,frozen:AppConfig?=null,useDefaultAudioOutput:Boolean=false){
+        if (AssistantPreview.overlays.active) return
         if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
         if(node.chat.busy||gathering||recorder!=null){toast("请先结束当前采集或请求");return}
         if(text.isBlank()){node.chat.reportSubmissionFailure(IllegalArgumentException("请输入问题"));return}
@@ -942,13 +1009,14 @@ class AssistantService : Service() {
         if(node.kind=="photo"&&node.imageMode==1)capture(node,false,true){submit()} else submit()
     }
     private fun captureNew(crop:Boolean){
+        if (AssistantPreview.overlays.active) return
         if(recorder!=null){toast("请先完成或取消录音");return}
         if(gathering){toast("正在取得画面，请稍候");return}
         if(frames==null){requestCaptureConsent(if(crop)AssistantActions.CROP else AssistantActions.SCREEN);return}
         val node=fresh("photo");capture(node,crop,false){showPrepared(node,config.autoAsk("photo"))}
     }
     private fun capture(node:FloatingConversation,crop:Boolean,reuse:Boolean,after:()->Unit){
-        if(!alive || gathering || node.detached || nodes[node.kind]!==node)return
+        if(!alive || AssistantPreview.overlays.active || gathering || node.detached || nodes[node.kind]!==node)return
         val source=frames?:run{requestCaptureConsent(AssistantActions.SCREEN){capture(node,crop,reuse,after)};return}
         val oldBounds=if(reuse)node.bounds else null;val oldSize=node.sourceSize;val oldRotation=node.rotation
         val rotation=screenRotation();val id=++captureEpoch
@@ -962,7 +1030,7 @@ class AssistantService : Service() {
         }
         restoreCaptureWindows={
             shown.forEach { (visible,root,layout) ->
-                if(alive&&!visible.detached&&nodes[visible.kind]===visible&&visible.root===root&&!root.isAttachedToWindow){
+                if(alive&&!AssistantPreview.overlays.active&&!visible.detached&&nodes[visible.kind]===visible&&visible.root===root&&!root.isAttachedToWindow){
                     clamp(layout)
                     layout.softInputMode=(layout.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST) or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
                     runCatching{windows.addView(root,layout);visible.layout=layout;refresh(visible)}
@@ -1003,6 +1071,7 @@ class AssistantService : Service() {
         showBubble()
     }
     private fun showCrop(node:FloatingConversation,frame:CapturedFrame,rotation:Int){
+        if (AssistantPreview.overlays.active) return
         removeBubble();hideUnpinned();removeSelector()
         val crop=CropView(uiContext,frame.bitmap)
         lateinit var body:LinearLayout
@@ -1021,21 +1090,22 @@ class AssistantService : Service() {
         try{windows.addView(body,layout);selector=body;body.requestFocus()}catch(_:RuntimeException){toast("无法打开框选");showBubble()}
     }
     private fun startRecording(){
-        if(recorder!=null||finishingAudio||gathering)return
+        if(AssistantPreview.overlays.active||recorder!=null||finishingAudio||gathering)return
         nodes["audio"]?.takeIf{it.awaitingAudioApproval}?.let {
             showWindow(it);toast("上一段录音已达上限，请先选择转写或丢弃");return
         }
         if(projection==null || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestCaptureConsent(AssistantActions.START_AUDIO);return}
         val source=projection?:return
         if(nodes["audio"]?.chat?.busy==true){toast("请先等待或取消当前音频回答");showWindow(nodes.getValue("audio"));return}
-        removeMenu();hideUnpinned();stopPlayback();audioManual=false
+        removeMenu();hideUnpinned();stopPlayback();audioManual=false;audioForPreview=false
         val recordingConfig=config
         val token=recordingGate.begin();val next=PlaybackRecorder(this,main);recorder=next
         try{next.start(source, recordingConfig.recordingMaxMinutes){result->
             if(!alive||recorder!==next||!recordingGate.complete(token)){result?.file?.delete();return@start}
             recorder=null;finishingAudio=false;ProbeState.recording=false
+            val retainForPreview = audioForPreview; audioForPreview = false
             if(result==null){ProbeState.lastEvent="录音采集失败，请检查权限和音源后重录";toast(ProbeState.lastEvent);return@start}
-            val disposition=recordingDisposition(result.reachedLimit,recordingConfig.recordingLimitAction,config.autoAskAudio,audioManual,config.useDefaultQuestion,captureFailed=result.error!=null)
+            val disposition=recordingDisposition(result.reachedLimit,recordingConfig.recordingLimitAction,config.autoAskAudio,audioManual,config.useDefaultQuestion,captureFailed=result.error!=null,retainForPreview=retainForPreview)
             if(disposition==RecordingDisposition.FAILED){
                 val deleted=result.file.delete()
                 ProbeState.lastEvent=if(deleted)"录音采集中断，请重录" else "录音采集中断，请重录；临时音频清理失败"
@@ -1072,7 +1142,7 @@ class AssistantService : Service() {
     private fun finishRecording(manual:Boolean){val current=recorder?:return;if(finishingAudio)return;audioManual=manual;finishingAudio=true;current.stop(false)}
     private fun cancelRecording(notify:Boolean){
         val current=recorder
-        recordingGate.cancel();recorder=null;finishingAudio=false;audioManual=false;ProbeState.recording=false
+        recordingGate.cancel();recorder=null;finishingAudio=false;audioManual=false;audioForPreview=false;ProbeState.recording=false
         current?.stop(true);removeMenu();cancelGestures();bubbleVisual?.invalidate()
         ProbeState.lastEvent=if(current!=null)"录音已取消并丢弃，没有发起请求" else "当前没有录音"
         if(notify)toast(ProbeState.lastEvent)
@@ -1122,6 +1192,8 @@ class AssistantService : Service() {
     }
     override fun onDestroy(){
         alive=false;capturePermissionGate.cancel();main.removeCallbacksAndMessages(null);ActiveConversationBridge.detachHandler=null
+        AssistantPreview.overlays.removeListener(previewListener); AssistantPreview.finishRecording = null
+        previewWindows=emptyList();previewSelector=null;deferredPreviewWindows.clear()
         AppAppearance.removeListener(this, appearanceListener)
         preferences.removeListener(preferencesListener);cancelRecording(false);stopPlayback()
         apiPreferences.unregisterOnSharedPreferenceChangeListener(apiPreferencesListener)

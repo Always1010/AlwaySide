@@ -30,6 +30,7 @@ internal class SettingsScreen(
     private val onTutorial: () -> Unit = {},
     private val onPreparation: () -> Unit = {},
     private val onHelp: () -> Unit = {},
+    private val onSlideTutorial: () -> Unit = {},
 ) : ContextWrapper(activity) {
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
@@ -285,13 +286,7 @@ internal class SettingsScreen(
         GestureSettingsUi(this, content, config, load = interactionStore::load,
             save = ::persistInteraction, showDialog = { it.showTracked() },
             showChoiceSheet = { it.showTracked() },
-            onTutorial = {
-                if (ProbeState.serviceRunning) MaterialAlertDialogBuilder(this)
-                    .setTitle("先关闭真实悬浮球")
-                    .setMessage("请先在首页关闭悬浮球，再体验模拟手势，避免误触真实功能。")
-                    .setPositiveButton("知道了", null).showTracked()
-                else LongPressSlideTutorial.show(activity, interactionStore.load(), showDialog = { it.showTracked() })
-            }).render()
+            onTutorial = onSlideTutorial).render()
     }
 
     private fun windowPage(config: AppConfig, interaction: InteractionConfig) {

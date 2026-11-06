@@ -170,4 +170,17 @@ class BubbleGestureTest {
         assertTrue(lesson.accept(null)); lesson.next()
         assertTrue(lesson.complete)
     }
+
+    @Test fun practiceRestoresItsStepAndPassedStateAfterTheHostIsRecreated() {
+        val lesson = LongPressSlideLesson()
+        lesson.accept(BubbleGesture.HOLD); lesson.next(); lesson.accept(BubbleGesture.UP)
+        val restored = LongPressSlideLesson(lesson.index, lesson.passed)
+        assertEquals(LongPressSlideLesson.Step.UP, restored.step)
+        assertTrue(restored.passed)
+        restored.next()
+        assertEquals(LongPressSlideLesson.Step.DOWN, restored.step)
+        val complete = LongPressSlideLesson(LongPressSlideLesson.Step.entries.size, true)
+        assertTrue(complete.complete)
+        assertFalse(complete.passed)
+    }
 }
