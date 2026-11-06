@@ -163,7 +163,7 @@ internal class ChatScreen(
             })
         }
         toolbar = materialToolbar("对话", onBack).apply {
-            addIconAction(4, R.drawable.ic_line_bookmark, "收藏会话") { toggleFavorite() }.isEnabled = false
+            addIconAction(4, R.drawable.ic_line_star, "收藏会话") { toggleFavorite() }.isEnabled = false
             addIconAction(1, R.drawable.ic_copy, "复制整段会话") { copyConversation() }
             addIconAction(2, android.R.drawable.ic_menu_manage, "设置") { onSettings() }
             addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
@@ -314,7 +314,7 @@ internal class ChatScreen(
     private fun renderCollectionActions() {
         val label = if (favorite) "取消收藏" else "收藏会话"
         toolbar.menu.findItem(4)?.apply {
-            icon = prototypeIcon(if (favorite) R.drawable.ic_bookmark_filled else R.drawable.ic_line_bookmark)
+            icon = prototypeIcon(if (favorite) R.drawable.ic_star_filled else R.drawable.ic_line_star)
             iconTintList = android.content.res.ColorStateList.valueOf(if (favorite) ACCENT else INK)
             title = label; contentDescription = label; tooltipText = label
             isEnabled = ready && (openedStoredRecord || session.messages.isNotEmpty() ||

@@ -192,6 +192,7 @@ internal class AssistantWindowActions(
     val pin: () -> Unit = {}, val expand: () -> Unit = {}, val toggle: () -> Unit = {},
     val cancel: () -> Unit = {}, val retry: () -> Unit = {}, val copy: () -> Unit = {},
     val imageChoice: (View) -> Unit = {}, val search: () -> Unit = {}, val send: () -> Unit = {},
+    val favorite: () -> Unit = {},
 )
 
 /** Exactly the same window hierarchy and controls for the service and the local tutorial. */
@@ -204,6 +205,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val header = context.materialToolbar(title,null,compact=true).apply {
         setTitleTextAppearance(context,R.style.TextAppearance_AlwaySide_AssistantTitle)
     }
+    val favorite = header.addIconAction(3,R.drawable.ic_line_star,"收藏会话",actions.favorite)
     val pin = header.addIconAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示",actions.pin)
     val content = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(15),context.dp(13),context.dp(15),context.dp(8)) }
     val sourceContent = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(12),context.dp(5),context.dp(12),context.dp(5)) }

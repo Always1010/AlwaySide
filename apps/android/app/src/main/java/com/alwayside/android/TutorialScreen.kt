@@ -174,6 +174,7 @@ internal class TutorialScreen(
                 },
                 send={act(TutorialAction.SEND)},
                 pin={explain("实际使用时，这里可以固定小窗。")},expand={explain("实际使用时，这里会进入应用内的完整对话。")},
+                favorite={explain("实际使用时，这里可以收藏或取消收藏会话。")},
                 copy={explain("实际使用时，这里可以复制最近回答。")},
                 imageChoice={explain("这里可选择沿用截图、更新画面或仅文字。本次保留示例截图。")},
                 search={explain("本次引导不联网；真实使用时可在这里切换联网搜索。")},

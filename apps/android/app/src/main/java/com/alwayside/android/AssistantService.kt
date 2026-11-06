@@ -159,6 +159,8 @@ class AssistantService : Service() {
         var retry: View? = null
         var copy: View? = null
         var pin: MenuItem? = null
+        var favorite: MenuItem? = null
+        var isFavorite = false
         var imageChoice: MaterialButton? = null
         var search: MaterialButton? = null
         var scroll: ScrollView? = null
@@ -581,7 +583,7 @@ class AssistantService : Service() {
         node.root=null;node.layout=null;node.response=null;node.status=null;node.requestNotice=null;node.source=null;node.sourceImage=null;node.transcript=null
         node.transcriptCopy=null
         node.audioApproval=null
-        node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
+        node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.pin=null;node.favorite=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
         node.composer=null;node.composerToggle=null
         if (stopAudio) stopPlayback()
     }
@@ -606,6 +608,7 @@ class AssistantService : Service() {
         val presentation=AssistantWindowViews(uiContext,when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"},
             node.kind=="photo",AssistantWindowActions(
                 pin={node.pinned=!node.pinned;updatePin(node)},expand={openConversationInApp(node)},
+                favorite={toggleFavorite(node)},
                 toggle={setComposerExpanded(node,!node.composerExpanded,fromUser=true)},
                 cancel={node.chat.cancel()},retry={if(!gathering)node.chat.retry()},
                 copy={
@@ -617,6 +620,11 @@ class AssistantService : Service() {
             ))
         val body=presentation.body;val header=presentation.header;val sourceContent=presentation.sourceContent
         node.pin=presentation.pin;node.content=presentation.content;node.response=presentation.response;node.status=presentation.status
+        node.favorite=presentation.favorite
+        runCatching { HistoryStore(this).find(node.chat.conversationId) }
+            .onSuccess { node.isFavorite=it?.isFavorite==true }
+            .onFailure { node.favorite?.isEnabled=false;toast("无法读取收藏状态，请重新打开小窗") }
+        updateFavorite(node)
         node.requestNotice=AssistantRequestNoticeView(uiContext) { node.chat.dismissNotice() }.also {
             presentation.noticeSlot.addView(it,FrameLayout.LayoutParams(-1,-2).apply { setMargins(dp(8),0,dp(8),dp(4)) })
         }
@@ -731,6 +739,28 @@ class AssistantService : Service() {
         contentDescription=if(node.pinned)"取消固定，之后点外部收起" else "固定窗口，点外部保持显示"
         tooltipText=contentDescription
     }}
+    private fun updateFavorite(node:FloatingConversation){node.favorite?.apply{
+        icon=uiContext.prototypeIcon(if(node.isFavorite)R.drawable.ic_star_filled else R.drawable.ic_line_star)
+        isCheckable=true;isChecked=node.isFavorite
+        iconTintList=android.content.res.ColorStateList.valueOf(if(node.isFavorite)ACCENT else MUTED)
+        title=if(node.isFavorite)"取消收藏" else "收藏会话"
+        contentDescription=title;tooltipText=title
+    }}
+    private fun toggleFavorite(node:FloatingConversation){
+        if(!alive||node.detached)return
+        if(node.awaitingAudioApproval){toast("请先保留或丢弃本段录音");return}
+        runCatching {
+            val store=HistoryStore(this)
+            var stored=store.find(node.chat.conversationId)
+            if(stored==null){store.save(node.chat.snapshot());stored=store.find(node.chat.conversationId)}
+            val favorite=stored?.isFavorite!=true
+            store.setFavorite(node.chat.conversationId,favorite)
+            node.isFavorite=favorite
+        }.onSuccess {
+            updateFavorite(node)
+            toast(if(node.isFavorite)"已收藏" else "已取消收藏，重新加入普通历史保留队列")
+        }.onFailure { toast(it.message?.take(120) ?: "无法保存收藏，请重试") }
+    }
     private fun openConversationInApp(node:FloatingConversation){
         if(!alive||gathering||node.detached||node.openingInApp)return
         if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
