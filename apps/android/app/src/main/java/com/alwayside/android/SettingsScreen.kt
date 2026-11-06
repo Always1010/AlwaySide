@@ -38,9 +38,10 @@ internal class SettingsScreen(
         PROMPTS("提示词", "默认问题与音频输出", android.R.drawable.ic_menu_edit),
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
-        GESTURES("快捷动作", "功能绑定与长按滑动", android.R.drawable.ic_menu_directions),
+        GESTURES("快捷动作", "功能与手势绑定", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "窗口行为与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "历史上限、录音与媒体保留", android.R.drawable.ic_menu_recent_history),
+        LABORATORY("实验室", "试用中的功能", android.R.drawable.ic_menu_manage),
         HELP("帮助与引导", "新手引导与使用准备", android.R.drawable.ic_menu_help),
     }
 
@@ -185,6 +186,7 @@ internal class SettingsScreen(
             Page.GESTURES -> gesturePage(interaction)
             Page.WINDOW -> windowPage(config, interaction)
             Page.MEDIA -> mediaPage(interaction)
+            Page.LABORATORY -> laboratoryPage(interaction)
             Page.HELP -> {
                 note("通过内置示例了解悬浮球、截图问答和追问。全程模拟，不联网，不调用 API，也不需要系统权限。")
                 action("查看新手引导") { finishEditing(onTutorial) }.apply { applyOnboardingPrimaryStyle() }
@@ -284,6 +286,14 @@ internal class SettingsScreen(
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(content, LinearLayout.LayoutParams(-1, -2))
         GestureSettingsUi(this, content, config, load = interactionStore::load,
+            save = ::persistInteraction, showDialog = { it.showTracked() },
+            showChoiceSheet = { it.showTracked() }).render()
+    }
+
+    private fun laboratoryPage(config: InteractionConfig) {
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(content, LinearLayout.LayoutParams(-1, -2))
+        LaboratorySettingsUi(this, content, config, load = interactionStore::load,
             save = ::persistInteraction, showDialog = { it.showTracked() },
             showChoiceSheet = { it.showTracked() },
             onTutorial = onSlideTutorial).render()
