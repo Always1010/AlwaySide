@@ -166,7 +166,7 @@ class AssistantService : Service() {
         var send: View? = null
         var cancel: View? = null
         var retry: View? = null
-        var copy: MenuItem? = null
+        var copy: View? = null
         var pin: MaterialButton? = null
         var favorite: MaterialButton? = null
         var isFavorite = false

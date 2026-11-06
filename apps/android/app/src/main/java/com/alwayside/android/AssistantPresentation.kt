@@ -11,7 +11,6 @@ import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.ContextThemeWrapper
-import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -206,7 +205,6 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val header = context.materialToolbar(title,null,compact=true).apply {
         setTitleTextAppearance(context,R.style.TextAppearance_AlwaySide_AssistantTitle)
         minimumHeight=context.dp(44)
-        overflowIcon=context.prototypeIcon(R.drawable.ic_line_more).apply { setTint(INK) }
     }
     private fun headerAction(id: Int, resource: Int, description: String, action: () -> Unit): MaterialButton {
         val context=header.context
@@ -242,7 +240,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val cancel: MaterialButton
     val retry: MaterialButton
     val resize: MaterialButton
-    val copy: MenuItem
+    val copy: MaterialButton
     val composerSection = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     val imageChoice: MaterialButton?
     val inputLayout = TextInputLayout(context,null,com.google.android.material.R.attr.textInputOutlinedStyle).apply {
@@ -267,10 +265,6 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
 
     init { with(context) {
         headerAction(2,R.drawable.ic_line_expand,"在应用中打开",actions.expand)
-        copy=header.menu.add(0,4,4,"复制最近回答").apply {
-            setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
-            setOnMenuItemClickListener { actions.copy();true }
-        }
         body.addView(header,LinearLayout.LayoutParams(-1,dp(44)))
         body.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
         val sourceCard=assistantCard(12)
@@ -286,6 +280,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         }.also { controls.addView(it,LinearLayout.LayoutParams(dp(32),dp(32))) }
         cancel=compact(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答",actions.cancel)
         retry=compact(android.R.drawable.ic_popup_sync,"重试原问题与证据",actions.retry)
+        copy=compact(R.drawable.ic_copy,"复制最近回答",actions.copy)
         resize=compact(R.drawable.ic_resize,"拖动调整窗口大小") {}
         body.addView(controls,LinearLayout.LayoutParams(-1,-2))
         composerSection.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
