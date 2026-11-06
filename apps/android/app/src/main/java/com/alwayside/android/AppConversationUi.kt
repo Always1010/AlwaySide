@@ -28,9 +28,6 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import java.text.DateFormat
 import java.util.Date
-import java.util.concurrent.Executors
-import java.util.concurrent.Future
-import java.util.concurrent.TimeUnit
 
 internal fun Context.appIcon(resource: Int, description: String, action: () -> Unit) =
     iconButton(resource, description, action)
@@ -54,10 +51,6 @@ internal class HistoryListScreen(
     private val media = ConversationMediaStore(activity)
     private val selection = HistorySelection(initialSelection, initialSelecting)
     private var values = emptyList<StoredConversation>()
-    private var visibleValues = emptyList<StoredConversation>()
-    private var loading = false
-    @Volatile private var requestVersion = 0
-    private var pendingRead: Future<*>? = null
     private var tags = emptyList<String>()
     private var readFailed = false
     private var pendingScrollY: Int? = null
@@ -68,7 +61,7 @@ internal class HistoryListScreen(
     private val selectAll = MaterialButton(activity, null, androidx.appcompat.R.attr.borderlessButtonStyle).apply {
         applyActionStyle(false)
         minimumWidth = 0; minWidth = 0
-        setOnClickListener { selection.toggleAll(visibleValues.map { it.id }); changed() }
+        setOnClickListener { selection.toggleAll(browse.visible(values).map { it.id }); changed() }
     }
     private val selectionCount = activity.label("", 18f).apply { gravity = Gravity.CENTER }
     private val selectionHeader = LinearLayout(activity).apply {
@@ -182,17 +175,10 @@ internal class HistoryListScreen(
                 val query = s?.toString().orEmpty()
                 if (query == browse.query) return
                 browse.query = query
-                selection.cancel(); pendingScrollY = 0; browse.page = 0
-                visibleValues = emptyList()
-                requestRefresh(250); onSelectionChanged()
+                selection.cancel(); pendingScrollY = 0
+                render(); onSelectionChanged()
             }
             override fun afterTextChanged(s: Editable?) = Unit
-        })
-        scrollView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(view: View) = Unit
-            override fun onViewDetachedFromWindow(view: View) {
-                requestVersion++; pendingRead?.cancel(false); pendingRead = null
-            }
         })
         refresh()
     }
@@ -206,9 +192,8 @@ internal class HistoryListScreen(
         searchInput.clearFocus(); hideSearchKeyboard()
         activity.showHistoryDateFilter(browse.dateRange) { range ->
             browse.dateRange = range
-            selection.cancel(); pendingScrollY = 0; browse.page = 0
-            visibleValues = emptyList()
-            refresh(); onSelectionChanged()
+            selection.cancel(); pendingScrollY = 0
+            render(); onSelectionChanged()
         }
     }
 
@@ -231,7 +216,10 @@ internal class HistoryListScreen(
 
     fun restoreScroll(y: Int) {
         pendingScrollY = y
-        if (!loading) render()
+        scrollView.post {
+            scrollView.scrollTo(0, y)
+            pendingScrollY = null
+        }
     }
 
     fun back(): Boolean {
@@ -240,45 +228,26 @@ internal class HistoryListScreen(
         }
         if (selection.cancel()) { changed(); return true }
         if (browse.back()) {
-            pendingScrollY = 0; visibleValues = emptyList()
-            refresh(); onSelectionChanged(); return true
+            scrollView.scrollTo(0, 0); render(); onSelectionChanged(); return true
         }
         return false
     }
 
-    fun refresh() { requestRefresh(0) }
-
-    private fun requestRefresh(delayMillis: Long) {
-        val version = ++requestVersion
-        pendingRead?.cancel(false)
-        loading = true; readFailed = false
-        val requested = HistoryBrowse(browse.favorites, browse.tag, browse.untagged, browse.query, browse.dateRange)
+    fun refresh() {
+        val wasSelecting = selecting
+        try {
+            values = store.list()
+            tags = store.tags()
+            if (browse.tag != null && browse.tag !in tags) browse.showFavorites()
+            readFailed = false
+            selection.retain(browse.visible(values).map { it.id })
+        } catch (_: Exception) {
+            values = emptyList()
+            readFailed = true
+            selection.cancel()
+        }
         render()
-        pendingRead = reader.schedule({
-            val result = runCatching {
-                val state = store.index()
-                if (requested.tag != null && requested.tag !in state.tags) requested.showFavorites()
-                val found = HistorySearch.run(requested, state.conversations, store::find) { requestVersion != version }
-                state to found
-            }
-            activity.runOnUiThread {
-                if (requestVersion != version) return@runOnUiThread
-                val wasSelecting = selecting
-                loading = false
-                result.onSuccess { (state, found) ->
-                    values = state.conversations; tags = state.tags; visibleValues = found
-                    if (browse.tag != null && browse.tag !in tags) browse.showFavorites()
-                    selection.retain(found.map { it.id })
-                    browse.page = browse.page.coerceIn(0, ((found.size - 1).coerceAtLeast(0) / PAGE_SIZE))
-                    readFailed = false
-                }.onFailure {
-                    values = emptyList(); visibleValues = emptyList()
-                    readFailed = true; selection.cancel()
-                }
-                render()
-                if (wasSelecting != selecting) onSelectionChanged()
-            }
-        }, delayMillis, TimeUnit.MILLISECONDS)
+        if (wasSelecting != selecting) onSelectionChanged()
     }
 
     private fun changed() { render(); onSelectionChanged() }
@@ -314,8 +283,8 @@ internal class HistoryListScreen(
 
     private fun render() {
         val targetY = pendingScrollY ?: scrollView.scrollY
-        if (!loading) pendingScrollY = null
-        val visible = visibleValues
+        pendingScrollY = null
+        val visible = browse.visible(values)
         newConversation.visibility = if (selecting) View.GONE else View.VISIBLE
         rows.setPadding(activity.dp(16), activity.dp(8), activity.dp(16), activity.dp(if (selecting) 24 else 168))
         searchView.visibility = if (selecting) View.GONE else View.VISIBLE
@@ -346,7 +315,7 @@ internal class HistoryListScreen(
             browse.favorites -> "我的收藏"
             else -> "全部对话"
         }
-        toolbar.subtitle=if(selecting)null else if (loading) "正在读取…" else "${visible.size} 个对话"
+        toolbar.subtitle=if(selecting)null else "${visible.size} 个对话"
         toolbar.navigationIcon = if (selecting) null else activity.prototypeIcon(R.drawable.ic_line_menu)
         toolbar.setNavigationIconTint(INK)
         toolbar.navigationContentDescription = "打开对话与收藏导航"
@@ -356,7 +325,7 @@ internal class HistoryListScreen(
         selectionCount.text = "已选 ${selection.snapshot().size} 项"
         selectAll.text = if (selection.allSelected(visible.map { it.id })) "取消全选" else "全选"
         selectAll.accessible(selectAll.text.toString())
-        selectAll.isEnabled = !loading && visible.isNotEmpty()
+        selectAll.isEnabled = visible.isNotEmpty()
         selectionActions.removeAllViews()
         selectionActions.visibility = if (selecting) View.VISIBLE else View.GONE
         if (selecting) {
@@ -399,7 +368,6 @@ internal class HistoryListScreen(
             rows.action("清空无法读取的记录") { confirmCorruptCleanup() }
         } else if (visible.isEmpty()) {
             val empty = when {
-                loading -> if (browse.query.isNotBlank()) "正在搜索…" else "正在读取…"
                 browse.query.isNotBlank() || browse.dateRange != null -> "没有找到匹配的对话。"
                 browse.tag != null || browse.untagged -> "这里还没有收藏会话。"
                 browse.favorites -> "还没有收藏。\n在对话中点击五角星即可收藏。"
@@ -409,34 +377,9 @@ internal class HistoryListScreen(
                 gravity = Gravity.CENTER; setLineSpacing(activity.dp(5).toFloat(), 1f)
                 setPadding(activity.dp(20), activity.dp(75), activity.dp(20), activity.dp(75))
             }, LinearLayout.LayoutParams(-1, -2))
-        } else {
-            val first = browse.page * PAGE_SIZE
-            visible.subList(first, minOf(first + PAGE_SIZE, visible.size)).forEach(::addRow)
-            addPaging(visible.size)
-        }
+        } else visible.forEach { value -> addRow(value) }
         renderDrawer()
-        if (!loading) scrollView.post { scrollView.scrollTo(0, targetY) }
-    }
-
-    private fun addPaging(count: Int) {
-        if (count <= PAGE_SIZE) return
-        val pages = (count - 1) / PAGE_SIZE + 1
-        rows.addView(LinearLayout(activity).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, activity.dp(16), 0, activity.dp(8))
-            fun move(delta: Int) {
-                browse.page = (browse.page + delta).coerceIn(0, pages - 1)
-                pendingScrollY = 0; render()
-            }
-            addView(activity.iconButton(android.R.drawable.ic_media_previous, "上一页对话") { move(-1) }
-                .apply { isEnabled = !loading && browse.page > 0 })
-            addView(activity.label("${browse.page + 1} / $pages", 14f, true).apply {
-                gravity = Gravity.CENTER
-                contentDescription = "第 ${browse.page + 1} 页，共 $pages 页"
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(activity.iconButton(android.R.drawable.ic_media_next, "下一页对话") { move(1) }
-                .apply { isEnabled = !loading && browse.page + 1 < pages })
-        }, LinearLayout.LayoutParams(-1, -2))
+        scrollView.post { scrollView.scrollTo(0, targetY) }
     }
 
     private fun addRow(value: StoredConversation) {
@@ -524,7 +467,7 @@ internal class HistoryListScreen(
         selection.cancel()
         if (favorites) browse.showFavorites(tag, untagged) else browse.showAll()
         drawerLayout?.closeDrawer(GravityCompat.START)
-        pendingScrollY = 0; visibleValues = emptyList(); refresh(); onSelectionChanged()
+        pendingScrollY = 0; scrollView.scrollTo(0, 0); render(); onSelectionChanged()
     }
 
     private fun renderDrawer() {
@@ -560,11 +503,6 @@ internal class HistoryListScreen(
         tags.forEach { tag ->
             entry(tag, R.drawable.ic_line_tag, favorites.count { tag in it.tags }, browse.tag == tag) { navigate(true, tag) }
         }
-    }
-
-    private companion object {
-        const val PAGE_SIZE = 50
-        val reader = Executors.newSingleThreadScheduledExecutor()
     }
 
 }

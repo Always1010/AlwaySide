@@ -92,7 +92,6 @@ class MainActivity : ThemedActivity() {
             savedInstanceState.getBoolean("history_favorites"), savedInstanceState.getString("history_tag"),
             savedInstanceState.getBoolean("history_untagged"), savedInstanceState.getString("history_query").orEmpty(),
             HistoryDateRange.restore(savedInstanceState.getString("history_date_start"), savedInstanceState.getString("history_date_end")),
-            savedInstanceState.getInt("history_page"),
         ) else retained?.historyBrowse ?: HistoryBrowse()
         container = FrameLayout(this).apply { setBackgroundColor(BACKGROUND); fitsSystemWindows = true }
         setContentView(container)
@@ -480,7 +479,6 @@ class MainActivity : ThemedActivity() {
         outState.putStringArrayList("history_selection", ArrayList(historyScreen?.selectedIds() ?: restoredHistorySelection))
         outState.putBoolean("history_selecting", historyScreen?.selecting ?: restoredHistorySelecting)
         val browse = historyScreen?.browse ?: restoredHistoryBrowse
-        outState.putInt("history_page", browse.page)
         outState.putBoolean("history_favorites", browse.favorites)
         outState.putString("history_tag", browse.tag)
         outState.putBoolean("history_untagged", browse.untagged)
