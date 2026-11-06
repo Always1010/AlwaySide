@@ -32,9 +32,11 @@ macOS / Linux 使用 `./gradlew`。APK 输出到 `app/build/outputs/apk/debug/ap
 .\package-apk.bat 1.1.2
 ```
 
-脚本自动计算与 GitHub Release 相同的 `versionCode`，离线构建 Release APK，使用正式发布证书和原签名轮换链签名，然后上传到 `ALWAYSIDE_APK_SHARE\`。产物名称包含版本号和时间，运行成功后打印完整网盘路径；本地 APK 与签名、交付记录保存在被 Git 忽略的 `.local/android-build/`。
+脚本自动计算与 GitHub Release 相同的 `versionCode`，离线构建 Release APK，使用正式发布证书和原签名轮换链签名，然后上传到本地配置指定的网盘目录。产物名称包含版本号和时间，运行成功后打印完整网盘路径；本地 APK 与签名、交付记录保存在被 Git 忽略的 `.local/android-build/`。
 
-当前入口复用本机 Python、`JAVA_HOME`、`.local/android-sdk/` 和 `.local/gradle-cache/`；正式签名文件使用 `.local/release-signing/` 下的 `alwayside-production.p12`、`production-credentials.json` 和 `alwayside.lineage`。这些工具、缓存和签名材料需要事先存在，脚本不安装依赖或修改系统环境配置，密钥与密码不进入版本控制或网盘。
+入口优先调用被 Git 忽略的 `.local/android/package-release-upload.py`，由该本地脚本设置 `JAVA_HOME` 和 `ALWAYSIDE_APK_SHARE`，再调用仓库中的 `tools/package_apk.py`。没有本地调用脚本时，也可先在当前进程环境中设置这两个变量再运行入口；真实路径和网盘地址只保存在本地，不写入项目文件。
+
+构建复用已有 Python、`.local/android-sdk/` 和 `.local/gradle-cache/`；正式签名文件使用 `.local/release-signing/` 下的 `alwayside-production.p12`、`production-credentials.json` 和 `alwayside.lineage`。这些工具、缓存和签名材料需要事先存在，脚本不安装依赖或修改系统环境配置，密钥与密码不进入版本控制或网盘。
 
 打包流程只额外检查正式证书和 V3 签名，避免误发测试签名包；不额外运行单元测试或完整 Lint，Release 构建本身保留 Gradle 默认的 `lintVitalRelease`。构建或签名失败即停止，不上传旧包。
 

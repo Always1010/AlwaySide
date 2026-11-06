@@ -13,7 +13,6 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SHARE = Path(os.environ["ALWAYSIDE_APK_SHARE"])
 RELEASE_CERTIFICATE = "42a96aa67b649d9ee3cc523e57ea9cb5e0741fb4419ba0160ebae47691b536fd"
 
 
@@ -26,6 +25,14 @@ def release_version(value):
 
 
 def package_and_upload(version):
+    settings = {}
+    for key in ("JAVA_HOME", "ALWAYSIDE_APK_SHARE"):
+        value = os.environ.get(key, "").strip()
+        if not value:
+            raise RuntimeError(f"缺少本地配置 {key}，请通过本地调用脚本或环境变量指定")
+        settings[key] = Path(value)
+    java_home = settings["JAVA_HOME"]
+    share = settings["ALWAYSIDE_APK_SHARE"]
     major, minor, patch = map(int, version.split("."))
     code = major * 1000000 + minor * 1000 + patch
     signing = ROOT / ".local/release-signing"
@@ -33,14 +40,13 @@ def package_and_upload(version):
     keystore = signing / "alwayside-production.p12"
     lineage = signing / "alwayside.lineage"
     sdk = ROOT / ".local/android-sdk"
-    java_home = Path(os.environ["JAVA_HOME"])
     java = java_home / "bin/java.exe"
     signer_jar = sdk / "build-tools/36.0.0/lib/apksigner.jar"
     for required in (keystore, lineage, java, signer_jar, sdk / "platforms/android-36/android.jar"):
         if not required.is_file():
             raise RuntimeError(f"缺少现有构建或签名文件：{required}")
-    if not SHARE.is_dir():
-        raise RuntimeError(f"网盘目录不可访问：{SHARE}")
+    if not share.is_dir():
+        raise RuntimeError(f"网盘目录不可访问：{share}")
 
     # Credentials and tool paths apply only to the child processes.
     env = os.environ.copy()
@@ -80,9 +86,9 @@ def package_and_upload(version):
         raise RuntimeError("正式证书或 V3 签名不匹配，已停止上传")
     (record / "signature.txt").write_text(signature, encoding="utf-8")
 
-    target = SHARE / name
+    target = share / name
     temporary = target.with_name(target.name + ".uploading-" + uuid.uuid4().hex)
-    print(f"上传到 {SHARE} …", flush=True)
+    print(f"上传到 {share} …", flush=True)
     try:
         with output.open("rb") as source, temporary.open("xb") as destination:
             shutil.copyfileobj(source, destination)
