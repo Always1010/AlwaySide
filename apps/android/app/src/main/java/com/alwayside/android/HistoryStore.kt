@@ -2,66 +2,103 @@ package com.alwayside.android
 
 import android.content.Context
 import android.util.AtomicFile
-import java.io.File
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileNotFoundException
 
-/** A bounded, text-only local archive. The file is excluded from Android backup. */
+/** Local archive outside Android backup; favorites never participate in automatic retention. */
 internal class HistoryStore(context: Context) {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "conversations.json"))
     private val media = ConversationMediaStore(context)
-
-    fun list(): List<StoredConversation> = synchronized(lock) { read() }
-    fun find(id: String): StoredConversation? = synchronized(lock) { read().find { it.id == id } }
-
-    fun save(value: StoredConversation) = synchronized(lock) {
-        require(value.id.isNotBlank() && value.id.length <= 128) { "Invalid conversation ID" }
-        val old = read()
-        if ((old.find { it.id == value.id }?.updatedAt ?: Long.MIN_VALUE) > value.updatedAt) return@synchronized
-        val packed = HistoryArchive.save(old, value, ::encodeRecord)
-        val next = packed.values
-        writeBytes(packed.bytes)
-        old.filter { previous -> next.none { it.id == previous.id } }.forEach { media.delete(it.id) }
+    private val files = synchronized(lock) {
+        val root = context.noBackupFilesDir.canonicalFile
+        repositories.getOrPut(root.path) {
+            HistoryFiles(AndroidHistoryFiles(root),
+                { WireJson.encode(it).toByteArray(Charsets.UTF_8) },
+                { WireJson.decode(it.toString(Charsets.UTF_8)) })
+        }
     }
 
-    fun delete(id: String) = synchronized(lock) { write(read().filterNot { it.id == id }); media.delete(id) }
+    fun list(): List<StoredConversation> = synchronized(lock) { files.load().conversations }
+    fun find(id: String): StoredConversation? = synchronized(lock) { files.load().conversations.find { it.id == id } }
+    fun historyLimit(): Int = synchronized(lock) { files.load().historyLimit }
+    fun tags(): List<String> = synchronized(lock) { files.load().tags }
+
+    fun save(value: StoredConversation) = change { HistoryCollection.save(it, value, System.currentTimeMillis()) }
+    fun setHistoryLimit(limit: Int) = change {
+        require(limit > 0) { "历史数量须大于 0" }
+        HistoryCollection.retain(it.copy(historyLimit = limit))
+    }
+    fun setFavorite(id: String, favorite: Boolean) = change {
+        HistoryCollection.favorite(it, id, favorite, System.currentTimeMillis())
+    }
+    fun setTags(id: String, tags: List<String>) = change { HistoryCollection.setTags(it, id, tags) }
+    fun createTag(name: String) = change { HistoryCollection.createTag(it, name.trim()) }
+    fun renameTag(old: String, new: String) = change { HistoryCollection.renameTag(it, old, new.trim()) }
+    fun deleteTag(name: String) = change { HistoryCollection.deleteTag(it, name) }
+    fun delete(id: String) = change { it.copy(conversations = it.conversations.filterNot { value -> value.id == id }) }
     fun clear() = synchronized(lock) {
-        file.delete()
-        check(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()
-            && !File(file.baseFile.path + ".new").exists()) { "History deletion failed" }
-        media.clear()
+        files.clear { media.clear() }
     }
 
-    private fun read(): List<StoredConversation> {
-        val bytes = try { file.openRead().use { input ->
-            val buffer = ByteArray(8192)
+    private fun change(transform: (HistoryState) -> HistoryState) = synchronized(lock) {
+        val old = files.load()
+        val next = transform(old)
+        files.commit(old, next)
+        val remaining = next.conversations.map { it.id }.toSet()
+        old.conversations.filterNot { it.id in remaining }.forEach { media.delete(it.id) }
+    }
+
+    private companion object {
+        val lock = Any()
+        val repositories = mutableMapOf<String, HistoryFiles>()
+    }
+}
+
+private class AndroidHistoryFiles(private val root: File) : HistoryFileAccess {
+    private val directory = File(root, "conversations_v2")
+    private fun target(name: String): AtomicFile {
+        require(name == HistoryFiles.LEGACY || name == HistoryFiles.MANIFEST || HistoryFiles.RECORD_NAME.matches(name))
+        return AtomicFile(if (name == HistoryFiles.LEGACY) File(root, "conversations.json") else File(directory, name))
+    }
+
+    override fun read(name: String, maxBytes: Int): ByteArray? {
+        val file = target(name)
+        val input = try { file.openRead() } catch (error: FileNotFoundException) {
+            if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()) throw error
+            return null
+        }
+        return input.use {
+            check(it.channel.size() <= maxBytes) { "历史文件超过大小上限" }
             val result = ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
             while (true) {
-                val count = input.read(buffer)
+                val count = it.read(buffer)
                 if (count < 0) break
-                check(result.size() + count <= HistoryArchive.MAX_FILE_BYTES) { "History exceeds size limit" }
+                check(result.size().toLong() + count <= maxBytes) { "历史文件超过大小上限" }
                 result.write(buffer, 0, count)
             }
-            val bytes = result.toByteArray()
-            check(bytes.size <= HistoryArchive.MAX_FILE_BYTES) { "History exceeds size limit" }
-            bytes
-        } } catch (_: java.io.FileNotFoundException) { return emptyList() }
-        return HistoryArchive.decode(WireJson.decode(bytes.toString(Charsets.UTF_8)))
+            result.toByteArray()
+        }
     }
 
-    private fun write(values: List<StoredConversation>) {
-        writeBytes(HistoryArchive.encode(values, ::encodeRecord))
-    }
-
-    private fun encodeRecord(value: StoredConversation): ByteArray =
-        WireJson.encode(HistoryArchive.record(value)).toByteArray(Charsets.UTF_8)
-
-    private fun writeBytes(bytes: ByteArray) {
+    override fun write(name: String, bytes: ByteArray) {
+        check(directory.isDirectory || directory.mkdirs()) { "无法创建历史目录" }
+        val file = target(name)
         val output = file.startWrite()
         try { output.write(bytes); file.finishWrite(output) }
         catch (error: Exception) { file.failWrite(output); throw error }
     }
 
-    companion object {
-        private val lock = Any()
+    override fun delete(name: String) {
+        val file = target(name)
+        file.delete()
+        check(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()
+            && !File(file.baseFile.path + ".new").exists()) { "历史文件删除失败" }
+    }
+
+    override fun records(): List<String> {
+        if (!directory.exists()) return emptyList()
+        return (directory.list() ?: error("无法读取历史目录"))
+            .map { it.removeSuffix(".bak").removeSuffix(".new") }.distinct()
     }
 }

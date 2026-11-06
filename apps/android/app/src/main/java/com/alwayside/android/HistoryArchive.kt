@@ -1,48 +1,11 @@
 package com.alwayside.android
 
-import java.io.ByteArrayOutputStream
-
-/** Version-one JSON with complete records; capacity is enforced by evicting whole old records. */
+/** Legacy archive reader and complete, independently bounded conversation records. */
 internal object HistoryArchive {
-    const val MAX_CONVERSATIONS = 50
+    const val DEFAULT_HISTORY_LIMIT = 500
     const val MAX_MESSAGES = 100
-    const val MAX_FILE_BYTES = 32 * 1024 * 1024
-    private val prefix = "{\"version\":1,\"conversations\":[".toByteArray(Charsets.UTF_8)
-    private val suffix = "]}".toByteArray(Charsets.UTF_8)
-    private const val TOO_LARGE = "完整会话超过本地历史大小上限，未保存"
-
-    data class Packed(val values: List<StoredConversation>, val bytes: ByteArray)
-
-    fun save(previous: List<StoredConversation>, value: StoredConversation,
-             encodeRecord: (StoredConversation) -> ByteArray,
-             maxBytes: Int = MAX_FILE_BYTES, maxConversations: Int = MAX_CONVERSATIONS): Packed {
-        validate(value)
-        previous.forEach(::validate)
-        require(previous.map { it.id }.distinct().size == previous.size) { "Duplicate conversation ID" }
-        require(maxConversations in 1..MAX_CONVERSATIONS && maxBytes in 1..MAX_FILE_BYTES)
-        val incoming = encodeRecord(value)
-        check(prefix.size.toLong() + suffix.size + incoming.size <= maxBytes) { TOO_LARGE }
-        val encoded = mutableMapOf(value.id to incoming)
-        val values = (previous.filterNot { it.id == value.id } + value).sortedByDescending { it.updatedAt }.toMutableList()
-        values.filterNot { it.id == value.id }.forEach { encoded[it.id] = encodeRecord(it) }
-        var size = prefix.size.toLong() + suffix.size + encoded.values.sumOf { it.size.toLong() } + values.size - 1
-        while (values.size > maxConversations || size > maxBytes) {
-            val index = values.indexOfLast { it.id != value.id }
-            check(index >= 0) { TOO_LARGE }
-            size -= encoded.getValue(values.removeAt(index).id).size + 1L
-        }
-        return Packed(values, assemble(values.map { encoded.getValue(it.id) }))
-    }
-
-    fun encode(values: List<StoredConversation>, encodeRecord: (StoredConversation) -> ByteArray): ByteArray {
-        check(values.size <= MAX_CONVERSATIONS) { "History exceeds conversation limit" }
-        values.forEach(::validate)
-        val entries = values.map(encodeRecord)
-        check(prefix.size.toLong() + suffix.size + entries.sumOf { it.size.toLong() } + (entries.size - 1).coerceAtLeast(0) <= MAX_FILE_BYTES) {
-            "History exceeds size limit"
-        }
-        return assemble(entries)
-    }
+    const val MAX_RECORD_BYTES = 32 * 1024 * 1024
+    const val MAX_FILE_BYTES = MAX_RECORD_BYTES // Version-one archive migration only.
 
     fun record(value: StoredConversation): Map<String, Any?> {
         validate(value)
@@ -53,42 +16,50 @@ internal object HistoryArchive {
                 "evidence" to it.evidence, "searchSuggestions" to it.searchSuggestions) },
             "evidence" to value.evidence, "transcript" to value.transcript, "kind" to value.kind,
             "status" to value.status, "sourceText" to value.sourceText,
+            "favoriteAt" to value.favoriteAt, "historyEnteredAt" to value.historyEnteredAt,
+            "tags" to value.tags,
         )
     }
 
     fun decode(root: Map<String, Any?>): List<StoredConversation> {
-        check((root["version"] as? Number)?.toDouble() == 1.0) { "Unknown history version" }
-        val entries = root["conversations"] as? List<*> ?: error("Invalid history conversations")
-        check(entries.size <= MAX_CONVERSATIONS) { "History exceeds conversation limit" }
-        return entries.map { raw ->
-            val entry = raw as? Map<*, *> ?: error("Invalid history conversation")
-            fun required(name: String) = entry[name] as? String ?: error("Invalid history $name")
-            val rawMessages = entry["messages"] as? List<*> ?: error("Invalid history messages")
-            check(rawMessages.size <= MAX_MESSAGES) { "History exceeds message limit" }
-            val messages = rawMessages.map { item ->
-                val message = item as? Map<*, *> ?: error("Invalid history message")
-                ChatMessage(message["role"] as? String ?: error("Invalid history role"),
-                    message["text"] as? String ?: error("Invalid history text"),
-                    message["evidence"] as? String ?: "", message["searchSuggestions"] as? String ?: "")
-            }
-            StoredConversation(required("id"), (entry["updatedAt"] as? Number)?.toLong() ?: error("Invalid history timestamp"),
-                ConversationTitle.resolve(required("title"), messages), messages, entry["evidence"] as? String ?: "",
-                entry["transcript"] as? String ?: "", entry["kind"] as? String ?: "text",
-                entry["status"] as? String ?: "已完成", entry["sourceText"] as? String ?: "").also(::validate)
-        }.also { values -> check(values.map { it.id }.distinct().size == values.size) { "Duplicate conversation ID" } }
+        check((root["version"] as? Number)?.toDouble() == 1.0) { "不支持的历史记录版本" }
+        val entries = root["conversations"] as? List<*> ?: error("历史记录格式错误")
+        return entries.map { decodeRecord(it as? Map<*, *> ?: error("会话格式错误")) }
+            .also { values -> check(values.map { it.id }.distinct().size == values.size) { "会话编号重复" } }
             .sortedByDescending { it.updatedAt }
     }
 
-    private fun validate(value: StoredConversation) {
-        require(value.id.isNotBlank() && value.id.length <= 128) { "Invalid conversation ID" }
-        require(value.messages.size <= MAX_MESSAGES) { "History exceeds message limit" }
-        require(value.messages.all { it.role in setOf("user", "assistant", "system") }) { "Invalid history role" }
-        require(value.kind in setOf("photo", "audio", "text")) { "Invalid history kind" }
+    fun decodeRecord(entry: Map<*, *>): StoredConversation {
+        fun required(name: String) = entry[name] as? String ?: error("会话字段错误：$name")
+        val rawMessages = entry["messages"] as? List<*> ?: error("会话消息格式错误")
+        check(rawMessages.size <= MAX_MESSAGES) { "会话消息超过上限" }
+        val messages = rawMessages.map { item ->
+            val message = item as? Map<*, *> ?: error("会话消息格式错误")
+            ChatMessage(message["role"] as? String ?: error("会话角色错误"),
+                message["text"] as? String ?: error("会话正文错误"),
+                message["evidence"] as? String ?: "", message["searchSuggestions"] as? String ?: "")
+        }
+        val tags = when (val raw = entry["tags"]) {
+            null -> emptyList()
+            is List<*> -> raw.map { it as? String ?: error("会话标签格式错误") }
+            else -> error("会话标签格式错误")
+        }
+        return StoredConversation(required("id"),
+            (entry["updatedAt"] as? Number)?.toLong() ?: error("会话时间错误"),
+            ConversationTitle.resolve(required("title"), messages), messages, entry["evidence"] as? String ?: "",
+            entry["transcript"] as? String ?: "", entry["kind"] as? String ?: "text",
+            entry["status"] as? String ?: "已完成", entry["sourceText"] as? String ?: "",
+            (entry["favoriteAt"] as? Number)?.toLong() ?: 0,
+            (entry["historyEnteredAt"] as? Number)?.toLong() ?: 0, tags).also(::validate)
     }
 
-    private fun assemble(entries: List<ByteArray>): ByteArray = ByteArrayOutputStream().apply {
-        write(prefix)
-        entries.forEachIndexed { index, entry -> if (index > 0) write(','.code); write(entry) }
-        write(suffix)
-    }.toByteArray()
+    fun validate(value: StoredConversation) {
+        require(value.id.isNotBlank() && value.id.length <= 128) { "会话编号无效" }
+        require(value.messages.size <= MAX_MESSAGES) { "会话消息超过上限" }
+        require(value.messages.all { it.role in setOf("user", "assistant", "system") }) { "会话角色无效" }
+        require(value.kind in setOf("photo", "audio", "text")) { "会话类型无效" }
+        require(value.favoriteAt >= 0 && value.historyEnteredAt >= 0) { "会话时间无效" }
+        require(value.tags.distinct().size == value.tags.size) { "会话标签重复" }
+        value.tags.forEach(HistoryCollection::validateTag)
+    }
 }

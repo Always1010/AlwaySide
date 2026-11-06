@@ -47,4 +47,9 @@ internal data class StoredConversation(
     val kind: String = "text",
     val status: String = "已完成",
     val sourceText: String = "",
-)
+    val favoriteAt: Long = 0,
+    val historyEnteredAt: Long = 0,
+    val tags: List<String> = emptyList(),
+) {
+    val isFavorite: Boolean get() = favoriteAt > 0
+}
