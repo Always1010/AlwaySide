@@ -7,6 +7,34 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WavTranscriptionTest {
+    @Test fun prefersSilenceNearLimitWithoutLosingOrRepeatingPcmBytes() {
+        val bytesPerSecond = RecordingLimits.SAMPLE_RATE * 2
+        val limit = RecordingLimits.UPLOAD_PCM_BYTES
+        val pcm = ByteArray(limit + bytesPerSecond) { ((it % 251) + 1).toByte() }
+        val silenceStart = limit - 2 * bytesPerSecond
+        val silenceEnd = limit - bytesPerSecond
+        pcm.fill(0, silenceStart, silenceEnd)
+        withClip(pcm.size) { file ->
+            RandomAccessFile(file, "rw").use { it.seek(44); it.write(pcm) }
+            var offset = 0
+            var calls = 0
+            val result = WavTranscription.transcribe(file, RequestCancellation(), 1000) { source, bytes ->
+                assertEquals(44L + offset, source.filePointer)
+                assertTrue(bytes <= limit)
+                assertEquals(0, bytes % 2)
+                if (calls == 0) assertTrue(bytes in silenceStart until silenceEnd)
+                val actual = ByteArray(bytes)
+                source.readFully(actual)
+                assertArrayEquals(pcm.copyOfRange(offset, offset + bytes), actual)
+                offset += bytes
+                "part${++calls}"
+            }
+            assertEquals(pcm.size, offset)
+            assertEquals(2, calls)
+            assertEquals("part1\npart2", result)
+        }
+    }
+
     @Test fun tenMinutesUploadsAllSamplesInOrderWithinPerRequestLimit() = withClip(RecordingLimits.pcmBytes(InteractionConfig().recordingMaxMinutes)) { file ->
         val lengths = mutableListOf<Int>()
         var nextPosition = 44L

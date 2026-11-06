@@ -5,6 +5,11 @@ import java.io.RandomAccessFile
 
 /** Reads the recorder's WAV sequentially so even long clips use a bounded upload buffer. */
 internal object WavTranscription {
+    private const val PCM_BYTES_PER_SECOND = RecordingLimits.SAMPLE_RATE * 2
+    private const val SILENCE_SEARCH_BYTES = PCM_BYTES_PER_SECOND * 5
+    private const val MIN_SILENCE_BYTES = PCM_BYTES_PER_SECOND / 5
+    private const val SILENCE_AMPLITUDE = 327 // About 1% of PCM16 full scale (RMS).
+
     fun transcribe(file: File, cancellation: RequestCancellation, maxChars: Int,
                    sendPart: (RandomAccessFile, Int) -> String): String {
         cancellation.throwIfCancelled()
@@ -21,7 +26,8 @@ internal object WavTranscription {
             var remaining = pcmBytes
             while (remaining > 0) {
                 cancellation.throwIfCancelled()
-                val partBytes = minOf(remaining, RecordingLimits.UPLOAD_PCM_BYTES)
+                val partBytes = if (remaining <= RecordingLimits.UPLOAD_PCM_BYTES) remaining
+                    else findPartBoundary(source, cancellation)
                 val text = sendPart(source, partBytes).trim()
                 cancellation.throwIfCancelled()
                 if (source.filePointer != fileSize - remaining + partBytes)
@@ -38,5 +44,39 @@ internal object WavTranscription {
             if (transcript.isEmpty()) throw ProviderException("未识别到可用的音频文字")
             return transcript.toString()
         }
+    }
+
+    /** Prefer a pause near the upload limit; every sample still belongs to exactly one part. */
+    private fun findPartBoundary(source: RandomAccessFile, cancellation: RequestCancellation): Int {
+        val start = source.filePointer
+        val limit = RecordingLimits.UPLOAD_PCM_BYTES
+        var offset = maxOf(0, limit - SILENCE_SEARCH_BYTES)
+        val window = ByteArray(PCM_BYTES_PER_SECOND / 50) // 20 ms, independent of clip length.
+        var quietStart = offset
+        var boundary = limit
+        try {
+            source.seek(start + offset)
+            while (offset < limit) {
+                cancellation.throwIfCancelled()
+                val bytes = minOf(window.size, limit - offset)
+                source.readFully(window, 0, bytes)
+                var energy = 0L
+                for (i in 0 until bytes step 2) {
+                    val sample = ((window[i].toInt() and 0xff) or (window[i + 1].toInt() shl 8)).toShort().toInt()
+                    energy += sample.toLong() * sample
+                }
+                offset += bytes
+                if (energy <= SILENCE_AMPLITUDE.toLong() * SILENCE_AMPLITUDE * (bytes / 2)) {
+                    if (offset - quietStart >= MIN_SILENCE_BYTES) {
+                        boundary = (quietStart + (offset - quietStart) / 2) and -2
+                    }
+                } else {
+                    quietStart = offset
+                }
+            }
+        } finally {
+            source.seek(start)
+        }
+        return boundary
     }
 }
