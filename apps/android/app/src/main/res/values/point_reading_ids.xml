@@ -1,3 +1,5 @@
 <resources>
     <item name="point_reading_action" type="id" />
+    <item name="text_share_action" type="id" />
+    <item name="system_translation_action" type="id" />
 </resources>
