@@ -49,6 +49,14 @@ internal class ReadingSettingsUi(private val context: Context, private val paren
         group.addView(settingsListRow("音色", preferences.voice().voice, inlineValue = true) {
             edit("voice", "音色 ID", preferences.voice().voice)
         })
+        val used=PointReadingCache(java.io.File(noBackupFilesDir,"point_reading_audio")).bytes()
+        group.addView(settingsListRow("清理普通点读缓存", "${used / (1024 * 1024)} MiB", inlineValue=true) {
+            showDialog(MaterialAlertDialogBuilder(context).setTitle("清理普通点读缓存？")
+                .setMessage("保留收藏会话关联的音频。其他片段之后再听时可能需要重新请求；翻译文字不受影响。")
+                .setNegativeButton("取消",null).setPositiveButton("清理") { _,_ ->
+                    PointReadingController.get(context).clear(keepFavorites=true)
+                })
+        })
     }
     private fun edit(field: String, title: String, initial: String): Unit = with(context) {
         val input = TextInputLayout(this).apply {

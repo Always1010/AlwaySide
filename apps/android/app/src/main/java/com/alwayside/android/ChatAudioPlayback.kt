@@ -48,7 +48,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
             visibility.backgroundPlayback = preferences.load().backgroundPlayback
             if (visibility.shouldStop(conversationId)) stop()
             else if (conversationId != null) {
-                if (visibility.backgroundPlayback) requestService() else {
+                if (visibility.backgroundPlayback || readingKey.isNotEmpty()) requestService() else {
                     releaseService()
                     if (waitingForService) { waitingForService = false; startOrResume() }
                 }
@@ -62,6 +62,11 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         }
     }
     private var player: MediaPlayer? = null
+    var readingKey: String = ""; private set
+    var mediaTitle: String = "原始音频"; private set
+    var speed: Float = 1f; private set
+    private var readingSpeed = 1f
+    val currentFile: File? get() = file
     private var file: File? = null
     private var deleteWhenStopped = false
     private var resumeOnFocus = false
@@ -95,23 +100,46 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         }
     }
 
-    fun stateFor(id: String): State = if (conversationId == id) state else State()
+    fun stateFor(id: String): State = if (conversationId == id && readingKey.isEmpty()) state else State()
     fun isActive(id: String): Boolean = conversationId == id
-    fun fileFor(id: String): File? = file?.takeIf { conversationId == id && it.isFile }
+    fun fileFor(id: String): File? = file?.takeIf { conversationId == id && readingKey.isEmpty() && it.isFile }
+    fun mayPlay(id: String): Boolean = !visibility.shouldStop(id)
     fun addObserver(observer: () -> Unit) { observers.add(observer); observer() }
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
 
     fun setVisible(owner: Any, id: String?, visible: Boolean, retaining: Boolean = false) {
         visibility.update(owner, id, visible)
         if (!retaining && visibility.shouldStop(conversationId)) stop()
+        if (!retaining) PointReadingController.hiddenIfCreated()
     }
 
     fun play(id: String, source: File) {
+        PointReadingController.stopIfCreated()
         stop(releaseHosting = false)
+        speed = 1f
         conversationId = id
         file = source
         publish(State(preparing = true, remaining = 1f))
         startOrResume()
+    }
+
+    fun playReading(id: String, source: File, key: String, text: String) {
+        stop(releaseHosting = false)
+        speed = readingSpeed; readingKey = key; mediaTitle = "点读 · ${text.take(60)}"
+        conversationId = id; file = source
+        publish(State(preparing = true, remaining = 1f))
+        startOrResume()
+    }
+
+    fun setReadingSpeed(value: Float) {
+        if (readingKey.isEmpty() || value !in listOf(0.8f, 1f, 1.2f)) return
+        speed = value; readingSpeed = value
+        if (player != null && !state.preparing) runCatching {
+            player?.playbackParams = android.media.PlaybackParams().setSpeed(speed).setPitch(1f)
+            if (!state.playing) player?.pause()
+        }
+        publish(state)
+        service?.updatePlayback()
     }
 
     fun toggle() {
@@ -122,7 +150,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     fun resume() { if (!state.playing && !state.preparing && conversationId != null) startOrResume() }
 
     private fun startOrResume() {
-        if (visibility.backgroundPlayback && service?.hosting != true) {
+        if ((visibility.backgroundPlayback || readingKey.isNotEmpty()) && service?.hosting != true) {
             waitingForService = true
             requestService()
             return
@@ -158,6 +186,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
                 hasFocus = audioManager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
                 if (!hasFocus) { stop(); toast("暂时无法播放，请在其他音频结束后重试"); return }
             }
+            if (readingKey.isNotEmpty()) current.playbackParams = android.media.PlaybackParams().setSpeed(speed).setPitch(1f)
             current.start()
             updatePosition(current, playing = true)
             handler.removeCallbacks(ticker)
@@ -193,6 +222,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         if (deleteWhenStopped) file?.delete()
         file = null; deleteWhenStopped = false
         conversationId = null; duration = 0
+        readingKey = ""; mediaTitle = "原始音频"
         publish(State())
         if (releaseHosting) releaseService()
     }
@@ -211,7 +241,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     /** Called only after the mediaPlayback service has entered the foreground (before audio focus). */
     fun serviceReady(host: AudioPlaybackService): Boolean {
         serviceRequested = false
-        if (conversationId == null || !visibility.backgroundPlayback) return false
+        if (conversationId == null || (!visibility.backgroundPlayback && readingKey.isEmpty())) return false
         service = host
         if (waitingForService) startOrResume()
         return conversationId != null

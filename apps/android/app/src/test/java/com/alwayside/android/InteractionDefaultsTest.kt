@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InteractionDefaultsTest {
+    @Test fun readingExperimentsAreIndependentForAllFourCombinations() {
+        for (chat in listOf(false,true)) for (image in listOf(false,true)) {
+            val value=InteractionConfig(chatPointReading=chat,imagePointReading=image)
+            assertEquals(chat,value.readingEnabled(ReadingOrigin.CHAT))
+            assertEquals(image,value.readingEnabled(ReadingOrigin.IMAGE))
+            assertEquals(InteractionConfig().resolvedBindings(),value.resolvedBindings())
+        }
+    }
     @Test fun factoryBindingsUseOnlyTheAgreedFourBasicGestures() {
         val config = InteractionConfig()
         assertFalse(config.longPressSlide)

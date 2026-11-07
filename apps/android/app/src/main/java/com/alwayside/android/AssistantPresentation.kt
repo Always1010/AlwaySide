@@ -330,6 +330,8 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         setComposer(false)
     } }
 
+    fun addReadingBar(view: View) { sections.addView(view, sections.indexOfChild(controls), LinearLayout.LayoutParams(-1,-2)) }
+
     fun setComposer(expanded: Boolean, draft: Boolean = false) {
         composerSection.visibility=if(expanded)View.VISIBLE else View.GONE
         toggle.setAssistantComposerState(expanded,draft)

@@ -29,6 +29,8 @@ internal class ReadingPreferences(context: Context) {
         require(voice().connection == readingDigest(credential.id + "\u0000" + endpoint.baseUrl)) { "API 地址已变更，请重新选择朗读服务" }
         require(voice().model.isNotBlank()) { "请到实验室填写朗读模型" }
         return AppConfig(baseUrl = endpoint.baseUrl, apiKey = credential.value, apiProtocol = ApiProtocol.CHAT_COMPLETIONS,
-            model = voice().model, connectionId = credential.id, credentialRevision = credential.revision)
+            model = voice().model, connectionId = credential.id, credentialRevision = credential.revision,
+            serviceCatalog = catalog, credentialId = credential.id, endpointId = endpoint.id,
+            apiVersion = endpoint.apiVersion, workspaceId = endpoint.workspaceId)
     }
 }

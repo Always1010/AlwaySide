@@ -61,7 +61,7 @@ internal class AudioPlaybackService : Service() {
     fun updatePlayback() {
         val state = playback.currentState
         session.setMetadata(MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, "原始音频")
+            .putString(MediaMetadata.METADATA_KEY_TITLE, playback.mediaTitle)
             .putLong(MediaMetadata.METADATA_KEY_DURATION, playback.duration.toLong()).build())
         val status = when {
             state.preparing -> PlaybackState.STATE_BUFFERING
@@ -73,7 +73,7 @@ internal class AudioPlaybackService : Service() {
             PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
                 PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP)
             .addCustomAction(STOP, "停止", R.drawable.ic_line_stop)
-            .setState(status, playback.position.toLong(), if (state.playing) 1f else 0f).build())
+            .setState(status, playback.position.toLong(), if (state.playing) playback.speed else 0f).build())
         if (playback.conversationId != null)
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
     }
@@ -110,7 +110,7 @@ internal class AudioPlaybackService : Service() {
         val pause = state.playing || state.preparing
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_line_audio)
-            .setContentTitle("原始音频")
+            .setContentTitle(playback.mediaTitle)
             .setContentText(if (state.preparing) "正在读取音频" else if (state.playing) "正在播放" else "已暂停")
             .setContentIntent(openConversation())
             .setVisibility(Notification.VISIBILITY_PRIVATE)

@@ -42,6 +42,15 @@ class PointReadingCacheTest {
         assertFalse(ReadingParagraphs.split("Hello.\n你好。\nhttps://example.com").last().english)
         assertEquals(listOf(true, false), ReadingParagraphs.split("I'm down.\n我愿意。").map { it.english })
     }
+    @Test fun inactiveStoreCreatesNothingAndEvictionKeepsTheActiveFile() = withCache { root ->
+        val directory=java.io.File(root,"not-created")
+        val cache=PointReadingCache(directory,4)
+        assertFalse(directory.exists())
+        val voice=ReadingVoice("service","model","voice")
+        val current=cache.put(voice.key("active"),"a",cache.ticket("a"),byteArrayOf(1,2,3),emptySet())
+        assertNull(cache.put(voice.key("other"),"b",cache.ticket("b"),byteArrayOf(1,2),emptySet(),current))
+        assertTrue(current!!.exists())
+    }
     private fun withCache(block: (java.io.File) -> Unit) {
         val root = Files.createTempDirectory("point-reading-test").toFile()
         try { block(root) } finally { root.deleteRecursively() }

@@ -10,6 +10,7 @@ import java.util.concurrent.CancellationException
 /** One cancellation token per request; cancellation also interrupts a blocked network read. */
 internal class RequestCancellation {
     @Volatile private var cancelled = false
+    val isCancelled: Boolean get() = cancelled
     private var connection: HttpURLConnection? = null
 
     fun cancel() {

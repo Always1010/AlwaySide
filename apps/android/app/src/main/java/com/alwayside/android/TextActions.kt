@@ -14,12 +14,44 @@ import android.widget.TextView
 import android.widget.Toast
 
 /** A view ID is required by Android's PROCESS_TEXT menu, even for read-only text. */
-internal fun TextView.enableTextActions(selectable: Boolean = true) {
+internal fun TextView.enableTextActions(selectable: Boolean = true, read: ((String) -> Unit)? = null) {
     if (id == View.NO_ID) id = View.generateViewId()
     if (selectable) setTextIsSelectable(true)
     // Activity windows use Android's result-aware implementation. Service overlays need
     // explicit read-only launches because their Context cannot startActivityForResult.
-    if (!context.hasActivity()) customSelectionActionModeCallback = OverlayTextActions(this)
+    if (read != null) {
+        setTag(R.id.point_reading_action, read)
+        customSelectionActionModeCallback = ReadingTextActions(this, if (context.hasActivity()) null else OverlayTextActions(this))
+    } else {
+        if (getTag(R.id.point_reading_action) != null) {
+            setTag(R.id.point_reading_action, null)
+            customSelectionActionModeCallback = null
+        }
+        if (!context.hasActivity()) customSelectionActionModeCallback = OverlayTextActions(this)
+    }
+}
+
+private class ReadingTextActions(private val text: TextView, private val delegate: ActionMode.Callback?) : ActionMode.Callback {
+    override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+        delegate?.onCreateActionMode(mode, menu)
+        menu.add(Menu.NONE, R.id.point_reading_action, 0, "朗读")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        return true
+    }
+    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = delegate?.onPrepareActionMode(mode, menu) ?: false
+    override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+        if (item.itemId != R.id.point_reading_action) return delegate?.onActionItemClicked(mode, item) ?: false
+        val start = minOf(text.selectionStart, text.selectionEnd)
+        val end = maxOf(text.selectionStart, text.selectionEnd)
+        if (start >= 0 && end <= text.text.length && end > start) {
+            @Suppress("UNCHECKED_CAST")
+            val read = text.getTag(R.id.point_reading_action) as? ((String) -> Unit)
+            read?.invoke(text.text.subSequence(start, end).toString())
+        }
+        mode.finish()
+        return true
+    }
+    override fun onDestroyActionMode(mode: ActionMode) { delegate?.onDestroyActionMode(mode) }
 }
 
 private fun Context.hasActivity(): Boolean = when (this) {

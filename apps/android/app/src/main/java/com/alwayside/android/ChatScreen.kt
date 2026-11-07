@@ -88,6 +88,12 @@ internal class ChatScreen(
     private val playbackIcon = AudioPlaybackIcon(this)
     private val playback = ChatAudioPlayback.get(this)
     private var playbackForeground = true
+    private var readingEnabled = false
+    private var readingBar: ReadingBar? = null
+    private val readingPreferences = InteractionPreferences(this)
+    private val readingListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "chatPointReading" && ready && !closing) render()
+    }
     private val playbackObserver: () -> Unit = {
         if (ready && !closing) updatePlayback(playback.stateFor(session.conversationId))
     }
@@ -172,6 +178,7 @@ internal class ChatScreen(
             setBackgroundColor(BACKGROUND); fitsSystemWindows = true
             addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
+                    readingPreferences.addListener(readingListener)
                     playback.addObserver(playbackObserver)
                     setPlaybackForeground(playbackForeground)
                     // Reload configuration when the existing chat view is reattached.
@@ -182,6 +189,7 @@ internal class ChatScreen(
                     if (ready) { refreshCollectionState(); render() } else renderWebSearch()
                 }
                 override fun onViewDetachedFromWindow(view: View) {
+                    readingPreferences.removeListener(readingListener)
                     playback.removeObserver(playbackObserver)
                     playback.setVisible(this@ChatScreen, null, false, retaining = activity.isChangingConfigurations)
                 }
@@ -275,6 +283,19 @@ internal class ChatScreen(
     }
 
     private fun render() {
+        val nextReading=readingPreferences.load().chatPointReading
+        if(readingEnabled!=nextReading) {
+            readingEnabled=nextReading
+            disposeMessageRows();renderedHistorySize=-1
+            if(readingEnabled) {
+                readingBar=ReadingBar(this,session.conversationId,ReadingOrigin.CHAT).also {
+                    val root=view as LinearLayout
+                    root.addView(it,root.indexOfChild(scroll)+1,LinearLayout.LayoutParams(-1,-2))
+                }
+            } else {
+                (readingBar?.parent as? ViewGroup)?.removeView(readingBar);readingBar=null
+            }
+        }
         conversationTitle = session.title
         toolbar.title = conversationTitle
         toolbar.menu.findItem(3)?.isVisible = availableAudio() != null
@@ -565,6 +586,20 @@ internal class ChatScreen(
             row.text.text = MarkdownText.render(value)
             row.value = value
             changed = true
+            if(readingEnabled && row.role=="assistant") {
+                row.text.visibility=View.GONE
+                var blocks=row.block.getChildAt(1) as? ReadingBlocksView
+                if(blocks==null) { blocks=ReadingBlocksView(this,session.conversationId);row.block.addView(blocks,1) }
+                blocks.content(row.text.text,row!==partialAnswerRow)
+                blocks.tag=value to (row!==partialAnswerRow)
+            } else if(readingEnabled) row.text.enableTextActions(read={ selected ->
+                PointReadingController.get(this).read(session.conversationId,ReadingOrigin.CHAT,selected)
+            })
+        }
+        if(readingEnabled && row.role=="assistant") {
+            val blocks=row.block.getChildAt(1) as? ReadingBlocksView
+            val stamp=value to (row!==partialAnswerRow)
+            if(blocks!=null && blocks.tag!=stamp) { blocks.content(row.text.text,row!==partialAnswerRow);blocks.tag=stamp }
         }
         val html = suggestions.takeIf { row.role != "user" && it.isNotBlank() && it.length <= 32768 }.orEmpty()
         if (row.suggestions != html) {
@@ -622,7 +657,7 @@ internal class ChatScreen(
         if (!ready || session.transcript.isBlank()) return
         MaterialAlertDialogBuilder(this).setTitle("原始音频转写")
             .setView(ScrollView(this).apply {
-                addView(column().apply { addView(label(session.transcript).apply { enableTextActions() }) })
+                addView(column().apply { addView(label(session.transcript).apply { enableChatReading(session.conversationId) }) })
             }).setPositiveButton("返回对话", null).show()
     }
 
@@ -633,7 +668,7 @@ internal class ChatScreen(
                     ?: playback.fileFor(session.conversationId) else null
 
     private fun playAudio() {
-        if (playback.isActive(session.conversationId)) { playback.toggle(); return }
+        if (playback.isActive(session.conversationId) && playback.readingKey.isEmpty()) { playback.toggle(); return }
         val file = availableAudio() ?: run { toast("原始音频未保留或已被删除"); return }
         playback.play(session.conversationId, file)
     }
@@ -659,7 +694,7 @@ internal class ChatScreen(
         if (!ready || session.sourceText.isBlank()) return
         MaterialAlertDialogBuilder(this).setTitle("选中文字")
             .setView(ScrollView(this).apply {
-                addView(column().apply { addView(label(session.sourceText).apply { enableTextActions() }) })
+                addView(column().apply { addView(label(session.sourceText).apply { enableChatReading(session.conversationId) }) })
             }).setPositiveButton("返回对话", null).show()
     }
 
@@ -710,6 +745,7 @@ internal class ChatScreen(
         if (closing) return
         closing = true
         playback.removeObserver(playbackObserver)
+        readingPreferences.removeListener(readingListener)
         playback.setVisible(this, null, false, retaining = retaining)
         if (!retaining || !ready) releaseConversation()
     }

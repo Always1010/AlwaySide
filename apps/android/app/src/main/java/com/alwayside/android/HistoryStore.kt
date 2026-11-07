@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /** Local archive outside Android backup; favorites never participate in automatic retention. */
-internal class HistoryStore(context: Context) {
+internal class HistoryStore(private val context: Context) {
     private val media = ConversationMediaStore(context)
     private val repository = context.noBackupFilesDir.canonicalFile.let { root ->
         // Looking up an existing repository must not wait behind an unrelated long body write.
@@ -52,6 +52,7 @@ internal class HistoryStore(context: Context) {
         repository.pending.invalidate(id)
     }
     fun clear() = synchronized(lock) {
+        PointReadingController.clearAll(context)
         files.clear { repository.pending.invalidateAll(); media.clear() }
     }
 
@@ -61,6 +62,7 @@ internal class HistoryStore(context: Context) {
         old.conversations.filterNot { it.id in remaining }.forEach {
             repository.pending.invalidate(it.id)
             media.delete(it.id)
+            PointReadingController.delete(context, it.id)
         }
     }
 

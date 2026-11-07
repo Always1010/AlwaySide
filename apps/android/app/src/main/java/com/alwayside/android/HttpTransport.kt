@@ -11,6 +11,7 @@ internal class HttpTransport {
     fun <T> request(config: AppConfig, route: String, contentType: String, contentLength: Long,
         cancellation: RequestCancellation, writeBody: (java.io.OutputStream) -> Unit,
         method: String = "POST", streaming: Boolean = false, query: Map<String, String> = emptyMap(),
+        accept: String = if (streaming) "text/event-stream" else "application/json",
         readBody: (HttpURLConnection, Long) -> T): T {
         cancellation.throwIfCancelled()
         val deadline = System.nanoTime() + 240_000_000_000L
@@ -27,7 +28,7 @@ internal class HttpTransport {
             connection.doOutput = method == "POST"
             authHeaders(config).forEach { (key, value) -> connection.setRequestProperty(key, value) }
             if (method == "POST") connection.setRequestProperty("Content-Type", contentType)
-            connection.setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
+            connection.setRequestProperty("Accept", accept)
             if (method == "POST") connection.setFixedLengthStreamingMode(contentLength)
             cancellation.attach(connection)
             if (method == "POST") connection.outputStream.use { cancellation.throwIfCancelled(); writeBody(it) }
