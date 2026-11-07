@@ -593,6 +593,34 @@ class ChatSessionTest {
         assertTrue(h.session.messages.isEmpty())
     }
 
+    @Test fun discardingCancelledConversationInvalidatesQueuedArchivesAndLateAnswersForEveryEvidenceKind() {
+        for(kind in listOf("photo", "audio", "text")) {
+            val writes=ArrayDeque<Runnable>()
+            val pending=HistoryPendingWrites(Any(), java.util.concurrent.Executor { writes.addLast(it) })
+            val persisted=linkedMapOf<String,StoredConversation>()
+            val other=StoredConversation("other",1,"保留会话",emptyList(),"")
+            persisted[other.id]=other
+            val h=Harness { value,failed -> pending.submit(value.id,{persisted[value.id]=value},failed,value.updatedAt) }
+            h.session.newConversation(kind=kind)
+            val id=h.session.conversationId
+            h.session.submit(h.config,"误触后丢弃",null,kind,if(kind=="audio")File("clip.wav") else null)
+            // The provider has already posted its completion, but the UI has not received it yet.
+            h.worker.runNext()
+            val call=h.gateway.calls.single()
+            h.session.cancel()
+            persisted.remove(id);pending.invalidate(id)
+            h.session.close()
+            call.onDelta("迟到的回答")
+            h.drainMain()
+            while(writes.isNotEmpty())writes.removeFirst().run()
+            assertEquals(listOf(other),persisted.values.toList())
+            assertTrue(h.session.messages.isEmpty())
+            assertEquals("",h.session.partial)
+            assertFalse(h.session.busy)
+            assertTrue(h.worker.isShutdown)
+        }
+    }
+
     private class Harness(async: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null) {
         val config = AppConfig(apiKey = "fixture-key")
         val gateway = FakeGateway()

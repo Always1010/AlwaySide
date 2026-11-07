@@ -193,6 +193,7 @@ internal class AssistantWindowActions(
     val cancel: () -> Unit = {}, val retry: () -> Unit = {}, val copy: () -> Unit = {},
     val imageChoice: (View) -> Unit = {}, val search: () -> Unit = {}, val send: () -> Unit = {},
     val favorite: () -> Unit = {},
+    val discard: () -> Unit = {},
 )
 
 /** Exactly the same window hierarchy and controls for the service and the local tutorial. */
@@ -229,7 +230,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val noticeSlot = FrameLayout(context)
     // Reserve the corner for resizing; content actions never share its touch area.
     private val controls = LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(context.dp(8),0,context.dp(32),0) }
-    val discardSlot = FrameLayout(context)
+    private val discardSlot = FrameLayout(context)
     val toggle = MaterialButton(context,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
         applyActionStyle();setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantAction)
         iconSize=context.dp(14);iconPadding=context.dp(4);iconGravity=MaterialButton.ICON_GRAVITY_TEXT_END
@@ -244,6 +245,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val retry: MaterialButton
     val resize: MaterialButton
     val copy: MaterialButton
+    val discard: MaterialButton
     val composerSection = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     val imageChoice: MaterialButton?
     val inputLayout = TextInputLayout(context,null,com.google.android.material.R.attr.textInputOutlinedStyle).apply {
@@ -296,6 +298,8 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         cancel=compact(R.drawable.ic_line_stop,"停止当前回答",actions.cancel).apply { visibility=View.GONE }
         retry=compact(android.R.drawable.ic_popup_sync,"重试原问题与证据",actions.retry).apply { visibility=View.GONE }
         listOf(cancel,retry).forEach { requestState.addView(it,LinearLayout.LayoutParams(dp(36),dp(36))) }
+        discard=compact(R.drawable.ic_line_trash,"丢弃当前对话",actions.discard)
+        discardSlot.addView(discard,FrameLayout.LayoutParams(-1,-1))
         copy=compact(R.drawable.ic_copy,"复制最近回答",actions.copy)
         favorite=compact(R.drawable.ic_line_star,"收藏会话",actions.favorite).apply { setToggleCheckedStateOnClick(false) }
         listOf(copy,favorite).forEach { contentActions.addView(it,LinearLayout.LayoutParams(dp(32),dp(36))) }
