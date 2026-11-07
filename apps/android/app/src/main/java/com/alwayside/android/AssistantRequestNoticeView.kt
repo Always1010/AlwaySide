@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.text.TextUtils
+import android.view.ActionMode
 import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
@@ -65,11 +66,23 @@ internal class AssistantRequestNoticeView(context: Context, dismiss: () -> Unit)
         val content = context.column().apply {
             addView(context.label(value.summary, 15f))
             addView(context.label(value.detail, 13f).apply {
-                setTextIsSelectable(true)
+                enableTextActions()
                 setPadding(0, context.dp(12), 0, 0)
             })
         }
-        val popup = PopupWindow(ScrollView(context).apply { addView(content) },
+        // PopupWindow has no DecorView of its own. Use the owning Activity/overlay Window
+        // for the system toolbar, while keeping the selected text inside this popup.
+        val scroll = object : ScrollView(context) {
+            private var textMode: ActionMode? = null
+            override fun startActionModeForChild(child: View, callback: ActionMode.Callback, type: Int): ActionMode? =
+                this@AssistantRequestNoticeView.startActionModeForChild(child, callback, type).also { textMode = it }
+
+            override fun onDetachedFromWindow() {
+                textMode?.finish(); textMode = null
+                super.onDetachedFromWindow()
+            }
+        }.apply { addView(content) }
+        val popup = PopupWindow(scroll,
             width.coerceAtMost(context.dp(360)),
             (rootView.height - context.dp(24)).coerceIn(context.dp(96), context.dp(240)), true).apply {
             setBackgroundDrawable(context.outlinedCard())

@@ -1,4 +1,13 @@
 <resources>
+    <!-- A standard Window hosts text action modes without changing the assistant's content. -->
+    <style name="ThemeOverlay.AlwaySide.ConversationWindow" parent="AppTheme">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowElevation">0dp</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
     <!-- Floating surfaces retain their specified neutral fill at any parent elevation. -->
     <style name="ThemeOverlay.AlwaySide.AssistantCard" parent="">
         <item name="elevationOverlayEnabled">false</item>

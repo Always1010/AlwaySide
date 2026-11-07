@@ -68,7 +68,7 @@ class AssistantService : Service() {
     private var audioManual = false
     private var audioForPreview = false
     private var overlaysSuspended = false
-    private var previewWindows = emptyList<Triple<FloatingConversation, View, WindowManager.LayoutParams>>()
+    private var previewWindows = emptyList<Triple<FloatingConversation, AssistantConversationWindow, WindowManager.LayoutParams>>()
     private var previewSelector: Pair<View, WindowManager.LayoutParams>? = null
     private val deferredPreviewWindows = linkedMapOf<String, Pair<FloatingConversation, Boolean>>()
     private val previewListener: () -> Unit = {
@@ -150,7 +150,7 @@ class AssistantService : Service() {
         var originalExpanded = false
         var detached = false
         var openingInApp = false
-        var root: OutsideFrame? = null
+        var root: AssistantConversationWindow? = null
         var layout: WindowManager.LayoutParams? = null
         var response: LinearLayout? = null
         var status: TextView? = null
@@ -436,7 +436,12 @@ class AssistantService : Service() {
                 view to WindowManager.LayoutParams().apply { copyFrom(layout) }
             }
         }
-        (previewWindows.map { it.second } + listOfNotNull(previewSelector?.first)).forEach { root ->
+        previewWindows.forEach { (_, root, _) ->
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken, 0)
+            root.clearFocus()
+            root.detach()
+        }
+        previewSelector?.first?.let { root ->
             getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken, 0)
             root.clearFocus()
             if (root.isAttachedToWindow) windows.removeViewImmediate(root)
@@ -454,7 +459,7 @@ class AssistantService : Service() {
             if (!node.detached && nodes[node.kind] === node && node.root === root && !root.isAttachedToWindow) {
                 clamp(layout)
                 layout.softInputMode = (layout.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST) or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
-                runCatching { windows.addView(root, layout); node.layout = layout; playback.setVisible(node, node.chat.conversationId, true); refresh(node) }
+                runCatching { root.attach(layout); node.layout = layout; playback.setVisible(node, node.chat.conversationId, true); refresh(node) }
                     .onFailure { hideWindow(node, false); toast("小窗恢复失败，可从悬浮球重新打开") }
             }
         }
@@ -643,7 +648,7 @@ class AssistantService : Service() {
     }
     private fun hideUnpinned(except: FloatingConversation?=null) { nodes.values.filter { it!==except && !it.pinned }.forEach { hideWindow(it) } }
     private fun hideWindow(node: FloatingConversation, stopAudio: Boolean = true) {
-        node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);remove(it) }
+        node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);runCatching { it.detach() } }
         node.suggestionViews.values.forEach { (it.parent as? ViewGroup)?.removeView(it); it.destroy() };node.suggestionViews.clear()
         node.root=null;node.layout=null;node.response=null;node.status=null;node.requestNotice=null;node.source=null;node.sourceImage=null;node.transcript=null
         node.transcriptCopy=null
@@ -669,7 +674,7 @@ class AssistantService : Service() {
             y=if(config.rememberWindowPosition&&saved!=null)((size.second-height-dp(60))*saved.yFraction).toInt()+dp(8) else (size.second-height-dp(32))/2
         }
         clamp(layout)
-        val root=OutsideFrame { if(!node.pinned) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
+        val root=AssistantConversationWindow(uiContext) { if(!node.pinned) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
         root.isFocusableInTouchMode=true
         val presentation=AssistantWindowViews(uiContext,when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"},
             node.kind=="photo",AssistantWindowActions(
@@ -751,11 +756,11 @@ class AssistantService : Service() {
         installDrag(node,header,root,layout,false);installDrag(node,resize,root,layout,true)
         if(Build.VERSION.SDK_INT>=30)root.setOnApplyWindowInsetsListener{_,insets->
             val ime=insets.getInsets(WindowInsets.Type.ime()).bottom
-            if(ime>0&&node.root===root){val bottom=screenSize().second-ime-dp(12);val y=layout.y.coerceAtMost((bottom-layout.height).coerceAtLeast(dp(8)));if(y!=layout.y){layout.y=y;runCatching{windows.updateViewLayout(root,layout)}}}
+            if(ime>0&&node.root===root){val bottom=screenSize().second-ime-dp(12);val y=layout.y.coerceAtMost((bottom-layout.height).coerceAtLeast(dp(8)));if(y!=layout.y){layout.y=y;runCatching{root.update(layout)}}}
             insets
         }
         layout.softInputMode=(if(focusQuestion)WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE else WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN) or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        try{windows.addView(root,layout);node.root=root;node.layout=layout;playback.setVisible(node,node.chat.conversationId,true);if(!node.composerExpanded)root.requestFocus();updatePin(node);refresh(node);if(focusQuestion)focusQuestionInput(node)}catch(_:RuntimeException){toast("无法打开结果窗口，请检查悬浮权限")}
+        try{root.attach(layout);node.root=root;node.layout=layout;playback.setVisible(node,node.chat.conversationId,true);if(!node.composerExpanded)root.requestFocus();updatePin(node);refresh(node);if(focusQuestion)focusQuestionInput(node)}catch(_:RuntimeException){runCatching{root.detach()};toast("无法打开结果窗口，请检查悬浮权限")}
         removeBubble();showBubble()
     }
     private fun setComposerExpanded(node:FloatingConversation,expanded:Boolean,fromUser:Boolean=false) {
@@ -845,11 +850,11 @@ class AssistantService : Service() {
         }
     }
     private fun clamp(layout:WindowManager.LayoutParams){val size=screenSize();layout.width=layout.width.coerceIn(minOf(dp(220),size.first-dp(16)),size.first-dp(16));layout.height=layout.height.coerceIn(minOf(dp(220),size.second-dp(80)),size.second-dp(80));layout.x=layout.x.coerceIn(dp(8),(size.first-layout.width-dp(8)).coerceAtLeast(dp(8)));layout.y=layout.y.coerceIn(dp(8),(size.second-layout.height-dp(60)).coerceAtLeast(dp(8)))}
-    private fun installDrag(node:FloatingConversation,handle:View,root:View,layout:WindowManager.LayoutParams,resizing:Boolean){
+    private fun installDrag(node:FloatingConversation,handle:View,root:AssistantConversationWindow,layout:WindowManager.LayoutParams,resizing:Boolean){
         var downX=0f;var downY=0f;var ox=0;var oy=0;var ow=0;var oh=0
         handle.setOnTouchListener{_,event->when(event.actionMasked){
             MotionEvent.ACTION_DOWN->{downX=event.rawX;downY=event.rawY;ox=layout.x;oy=layout.y;ow=layout.width;oh=layout.height;true}
-            MotionEvent.ACTION_MOVE->{val dx=(event.rawX-downX).toInt();val dy=(event.rawY-downY).toInt();if(resizing){layout.width=ow+dx;layout.height=oh+dy}else{layout.x=ox+dx;layout.y=oy+dy};clamp(layout);if(node.root===root)windows.updateViewLayout(root,layout);true}
+            MotionEvent.ACTION_MOVE->{val dx=(event.rawX-downX).toInt();val dy=(event.rawY-downY).toInt();if(resizing){layout.width=ow+dx;layout.height=oh+dy}else{layout.x=ox+dx;layout.y=oy+dy};clamp(layout);if(node.root===root)root.update(layout);true}
             MotionEvent.ACTION_UP->{val size=screenSize();val density=resources.displayMetrics.density;preferences.saveWindow(node.kind,SavedWindow(layout.x.toFloat()/(size.first-layout.width).coerceAtLeast(1),(layout.y-dp(8)).toFloat()/(size.second-layout.height-dp(60)).coerceAtLeast(1),(layout.width/density).toInt(),(layout.height/density).toInt()));true}
             else->true
         }}
@@ -861,7 +866,8 @@ class AssistantService : Service() {
         if(!alive||node.detached)return
         ProbeState.requesting=nodes.values.any{it.chat.busy};bubbleVisual?.working=ProbeState.requesting
         node.source?.text=when(node.kind){"photo"->imageDescription(node)+"  ▾";"text"->"所选原文  ▾";else->if(node.chat.transcript.isNotBlank())"转写原文 · ${String.format(Locale.getDefault(),"%.1f",node.clip?.seconds ?: 0f)} 秒  ▾" else "内部音频 · 不附图"}
-        node.transcript?.text=if(node.kind=="text")node.chat.sourceText else node.chat.transcript
+        val sourceText=if(node.kind=="text")node.chat.sourceText else node.chat.transcript
+        node.transcript?.let { if(it.text.toString()!=sourceText)it.text=sourceText }
         updateTranscriptCopy(node)
         val messages=buildList {
             node.chat.messages.withIndex().toList().takeLast(12).forEach { (index,message) ->
@@ -896,7 +902,7 @@ class AssistantService : Service() {
         node.imageChoice?.isEnabled=!node.chat.busy&&!gathering
         node.imageChoice?.alpha=if(node.imageChoice?.isEnabled==false).55f else 1f
         updateSearch(node)
-        if(nearBottom)scroll?.post{if(node.scroll===scroll&&node.input?.hasFocus()!=true)scroll.fullScroll(View.FOCUS_DOWN)}
+        if(nearBottom)scroll?.post{if(node.scroll===scroll&&node.input?.hasFocus()!=true&&node.root?.hasTextActionMode!=true)scroll.scrollTo(0,node.content?.height ?: 0)}
         if(node.awaitingAudioApproval)ProbeState.lastEvent="已达录音上限，等待确认；尚未上传"
         else if(!node.chat.busy&&node.chat.status!=lastFinished){lastFinished=node.chat.status;ProbeState.lastEvent=node.chat.status}
     }
@@ -1033,7 +1039,7 @@ class AssistantService : Service() {
                 if(alive&&!AssistantPreview.overlays.active&&!visible.detached&&nodes[visible.kind]===visible&&visible.root===root&&!root.isAttachedToWindow){
                     clamp(layout)
                     layout.softInputMode=(layout.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST) or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
-                    runCatching{windows.addView(root,layout);visible.layout=layout;refresh(visible)}
+                    runCatching{root.attach(layout);visible.layout=layout;refresh(visible)}
                         .onFailure{hideWindow(visible,false);toast("截图结束，但小窗恢复失败，可从菜单重新打开")}
                 }
             }
@@ -1042,7 +1048,7 @@ class AssistantService : Service() {
             shown.forEach { (_,root,_) ->
                 getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken,0)
                 root.clearFocus()
-                windows.removeViewImmediate(root)
+                root.detach()
             }
         } catch(_:RuntimeException) {
             restoreAfterCapture();toast("无法暂时收起小窗，截图未发送，请重试");return
@@ -1194,7 +1200,7 @@ class AssistantService : Service() {
             captureEpoch++;removeSelector();restoreAfterCapture()
             nodes.values.forEach { node ->
                 node.root?.visibility=View.VISIBLE
-                node.layout?.let { layout -> clamp(layout); node.root?.let { root -> runCatching { windows.updateViewLayout(root,layout) } } }
+                node.layout?.let { layout -> clamp(layout); node.root?.let { root -> runCatching { root.update(layout) } } }
             }
             if(Build.VERSION.SDK_INT<34){val size=screenSize();frames?.resize(size.first,size.second)}
         }
