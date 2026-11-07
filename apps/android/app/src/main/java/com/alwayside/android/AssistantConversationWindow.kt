@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.graphics.Outline
+import android.graphics.drawable.GradientDrawable
 import android.view.ActionMode
 import android.view.MotionEvent
 import android.view.View
@@ -52,10 +53,16 @@ internal class AssistantConversationWindow(context: Context, private val outside
         setContentView(this@AssistantConversationWindow, ViewGroup.LayoutParams(-1, -1))
         window!!.apply {
             setBackgroundDrawableResource(android.R.color.transparent)
+            // Only the content clips its rounded corners. An empty decor outline must
+            // never suppress the entire window while its first frame is being built.
+            setClipToOutline(false)
             decorView.setPadding(0, 0, 0, 0)
             decorView.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
-                    this@AssistantConversationWindow.background?.getOutline(outline)
+                    // Drawable bounds are assigned during drawing, after the parent
+                    // outline is queried. Use the decor's size for its shadow instead.
+                    val radius = (this@AssistantConversationWindow.background as? GradientDrawable)?.cornerRadius ?: 0f
+                    outline.setRoundRect(0, 0, view.width, view.height, radius)
                 }
             }
         }
