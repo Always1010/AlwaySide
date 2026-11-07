@@ -45,7 +45,8 @@ def inputs():
     main = ROOT / "apps/android/app/src/main"
     paths = [main / "java/com/alwayside/android" / name for name in SHARED]
     paths += sorted((main / "res/drawable").glob("*.xml"))
-    paths += [main / "res/values/styles.xml", main / "res/values-night/styles.xml"]
+    paths += [main / "res/values/styles.xml", main / "res/values-night/styles.xml",
+              main / "res/values/point_reading_ids.xml"]
     paths += sorted((PROJECT / "src").rglob("*"))
     paths += [PROJECT / "settings.gradle.kts", PROJECT / "build.gradle.kts",
               PROJECT / "gradle.properties", SCENARIOS]

@@ -21,7 +21,8 @@ abstract class StagePresentation : DefaultTask() {
         }
         files.sync {
             from(applicationSource.dir("res")) {
-                include("drawable/*.xml", "values/styles.xml", "values-night/styles.xml")
+                include("drawable/*.xml", "values/styles.xml", "values-night/styles.xml",
+                    "values/point_reading_ids.xml")
             }
             into(resourceOutput)
         }
