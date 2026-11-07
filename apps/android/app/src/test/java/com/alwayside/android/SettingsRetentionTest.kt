@@ -44,7 +44,7 @@ class SettingsRetentionTest {
             page = ServiceSettingsUi.Page.KEY,
             history = listOf(ServiceSettingsUi.Page.ROOT, ServiceSettingsUi.Page.CARD, ServiceSettingsUi.Page.API),
             purpose = ModelPurpose.ANSWER, card = card, cardInitial = card, modelDefaultPending = false,
-            key = key, keyInitial = key, expected = null, connectionExpanded = true, optionsExpanded = true,
+            key = key, keyInitial = key, expected = null, connectionExpanded = true,
             field = field, status = "", verification = emptyMap(),
         )
     }

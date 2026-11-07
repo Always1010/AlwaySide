@@ -63,6 +63,23 @@ class MultiProviderSessionTest {
         }
     }
 
+    @Test fun changingOrClearingGlobalRecordingContextInvalidatesTheAudioCache() {
+        val initial = config.copy(transcriptionPrompt = "project names", transcriptionLanguage = "en")
+        val h = Harness(initial)
+        val changes = listOf(initial, initial.copy(transcriptionPrompt = "new names"),
+            initial.copy(transcriptionPrompt = "new names", transcriptionLanguage = "zh"),
+            initial.copy(transcriptionPrompt = "", transcriptionLanguage = "zh"),
+            initial.copy(transcriptionPrompt = "", transcriptionLanguage = ""))
+        changes.forEach { value ->
+            h.submitAudio(value)
+            h.completeWork()
+            val actual = ProviderConnections.transcription(h.gateway.transcriptions.last())
+            assertEquals(value.transcriptionPrompt, actual.transcriptionPrompt)
+            assertEquals(value.transcriptionLanguage, actual.transcriptionLanguage)
+        }
+        assertEquals(changes.size, h.gateway.transcriptions.size)
+    }
+
     @Test fun transcriptOnlyUsesAnIndependentAsrWithoutAnAnswerKey() {
         val transcriptOnly = config.copy(apiKey = "", audioOutput = "transcript")
         val h = Harness(transcriptOnly)

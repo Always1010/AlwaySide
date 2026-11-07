@@ -10,6 +10,7 @@ internal object SettingsRecovery {
         return linkedMapOf<String, Any?>("schemaVersion" to 4,
             "services" to ServiceCatalogCodec.encode(ServiceCatalog())).apply {
             prompts.forEach { (name, fallback) -> put(name, data?.get(name) as? String ?: fallback) }
+            put("transcriptionLanguage", TranscriptionSettings.readLanguage(data))
             put("autoUpdateImage", data?.get("autoUpdateImage") as? Boolean ?: defaults.autoUpdateImage)
             put("audioOutput", (data?.get("audioOutput") as? String)?.takeIf {
                 it in setOf("transcript", "translate", "interpret")

@@ -8,8 +8,10 @@ internal data class PromptPreset(
     val textQuestion: String? = null,
     val transcriptionPrompt: String? = null,
     val audioOutput: String? = null,
+    val transcriptionLanguage: String? = null,
 ) {
     fun validate() {
+        transcriptionLanguage?.let(TranscriptionSettings::validateLanguage)
         require(instructions.length <= 32000 && (transcriptionPrompt?.length ?: 0) <= 32000) {
             "助手回答方式和转写提示不能超过 32000 字符"
         }
@@ -25,13 +27,14 @@ internal data class PromptPreset(
         audioQuestion = audioQuestion,
         textQuestion = textQuestion ?: current.textQuestion,
         transcriptionPrompt = transcriptionPrompt ?: current.transcriptionPrompt,
+        transcriptionLanguage = transcriptionLanguage ?: current.transcriptionLanguage,
         audioOutput = audioOutput ?: current.audioOutput,
     )
 
     companion object {
         fun capture(config: AppConfig) = PromptPreset(
             config.instructions, config.defaultQuestion, config.audioQuestion,
-            config.textQuestion, config.transcriptionPrompt, config.audioOutput,
+            config.textQuestion, config.transcriptionPrompt, config.audioOutput, config.transcriptionLanguage,
         )
     }
 }

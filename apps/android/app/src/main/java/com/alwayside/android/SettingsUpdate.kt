@@ -4,7 +4,7 @@ package com.alwayside.android
 internal sealed interface SettingsUpdate {
     fun applyTo(current: AppConfig): AppConfig
 
-    enum class TextField { baseUrl, apiKey, model, transcriptionModel, instructions, defaultQuestion, textQuestion, audioQuestion, transcriptionPrompt, maxOutputTokens, temperature, topP, connectionName, apiVersion, workspaceId;
+    enum class TextField { baseUrl, apiKey, model, transcriptionModel, instructions, defaultQuestion, textQuestion, audioQuestion, transcriptionPrompt, transcriptionLanguage, maxOutputTokens, temperature, topP, connectionName, apiVersion, workspaceId;
         fun read(current: AppConfig): String = when (this) {
             baseUrl -> current.baseUrl
             apiKey -> ""
@@ -18,6 +18,7 @@ internal sealed interface SettingsUpdate {
             textQuestion -> current.textQuestion
             audioQuestion -> current.audioQuestion
             transcriptionPrompt -> current.transcriptionPrompt
+            transcriptionLanguage -> current.transcriptionLanguage
             maxOutputTokens -> current.maxOutputTokens.takeIf { it != 0 }?.toString().orEmpty()
             temperature -> current.temperature?.toString().orEmpty()
             topP -> current.topP?.toString().orEmpty()
@@ -39,6 +40,7 @@ internal sealed interface SettingsUpdate {
             TextField.textQuestion -> current.copy(textQuestion = value)
             TextField.audioQuestion -> current.copy(audioQuestion = value)
             TextField.transcriptionPrompt -> current.copy(transcriptionPrompt = value)
+            TextField.transcriptionLanguage -> current.copy(transcriptionLanguage = value.trim())
             TextField.maxOutputTokens -> current.copy(maxOutputTokens = value.trim().let { if (it.isEmpty()) 0 else it.toIntOrNull() ?: throw IllegalArgumentException("请填写整数或留空") })
             TextField.temperature -> optionalNumber(value).let { number ->
                 require(number == null || current.topP == null || replaceSampling) { "请先确认替换另一项采样参数" }

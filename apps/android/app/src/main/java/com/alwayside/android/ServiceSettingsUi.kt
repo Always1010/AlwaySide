@@ -41,7 +41,7 @@ internal class ServiceSettingsUi(
         val page: Page, val history: List<Page>, val purpose: ModelPurpose,
         val card: ModelProfile?, val cardInitial: ModelProfile?, val modelDefaultPending: Boolean,
         val key: KeyForm?, val keyInitial: KeyForm?, val expected: ServiceCatalog?,
-        val connectionExpanded: Boolean, val optionsExpanded: Boolean,
+        val connectionExpanded: Boolean,
         val field: FieldEditState?, val status: String,
         val verification: Map<String, Pair<ServiceCatalog, String>>,
     ) {
@@ -73,7 +73,6 @@ internal class ServiceSettingsUi(
     private var keyInitial: KeyForm? = null
     private var expected: ServiceCatalog? = null
     private var connectionExpanded = false
-    private var optionsExpanded = false
     private var disposed = false
     private var generation = 0
     private var request: RequestCancellation? = null
@@ -89,13 +88,13 @@ internal class ServiceSettingsUi(
             initialized = true; page = it.page; history.addAll(it.history); purpose = it.purpose
             card = it.card; cardInitial = it.cardInitial; modelDefaultPending = it.modelDefaultPending
             key = it.key; keyInitial = it.keyInitial; expected = it.expected
-            connectionExpanded = it.connectionExpanded; optionsExpanded = it.optionsExpanded
+            connectionExpanded = it.connectionExpanded
             status = it.status; verification.putAll(it.verification)
         }
     }
 
     fun retain(): RetainedState = RetainedState(page, history.toList(), purpose, card, cardInitial,
-        modelDefaultPending, key, keyInitial, expected, connectionExpanded, optionsExpanded,
+        modelDefaultPending, key, keyInitial, expected, connectionExpanded,
         fieldTitle?.let { FieldEditState(it, fieldInitial, fieldDraft) } ?: pendingField?.copy(),
         status, verification.toMap())
 
@@ -292,14 +291,13 @@ internal class ServiceSettingsUi(
         val disabled = providers.indices.filter { providers[it].id in existing }.toSet()
         choose("选择服务商", providers.map { it.name }, disabledIndices = disabled) { index ->
             val provider = providers[index]
-            val draft = ModelProfile(id(), provider.name, purpose, providerId = provider.id,
-                transcriptionPrompt = if (purpose == ModelPurpose.TRANSCRIPTION) store.load().transcriptionPrompt else "")
+            val draft = ModelProfile(id(), provider.name, purpose, providerId = provider.id)
             openCard(c, draft, initializeModel = true)
         }
     }
 
     private fun openCard(c: ServiceCatalog, profile: ModelProfile, initializeModel: Boolean = false) {
-        card = profile; cardInitial = profile; expected = c; optionsExpanded = false
+        card = profile; cardInitial = profile; expected = c
         modelDefaultPending = initializeModel
         navigate(Page.CARD)
     }
@@ -341,18 +339,9 @@ internal class ServiceSettingsUi(
         }
         fieldOpeners["模型"] = ::openModelEditor
         row("模型", p.model.ifBlank { "请选择" }) { chooseModel(c) }
-        section("用途参数", help = if (purpose == ModelPurpose.ANSWER)
-            "未设置的参数使用服务默认，支持范围随服务、接口和模型变化。\n\n输出上限：留空或 16–131072。Temperature：0–2，旧版 Claude 为 0–1；Top P：0–1，两种采样参数只设置一项。推理、详细程度及搜索需模型支持。"
-            else "转写提示用于专有名词和背景。语言留空时自动识别，也可填写 zh、en 等服务支持的语言代码。这些设置仅属于当前转写服务。")
-        if (purpose == ModelPurpose.ANSWER) renderOptions(p) else {
-            val customOptions = p.transcriptionPrompt.isNotBlank() || p.language.isNotBlank()
-            row("转写参数", if (optionsExpanded) "收起" else if (customOptions) "已自定义" else "默认") {
-                optionsExpanded = !optionsExpanded; redraw()
-            }
-            if (optionsExpanded) {
-                input("转写提示", p.transcriptionPrompt, "留空使用服务默认。", multiline = true) { card = requireNotNull(card).copy(transcriptionPrompt = it) }
-                input("语言", p.language, "留空自动识别，或填写 zh、en 等语言代码。") { card = requireNotNull(card).copy(language = it.trim()) }
-            }
+        if (purpose == ModelPurpose.ANSWER) {
+            section("用途参数", help = "未设置的参数使用服务默认，支持范围随服务、接口和模型变化。\n\n输出上限：留空或 16–131072。Temperature：0–2，旧版 Claude 为 0–1；Top P：0–1，两种采样参数只设置一项。推理、详细程度及搜索需模型支持。")
+            renderOptions(p)
         }
         action("保存", true) { saveCard() }
         val persisted = c.profiles.find { it.id == p.id }

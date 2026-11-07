@@ -56,12 +56,17 @@ internal class SettingsStore(context: Context) {
             audioQuestion = data.optString("audioQuestion", defaults.audioQuestion),
             autoUpdateImage = data.optBoolean("autoUpdateImage", defaults.autoUpdateImage),
             transcriptionPrompt = data.optString("transcriptionPrompt", defaults.transcriptionPrompt),
+            transcriptionLanguage = TranscriptionSettings.readLanguage(WireJson.decode(data.toString())),
             audioOutput = data.optString("audioOutput", defaults.audioOutput),
             textQuestion = data.optString("textQuestion", defaults.textQuestion),
         )
         if (schema != 4) return@synchronized ServiceCatalog().attach(globals)
         val catalog = ServiceCatalogCodec.decode(WireJson.decode(data.getJSONObject("services").toString())) { id ->
             readCredential("credential.$id")
+        }
+        if (!data.has("transcriptionLanguage")) {
+            data.put("transcriptionLanguage", globals.transcriptionLanguage)
+            check(prefs.edit().putString("config", data.toString()).commit()) { "Settings migration failed" }
         }
         catalog.attach(globals)
     }
@@ -106,6 +111,7 @@ internal class SettingsStore(context: Context) {
             put("audioQuestion", config.audioQuestion)
             put("autoUpdateImage", config.autoUpdateImage)
             put("transcriptionPrompt", config.transcriptionPrompt)
+            put("transcriptionLanguage", config.transcriptionLanguage)
             put("audioOutput", config.audioOutput)
             put("textQuestion", config.textQuestion)
         }
@@ -140,7 +146,7 @@ internal class SettingsStore(context: Context) {
             val value = data.getJSONObject(name)
             PromptPreset(value.getString("instructions"), value.getString("defaultQuestion"), value.getString("audioQuestion"),
                 value.optionalPresetString("textQuestion"), value.optionalPresetString("transcriptionPrompt"),
-                value.optionalPresetString("audioOutput"))
+                value.optionalPresetString("audioOutput"), value.optionalPresetString("transcriptionLanguage"))
         }.toSortedMap()
     }
 
@@ -152,7 +158,7 @@ internal class SettingsStore(context: Context) {
         data.put(name, JSONObject().put("instructions", preset.instructions)
             .put("defaultQuestion", preset.defaultQuestion).put("audioQuestion", preset.audioQuestion)
             .put("textQuestion", preset.textQuestion).put("transcriptionPrompt", preset.transcriptionPrompt)
-            .put("audioOutput", preset.audioOutput))
+            .put("audioOutput", preset.audioOutput).put("transcriptionLanguage", preset.transcriptionLanguage))
         check(prefs.edit().putString("presets", data.toString()).commit()) { "Preset write failed" }
     }
 

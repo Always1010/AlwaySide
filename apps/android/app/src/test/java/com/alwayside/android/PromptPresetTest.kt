@@ -18,26 +18,30 @@ class PromptPresetTest {
     }
 
     @Test fun legacyTemplateKeepsNewFieldsFromCurrentDraft() {
-        val draft = AppConfig(textQuestion = "draft text", transcriptionPrompt = "draft names", audioOutput = "transcript")
+        val draft = AppConfig(textQuestion = "draft text", transcriptionPrompt = "draft names", audioOutput = "transcript", transcriptionLanguage = "en")
         val merged = PromptPreset("old instructions", "old image", "old audio").mergeInto(draft)
         assertEquals("old instructions", merged.instructions)
         assertEquals("old image", merged.defaultQuestion)
         assertEquals("old audio", merged.audioQuestion)
         assertEquals(draft.textQuestion, merged.textQuestion)
         assertEquals(draft.transcriptionPrompt, merged.transcriptionPrompt)
+        assertEquals(draft.transcriptionLanguage, merged.transcriptionLanguage)
         assertEquals(draft.audioOutput, merged.audioOutput)
     }
 
     @Test fun fullTemplateRestoresEveryPromptFieldIncludingExplicitEmptyValues() {
         val source = AppConfig(instructions = "instructions", defaultQuestion = "image", audioQuestion = "audio",
             textQuestion = "text", transcriptionPrompt = "", audioOutput = "translate")
-        val merged = PromptPreset.capture(source).mergeInto(AppConfig(transcriptionPrompt = "replace me"))
+        val merged = PromptPreset.capture(source).mergeInto(AppConfig(transcriptionPrompt = "replace me", transcriptionLanguage = "en"))
         assertEquals(source.instructions, merged.instructions)
         assertEquals(source.defaultQuestion, merged.defaultQuestion)
         assertEquals(source.audioQuestion, merged.audioQuestion)
         assertEquals(source.textQuestion, merged.textQuestion)
         assertEquals("", merged.transcriptionPrompt)
+        assertEquals("", merged.transcriptionLanguage)
         assertEquals(source.audioOutput, merged.audioOutput)
+        val specified = source.copy(transcriptionLanguage = "zh")
+        assertEquals("zh", PromptPreset.capture(specified).mergeInto(merged).transcriptionLanguage)
     }
 
     @Test fun templateDoesNotRestoreCredentialsConnectionModelsOrGenerationOptions() {

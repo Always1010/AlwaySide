@@ -90,13 +90,10 @@ internal class AiProvider : AiGateway {
                                cancellation: RequestCancellation): String {
         val fileSize = pcmBytes.toLong() + 44
         val boundary = "alwayside-${UUID.randomUUID()}"
-        val prompt = if (config.transcriptionPrompt.isBlank()) "" else
-            "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n${config.transcriptionPrompt}"
-        val language = if (config.transcriptionLanguage.isBlank()) "" else
-            "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n${config.transcriptionLanguage}"
+        val context = TranscriptionSettings.multipart(config, boundary)
         val prefix = ("--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n" +
             config.transcriptionModel + "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson" +
-            prompt + language +
+            context +
             "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n" +
             "Content-Type: audio/wav\r\n\r\n").toByteArray(Charsets.UTF_8)
         val suffix = "\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)

@@ -64,6 +64,7 @@ internal class SettingsScreen(
     private var group: LinearLayout? = null
     private val selections = linkedMapOf<String, String>()
     private val audioOutputOptions = linkedMapOf("transcript" to "仅原始转写", "translate" to "原文 + 中文翻译", "interpret" to "原文 + 按音频问题回答")
+    private val transcriptionLanguages = linkedMapOf("" to "自动识别", "zh" to "中文", "en" to "英语", "ja" to "日语", "ko" to "韩语")
     private var page = Page.HOME
     private var readable = true
     private var ballSize = 36
@@ -241,9 +242,12 @@ internal class SettingsScreen(
         input("defaultQuestion", "截图问题", "截图后自动填入的问题", config.defaultQuestion, multiline = true)
         input("textQuestion", "选中文字问题", "选中文字后自动填入的问题", config.textQuestion, multiline = true)
         input("audioQuestion", "音频问题", "用于“原文 + 按音频问题回答”，可要求翻译、总结或提取要点", config.audioQuestion, multiline = true)
-        input("transcriptionPrompt", "新转写配置的默认提示", "示例：专有名词、背景或语言；不修改已有转写配置", config.transcriptionPrompt, multiline = true)
+        section("语音转写", help = "转写提示和音频语言由所有转写服务共用，保存后用于之后发起的转写。\n\n转写提示用于专有名词、录音背景或书写偏好。音频语言指录音中说的语言，不是翻译目标语言；不确定时选择自动识别。")
+        input("transcriptionPrompt", "语音转写提示", "示例：专有名词、录音背景或书写偏好；留空不附加提示", config.transcriptionPrompt, multiline = true)
+        input("transcriptionLanguage", "音频语言", "填写服务支持的语言代码，如 zh、en；留空自动识别", config.transcriptionLanguage,
+            options = transcriptionLanguages)
         choice("audioOutput", "音频默认输出", config.audioOutput, audioOutputOptions,
-            help = "仅原始转写：只转写，不生成回答。\n原文 + 中文翻译：将转写原文翻译成中文。\n原文 + 按音频问题回答：根据转写原文和「音频问题」回答。\n\n转写提示在音频转写配置中独立保存。此处的默认提示仅用于之后新建的转写配置，不修改已有配置。")
+            help = "仅原始转写：只转写，不生成回答。\n原文 + 中文翻译：将转写原文翻译成中文。\n原文 + 按音频问题回答：根据转写原文和「音频问题」回答。")
     }
 
     private fun showTemplateActions() {
@@ -251,7 +255,7 @@ internal class SettingsScreen(
         val sheet = BottomSheetDialog(this)
         templateSheet = sheet
         val content = column().apply { setPadding(dp(16), dp(8), dp(16), dp(24)) }
-        content.addView(label("模板包含六项已保存的提示配置。", 14f, true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        content.addView(label("模板包含已保存的提示词、音频语言与输出方式。", 14f, true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         fun templateAction(title: String, run: () -> Unit) {
             content.addView(MaterialButton(this, null, androidx.appcompat.R.attr.borderlessButtonStyle).apply {
                 text = title; applyActionStyle(false)
@@ -262,7 +266,7 @@ internal class SettingsScreen(
         templateAction("使用已有模板") { loadPreset() }
         templateAction("恢复默认提示词") {
             MaterialAlertDialogBuilder(this).setTitle("恢复默认提示词？")
-                .setMessage("恢复本页六项配置，保留已有模板。")
+                .setMessage("恢复本页提示词与音频设置，保留已有模板。")
                 .setNegativeButton("取消", null).setPositiveButton("恢复默认") { _, _ ->
                     finishEditing { if (persist(SettingsUpdate.Prompts(PromptPreset.capture(AppConfig())))) showPage(page) }
                 }.showTracked()
@@ -354,7 +358,8 @@ internal class SettingsScreen(
     }
 
     private fun input(name: String, title: String, hintValue: String, initial: String = "", multiline: Boolean = false,
-                      secret: Boolean = false, numeric: Boolean = false, decimal: Boolean = false) {
+                      secret: Boolean = false, numeric: Boolean = false, decimal: Boolean = false,
+                      options: Map<String, String>? = null) {
         val content = column().apply {
             setPadding(0, 0, 0, 0)
             isClickable = true; isFocusable = true
@@ -405,8 +410,23 @@ internal class SettingsScreen(
             }
         }
         fieldOpeners[name] = open
+        val select: () -> Unit = {
+            if (options == null) open(null) else finishEditing {
+                val current = runCatching { SettingsUpdate.TextField.valueOf(name).read(store.load()) }.getOrNull()
+                if (current == null) toast("无法读取配置，请重试") else {
+                    val keys = options.keys.toList()
+                    SettingsChoiceSheet(this, title, options.values.toList() + "自定义语言代码", keys.indexOf(current)) { index ->
+                        if (disposed) false else if (index == keys.size) {
+                            open(null); true
+                        } else if (persist(SettingsUpdate.Text(SettingsUpdate.TextField.valueOf(name), keys[index]))) {
+                            showPage(page); true
+                        } else false
+                    }.showTracked()
+                }
+            }
+        }
         content.contentDescription = "编辑$title，${valueView.text}"
-        content.setOnClickListener { open(null) }
+        content.setOnClickListener { select() }
         if (multiline) {
             group = null
             content.addView(label(title, 13f, true).apply { textSize = 13f }, LinearLayout.LayoutParams(-1, -2))
@@ -418,7 +438,7 @@ internal class SettingsScreen(
             content.addView(valueView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
             body.addView(content, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
         } else {
-            val row = settingsListRow(title, inlineValue = true, showArrow = false, onClick = { open(null) })
+            val row = settingsListRow(title, inlineValue = true, showArrow = false, onClick = { select() })
             val text = row.getChildAt(0) as LinearLayout
             text.addView(valueView.apply {
                 textSize = 14f; setTextColor(MUTED); gravity = Gravity.END
@@ -429,6 +449,7 @@ internal class SettingsScreen(
     }
 
     private fun inputDisplay(name: String, value: String): String = when (name) {
+        "transcriptionLanguage" -> transcriptionLanguages[value] ?: value
         "recordingMaxMinutes" -> if (value == "0") "不限时长" else "$value 分钟"
         "historyLimit" -> "$value 条"
         else -> value.ifBlank { "未设置" }
@@ -683,7 +704,7 @@ internal class SettingsScreen(
     private fun savePreset(restored: FieldEditState? = null) {
         activeEdit = restored?.copy() ?: FieldEditState("presetName", "")
         lateinit var panel: SettingsEditPanel
-        panel = SettingsEditPanel(this, "模板名称", "1–60 字，保存当前六项已存配置", "", false, false, false, false,
+        panel = SettingsEditPanel(this, "模板名称", "1–60 字，保存当前提示词、音频语言与输出方式", "", false, false, false, false,
             onDraft = { activeEdit?.takeIf { it.name == "presetName" }?.draft = it },
             onRequestClose = { finishEditing {} },
             onSave = { draft, error ->
@@ -724,10 +745,11 @@ internal class SettingsScreen(
                 }
                 val summary = listOf("助手回答方式" to preview.instructions, "截图默认问题" to preview.defaultQuestion,
                     "选中文字默认问题" to preview.textQuestion, "音频默认问题" to preview.audioQuestion,
-                    "转写提示" to preview.transcriptionPrompt, "音频默认输出" to (audioOutputOptions[preview.audioOutput] ?: preview.audioOutput))
+                    "语音转写提示" to preview.transcriptionPrompt, "音频语言" to inputDisplay("transcriptionLanguage", preview.transcriptionLanguage),
+                    "音频默认输出" to (audioOutputOptions[preview.audioOutput] ?: preview.audioOutput))
                     .joinToString("\n\n") { (title, value) -> "$title\n${value.ifBlank { "未设置" }}" }
                 MaterialAlertDialogBuilder(this).setTitle("应用“${names[index]}”？")
-                    .setMessage("确认以下六项提示配置后立即应用。")
+                    .setMessage("确认以下提示词与音频设置后立即应用。")
                     .setView(ScrollView(this).apply { addView(label(summary, 14f).apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }) })
                     .setNegativeButton("取消", null).setPositiveButton("应用模板") { _, _ ->
                         finishEditing {

@@ -11,7 +11,7 @@ internal object ServiceCatalogCodec {
             "revision" to it.revision, "endpointIds" to it.endpointIds.toList()) },
         "profiles" to c.profiles.map { mapOf("id" to it.id, "name" to it.name, "purpose" to it.purpose.name, "providerId" to c.providerIdOf(it),
             "endpointId" to it.endpointId, "credentialId" to it.credentialId, "model" to it.model,
-            "options" to options(it.options), "transcriptionPrompt" to it.transcriptionPrompt, "language" to it.language) },
+            "options" to options(it.options)) },
         "activeAnswerId" to c.activeAnswerId, "activeTranscriptionId" to c.activeTranscriptionId)
 
     private fun options(o: GenerationOptions) = mapOf("maxOutputTokens" to o.maxOutputTokens, "reasoning" to o.reasoning,
@@ -37,7 +37,7 @@ internal object ServiceCatalogCodec {
                 ModelProfile(it.text("id"), it.text("name"), ModelPurpose.valueOf(it.text("purpose")), it.nullable("endpointId"),
                     it.nullable("credentialId"), it.text("model"), GenerationOptions((o["maxOutputTokens"] as? Number)?.toInt() ?: 0,
                         o.text("reasoning"), o.text("verbosity"), (o["temperature"] as? Number)?.toDouble(), (o["topP"] as? Number)?.toDouble(), o["webSearch"] == true),
-                    it.text("transcriptionPrompt"), it.text("language"), it.text("providerId"))
+                    providerId = it.text("providerId"))
             } }, activeAnswerId = data.nullable("activeAnswerId"), activeTranscriptionId = data.nullable("activeTranscriptionId"))
         catalog.validate()
         return catalog

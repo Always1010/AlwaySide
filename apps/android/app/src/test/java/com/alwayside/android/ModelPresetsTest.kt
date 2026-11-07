@@ -37,7 +37,7 @@ class ModelPresetsTest {
     @Test fun initializationOnlyFillsBlankNewDraftAndPreservesAllOtherSettings() {
         val presets = presets()
         val draft = ModelProfile("draft", "OpenAI", ModelPurpose.ANSWER,
-            options = GenerationOptions(reasoning = "high"), transcriptionPrompt = "保留提示", language = "zh")
+            options = GenerationOptions(reasoning = "high"))
         assertEquals(draft.copy(model = "answer-fixture"), presets.initializeNewProfile(draft, ProviderKind.OPENAI, endpoint()))
         val manual = draft.copy(model = "private-model-v2")
         assertSame(manual, presets.initializeNewProfile(manual, ProviderKind.OPENAI, endpoint()))

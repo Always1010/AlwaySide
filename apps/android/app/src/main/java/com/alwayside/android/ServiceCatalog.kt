@@ -34,7 +34,6 @@ internal data class GenerationOptions(
 internal data class ModelProfile(
     val id: String, val name: String, val purpose: ModelPurpose, val endpointId: String? = null,
     val credentialId: String? = null, val model: String = "", val options: GenerationOptions = GenerationOptions(),
-    val transcriptionPrompt: String = "", val language: String = "",
     val providerId: String = "",
 )
 
@@ -101,7 +100,7 @@ internal data class ServiceCatalog(
         require(key.providerId == providerId) { "只能选择这家服务商的密钥" }
         val endpoint = key.endpointIds.singleOrNull() ?: error("密钥连接信息无效，请在 API 管理中修复")
         val card = profile.copy(name = provider.name, providerId = provider.id, endpointId = endpoint,
-            model = profile.model.trim(), language = profile.language.trim())
+            model = profile.model.trim())
         val next = copy(profiles = if (old == null) profiles + card else profiles.map { if (it.id == card.id) card else it })
         next.validate()
         require(next.readiness(card) == null) { next.readiness(card).orEmpty() }
@@ -127,8 +126,7 @@ internal data class ServiceCatalog(
             apiVersion = endpoint?.apiVersion ?: "2026-10-21", workspaceId = endpoint?.workspaceId.orEmpty(),
             model = if (profile.purpose == ModelPurpose.ANSWER) profile.model else "",
             transcriptionModel = if (profile.purpose == ModelPurpose.TRANSCRIPTION) profile.model else "",
-            transcriptionPrompt = if (profile.purpose == ModelPurpose.TRANSCRIPTION) profile.transcriptionPrompt else config.transcriptionPrompt,
-            transcriptionLanguage = profile.language, transcriptionConnectionId = activeTranscriptionId,
+            transcriptionConnectionId = activeTranscriptionId,
             continuationMessages = emptyList())
     }
 
@@ -229,8 +227,6 @@ internal data class ServiceCatalog(
                 require(providerIdOf(profile) == credential.providerId && endpoint.id in credential.endpointIds) { "卡片只能引用所属服务商密钥的连接信息" }
             }
             require(profile.model.length <= 200 && profile.model.none(Char::isISOControl)) { "模型 ID 无效" }
-            require(profile.transcriptionPrompt.length <= 32000) { "转写提示过长" }
-            require(profile.language.isBlank() || Regex("[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*").matches(profile.language)) { "语言请填写语言代码或留空" }
             ProviderProtocol.validateOptions(profile.options.applyTo(AppConfig()))
             require(profile.purpose == ModelPurpose.ANSWER || profile.options == GenerationOptions()) { "转写配置不能包含问答生成参数" }
         }

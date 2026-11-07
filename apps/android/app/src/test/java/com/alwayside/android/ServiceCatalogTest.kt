@@ -21,8 +21,7 @@ class ServiceCatalogTest {
     private fun catalog(): ServiceCatalog {
         val keys = keys()
         return keys.upsertCard(card("answer", ModelPurpose.ANSWER, keys.key("answer-key")))
-            .upsertCard(card("asr", ModelPurpose.TRANSCRIPTION, keys.key("asr-key"))
-                .copy(transcriptionPrompt = "保留专有名词", language = "zh"))
+            .upsertCard(card("asr", ModelPurpose.TRANSCRIPTION, keys.key("asr-key")))
             .upsertCard(card("other-answer", ModelPurpose.ANSWER, keys.key("other-key")))
             .upsertCard(card("other-asr", ModelPurpose.TRANSCRIPTION, keys.key("other-key")))
     }
@@ -43,7 +42,7 @@ class ServiceCatalogTest {
         val active = saved.activate("answer").activate("asr")
         assertSame(active, active.activate("answer"))
         assertSame(active, active.activate("asr"))
-        val answer = active.attach(AppConfig())
+        val answer = active.attach(AppConfig(transcriptionPrompt = "保留专有名词", transcriptionLanguage = "zh"))
         val asr = ProviderConnections.transcription(answer)
         assertEquals("fixture-answer-key-secret", answer.apiKey)
         assertEquals("fixture-asr-key-secret", asr.apiKey)
@@ -51,6 +50,32 @@ class ServiceCatalogTest {
         assertEquals("fixture-asr", asr.transcriptionModel)
         assertEquals("保留专有名词", asr.transcriptionPrompt)
         assertEquals("zh", asr.transcriptionLanguage)
+    }
+
+    @Test fun switchingServicesKeepsGlobalPromptsAndLanguageAndIgnoresLegacyCopies() {
+        val saved = catalog()
+        val legacy = ServiceCatalogCodec.encode(saved).toMutableMap().apply {
+            put("profiles", getValue("profiles").let { it as List<*> }.map { item ->
+                item.wireObject() + mapOf("transcriptionPrompt" to "old service prompt", "language" to "en")
+            })
+        }
+        val restored = ServiceCatalogCodec.decode(legacy) { id -> saved.credentials.single { it.id == id }.value to false }
+        assertEquals(saved, restored)
+        val global = AppConfig(instructions = "global instructions", transcriptionPrompt = "global names", transcriptionLanguage = "zh")
+        listOf(restored, restored.activate("other-answer").activate("other-asr")).forEach { services ->
+            val answer = services.attach(global)
+            val asr = ProviderConnections.transcription(answer)
+            assertEquals(global.instructions, answer.instructions)
+            assertEquals(global.transcriptionPrompt, asr.transcriptionPrompt)
+            assertEquals(global.transcriptionLanguage, asr.transcriptionLanguage)
+            val cleared = ProviderConnections.transcription(services.attach(global.copy(transcriptionPrompt = "", transcriptionLanguage = "")))
+            assertEquals("", cleared.transcriptionPrompt)
+            assertEquals("", cleared.transcriptionLanguage)
+        }
+        ServiceCatalogCodec.encode(restored).items("profiles").forEach { item ->
+            assertFalse(item.wireObject().containsKey("transcriptionPrompt"))
+            assertFalse(item.wireObject().containsKey("language"))
+        }
     }
 
     @Test fun emptyListsStayUnselectedAndOnlySavingANewFirstCardSelectsIt() {

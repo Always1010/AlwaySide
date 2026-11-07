@@ -23,6 +23,9 @@ class SettingsUpdateTest {
         assertEquals(current.copy(temperature = null), SettingsUpdate.Text(SettingsUpdate.TextField.temperature, " ").applyTo(current))
         assertEquals(saved.copy(maxOutputTokens = 0), SettingsUpdate.Text(SettingsUpdate.TextField.maxOutputTokens, "").applyTo(saved))
         assertEquals(saved.copy(transcriptionPrompt = ""), SettingsUpdate.Text(SettingsUpdate.TextField.transcriptionPrompt, "").applyTo(saved))
+        val language = SettingsUpdate.Text(SettingsUpdate.TextField.transcriptionLanguage, " en ").applyTo(saved)
+        assertEquals(saved.copy(transcriptionLanguage = "en"), language)
+        assertEquals(saved, SettingsUpdate.Text(SettingsUpdate.TextField.transcriptionLanguage, " ").applyTo(language))
     }
 
     @Test fun emptyCredentialCannotEraseSavedKey() {
