@@ -27,6 +27,13 @@ internal object ReadingPresets {
         else -> emptyList()
     }
     fun defaultVoice(model: String) = if (DEFAULT_VOICE in voices(model)) DEFAULT_VOICE else "alloy"
+    fun resolve(connection: String, savedModel: String?, savedVoice: String?, kind: ProviderKind): ReadingVoice {
+        val existing = !savedModel.isNullOrBlank()
+        val model = savedModel?.takeIf(String::isNotBlank) ?: defaultModel(kind)
+        // Previous installations used implicit Alloy, including when only a model was saved.
+        val voice = savedVoice?.takeIf(String::isNotBlank) ?: if (existing) "alloy" else defaultVoice(model)
+        return ReadingVoice(connection, model, if (existing) voice else compatibleVoice(model, voice))
+    }
     fun compatibleVoice(model: String, voice: String): String {
         val supported = voices(model)
         return if (supported.isNotEmpty() && voice in speechVoices && voice !in supported) defaultVoice(model) else voice

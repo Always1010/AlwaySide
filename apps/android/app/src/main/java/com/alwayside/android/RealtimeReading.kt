@@ -53,7 +53,7 @@ internal object RealtimeReading {
                 if (event.text("type") == "session.created" && !sent) {
                     frames.send(WireJson.encode(request(text, voice))); sent = true
                 }
-                if (decoder.accept(event)) return decoder.audio()
+                if (decoder.accept(event)) { runCatching { frames.close() }; return decoder.audio() }
             }
             throw ProviderException("Realtime 事件过多，请缩短内容后重试")
         } finally {

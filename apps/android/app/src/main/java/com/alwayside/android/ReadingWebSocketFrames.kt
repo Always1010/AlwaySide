@@ -15,6 +15,7 @@ internal class ReadingWebSocketFrames(private val input: InputStream, private va
     private var total = 0L
     private var frames = 0
     fun send(text: String) = sendFrame(1, text.toByteArray(Charsets.UTF_8))
+    fun close() = sendFrame(8, byteArrayOf(3, 232.toByte())) // Normal closure, code 1000.
     private fun sendFrame(opcode: Int, bytes: ByteArray) {
         require(bytes.size <= MAX_MESSAGE) { "Realtime 请求过大" }
         check()

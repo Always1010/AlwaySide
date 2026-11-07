@@ -6,9 +6,8 @@ import android.content.Context
 internal class ReadingPreferences(private val context: Context) {
     private val prefs = context.getSharedPreferences("point_reading", Context.MODE_PRIVATE)
     fun voice(): ReadingVoice {
-        val model = prefs.getString("model", "").orEmpty().ifBlank { ReadingPresets.defaultModel(kind()) }
-        return ReadingVoice(prefs.getString("connection", "").orEmpty(), model,
-            prefs.getString("voice", null)?.takeIf(String::isNotBlank) ?: ReadingPresets.defaultVoice(model))
+        return ReadingPresets.resolve(prefs.getString("connection", "").orEmpty(),
+            prefs.getString("model", null), prefs.getString("voice", null), kind())
     }
     fun kind(): ProviderKind {
         prefs.getString("providerKind", null)?.let { name -> runCatching { ProviderKind.valueOf(name) }.getOrNull()?.let { return it } }

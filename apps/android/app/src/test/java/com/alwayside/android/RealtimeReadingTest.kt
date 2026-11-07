@@ -11,6 +11,9 @@ class RealtimeReadingTest {
         assertEquals("gpt-realtime-2.1-mini",ReadingPresets.defaultModel(ProviderKind.OPENAI))
         assertTrue(ReadingPresets.realtime(ReadingPresets.DEFAULT_MODEL))
         assertEquals("marin",ReadingPresets.defaultVoice(ReadingPresets.DEFAULT_MODEL))
+        assertEquals("marin",ReadingPresets.resolve("service",null,null,ProviderKind.OPENAI).voice)
+        assertEquals("alloy",ReadingPresets.resolve("service","gpt-4o-mini-tts",null,ProviderKind.OPENAI).voice)
+        assertEquals("coral",ReadingPresets.resolve("service","my-model","coral",ProviderKind.CUSTOM).voice)
         assertTrue("marin" in ReadingPresets.voices("gpt-realtime-2.1"))
         assertFalse("nova" in ReadingPresets.voices("gpt-realtime-2.1-mini"))
         assertEquals("alloy",ReadingPresets.compatibleVoice("tts-1","marin"))
@@ -85,6 +88,12 @@ class RealtimeReadingTest {
         cancel.attach(socket);cancel.cancel()
         assertTrue(socket.isClosed)
         assertThrows(java.util.concurrent.CancellationException::class.java) { cancel.throwIfCancelled() }
+        val output=ByteArrayOutputStream()
+        ReadingWebSocketFrames(ByteArrayInputStream(byteArrayOf()),output).close()
+        assertEquals(0x88,output.toByteArray()[0].toInt() and 255)
+        assertEquals(0x82,output.toByteArray()[1].toInt() and 255)
+        assertEquals("https://example.com/v1/realtime?model=gpt-realtime-2.1-mini",ProviderProtocol.endpoint(
+            "https://example.com/v1","realtime",mapOf("model" to ReadingPresets.DEFAULT_MODEL)).toString())
     }
     private fun serverFrame(opcode:Int,text:String,fin:Boolean=true):ByteArray {
         val bytes=text.toByteArray()

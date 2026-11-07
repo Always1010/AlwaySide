@@ -314,6 +314,8 @@ Content-Type: audio/wav
 
 指定音频语言时，OpenAI 服务的 `gpt-transcribe` 按官方 multipart 格式发送 `languages[]`；其他模型和自定义兼容服务保持单值 `language`。自动识别时省略语言字段，不同时发送两种格式。转写提示与语言均进入请求快照及音频缓存标识；保存新值后再次提交音频会重新转写，历史追问继续复用已有原文。[OpenAI 转写上下文参数](https://developers.openai.com/api/docs/guides/speech-to-text#add-transcription-context)
 
+实验室点读使用独立的朗读配置，不属于上述转写链路。OpenAI 新配置默认选择 `gpt-realtime-2.1-mini` 与 `marin`，可选 `gpt-realtime-2.1`；通过 Bearer 认证的 Realtime WebSocket 发送单次文字输入，收集 24 kHz 单声道 PCM，并在完整生成后保存为 WAV。不会打开麦克风或发送聊天历史；取消会关闭连接，完成后主动关闭会话，不自动重试。旧 `audio/speech` 模型与 MP3 文件继续兼容。模型目录使用当前 Key 的 `GET models`，仅用户主动发起；内置音色依据所选模型的官方列表展示，不通过模型目录推断音色。[Realtime 事件格式](https://developers.openai.com/api/reference/resources/realtime/client-events)、[音色列表](https://developers.openai.com/api/docs/guides/realtime-conversations)
+
 ## 7. 错误、凭据与升级
 
 HTTP 3xx 明确提示填写最终地址；401／403 检查密钥、地域和权限；404 检查路由与模型；413 检查内容体积；429 检查限流／额度；5xx 和超时需用户手动重试。客户端不读取并回显任意 HTTP 错误正文。请求连接超时 20 秒、读超时 60 秒、整体上限 240 秒；取消令牌会主动断开连接。回答必须返回 SSE Content-Type，非流式 JSON 不会被误认为成功。
