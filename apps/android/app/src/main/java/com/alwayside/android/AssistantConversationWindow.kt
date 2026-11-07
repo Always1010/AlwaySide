@@ -38,9 +38,11 @@ internal class AssistantConversationWindow(context: Context, private val outside
 
         override fun dispatchTouchEvent(event: MotionEvent): Boolean {
             if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-                // The selection handles and floating toolbar can extend beyond the window.
-                // Their touches must not trigger the conversation's outside-to-hide action.
-                if (textMode == null) outside()
+                // Handles and the toolbar are higher subwindows; touching them does not
+                // send ACTION_OUTSIDE here. A real outside touch must also end selection
+                // in pinned windows, while the owner decides whether to hide the window.
+                textMode?.finish()
+                outside()
                 return false
             }
             return super.dispatchTouchEvent(event)
