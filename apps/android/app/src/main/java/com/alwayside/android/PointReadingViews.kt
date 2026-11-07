@@ -36,9 +36,9 @@ internal class ReadingBlocksView(context: Context, private val owner: String) : 
                 enableTextActions(read = { read(it) })
             }
             line.addView(text, LayoutParams(0, -2, 1f))
-            if (complete && block.english && block.text.length <= 3500) {
-                val button = context.iconButton(R.drawable.ic_line_audio, "朗读：${block.text.take(70)}") { read(block.text) }
-                buttons.add(block.text to button)
+            if (complete && block.english && block.speech.length <= 3500) {
+                val button = context.iconButton(R.drawable.ic_line_audio, "朗读：${block.speech.take(70)}") { read(block.speech) }
+                buttons.add(block.speech to button)
                 line.addView(button)
             }
             addView(line, LayoutParams(-1, -2))
