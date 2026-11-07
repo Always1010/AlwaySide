@@ -197,14 +197,15 @@ internal class AssistantWindowActions(
 
 /** Exactly the same window hierarchy and controls for the service and the local tutorial. */
 internal class AssistantWindowViews(context: Context, title: String, image: Boolean, actions: AssistantWindowActions) {
-    val body = LinearLayout(context).apply {
-        orientation=LinearLayout.VERTICAL;setPadding(context.dp(1),context.dp(1),context.dp(1),context.dp(1))
+    val body = FrameLayout(context).apply {
+        setPadding(context.dp(1),context.dp(1),context.dp(1),context.dp(1))
         // Draw the perimeter after the toolbar so its opaque fill cannot cover the rounded stroke.
         foreground=context.outlinedCard(Color.TRANSPARENT,15)
     }
+    private val sections = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     val header = context.materialToolbar(title,null,compact=true).apply {
         setTitleTextAppearance(context,R.style.TextAppearance_AlwaySide_AssistantTitle)
-        minimumHeight=context.dp(44)
+        minimumHeight=context.dp(42)
     }
     private fun headerAction(id: Int, resource: Int, description: String, action: () -> Unit): MaterialButton {
         val context=header.context
@@ -212,12 +213,12 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
             iconSize=context.dp(20)
             minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0
             setPadding(context.dp(12),0,context.dp(12),0)
-            cornerRadius=context.dp(22)
+            cornerRadius=context.dp(21)
             setToggleCheckedStateOnClick(false)
-            layoutParams=ViewGroup.LayoutParams(context.dp(44),context.dp(44))
+            layoutParams=ViewGroup.LayoutParams(context.dp(44),context.dp(42))
         }.also { header.addIconAction(id,resource,description,action).actionView=it }
     }
-    val favorite = headerAction(3,R.drawable.ic_line_star,"收藏会话",actions.favorite)
+    val favorite: MaterialButton
     val pin = headerAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示",actions.pin)
     val content = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(15),context.dp(13),context.dp(15),context.dp(8)) }
     val sourceContent = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(12),context.dp(5),context.dp(12),context.dp(5)) }
@@ -226,13 +227,15 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val scroll = ScrollView(context).apply { addView(content);isFillViewport=true;isVerticalScrollBarEnabled=true }
     // Empty in the tutorial; the service supplies request notices without coupling shared views to sessions.
     val noticeSlot = FrameLayout(context)
-    private val controls = LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(context.dp(8),0,context.dp(8),0) }
+    // Reserve the corner for resizing; content actions never share its touch area.
+    private val controls = LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(context.dp(8),0,context.dp(32),0) }
+    val discardSlot = FrameLayout(context)
     val toggle = MaterialButton(context,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
         applyActionStyle();setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantAction)
         iconSize=context.dp(14);iconPadding=context.dp(4);iconGravity=MaterialButton.ICON_GRAVITY_TEXT_END
         minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0
         insetLeft=0;insetRight=0;insetTop=0;insetBottom=0
-        setPadding(context.dp(8),0,context.dp(8),0);cornerRadius=context.dp(8)
+        setPadding(context.dp(8),0,context.dp(8),0);cornerRadius=context.dp(12)
         maxLines=1;ellipsize=TextUtils.TruncateAt.END
         backgroundTintList=ColorStateList.valueOf(if(AppAppearance.isNight)TONAL_SURFACE else 0xFFEAF0FF.toInt())
         setOnClickListener { actions.toggle() }
@@ -266,27 +269,40 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
 
     init { with(context) {
         headerAction(2,R.drawable.ic_line_expand,"在应用中打开",actions.expand)
-        body.addView(header,LinearLayout.LayoutParams(-1,dp(44)))
-        body.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
+        sections.addView(header,LinearLayout.LayoutParams(-1,dp(42)))
+        sections.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
         val sourceCard=assistantCard(12)
         sourceCard.addView(sourceContent);content.addView(sourceCard,LinearLayout.LayoutParams(-1,-2))
-        content.addView(response);content.addView(status)
-        body.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-        body.addView(noticeSlot,LinearLayout.LayoutParams(-1,-2))
+        content.addView(response)
+        sections.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        val requestState=LinearLayout(this).apply {
+            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(15),0,dp(8),0)
+            addView(status,LinearLayout.LayoutParams(0,-2,1f))
+        }
+        sections.addView(requestState,LinearLayout.LayoutParams(-1,-2))
+        sections.addView(noticeSlot,LinearLayout.LayoutParams(-1,-2))
+        sections.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
         val entry=FrameLayout(this)
-        controls.addView(entry,LinearLayout.LayoutParams(0,dp(32),1f))
+        controls.addView(entry,LinearLayout.LayoutParams(0,dp(36),1f))
         entry.addView(toggle,FrameLayout.LayoutParams(-2,-1,Gravity.START or Gravity.CENTER_VERTICAL))
+        controls.addView(discardSlot,LinearLayout.LayoutParams(dp(36),dp(36)).apply { marginStart=dp(6);marginEnd=dp(6) })
+        val trailing=FrameLayout(this)
+        controls.addView(trailing,LinearLayout.LayoutParams(0,dp(36),1f))
+        val contentActions=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
+        trailing.addView(contentActions,FrameLayout.LayoutParams(-2,-1,Gravity.END))
         fun compact(resource: Int, description: String, action: () -> Unit) = iconButton(resource,description,action).apply {
             iconSize=dp(17);minWidth=0;minHeight=0;minimumWidth=0;minimumHeight=0;setPadding(dp(7),0,dp(7),0)
-        }.also { controls.addView(it,LinearLayout.LayoutParams(dp(32),dp(32))) }
-        cancel=compact(android.R.drawable.ic_menu_close_clear_cancel,"取消当前回答",actions.cancel)
-        retry=compact(android.R.drawable.ic_popup_sync,"重试原问题与证据",actions.retry)
+        }
+        cancel=compact(R.drawable.ic_line_stop,"停止当前回答",actions.cancel).apply { visibility=View.GONE }
+        retry=compact(android.R.drawable.ic_popup_sync,"重试原问题与证据",actions.retry).apply { visibility=View.GONE }
+        listOf(cancel,retry).forEach { requestState.addView(it,LinearLayout.LayoutParams(dp(36),dp(36))) }
         copy=compact(R.drawable.ic_copy,"复制最近回答",actions.copy)
-        resize=compact(R.drawable.ic_resize,"拖动调整窗口大小") {}
-        body.addView(controls,LinearLayout.LayoutParams(-1,-2))
+        favorite=compact(R.drawable.ic_line_star,"收藏会话",actions.favorite).apply { setToggleCheckedStateOnClick(false) }
+        listOf(copy,favorite).forEach { contentActions.addView(it,LinearLayout.LayoutParams(dp(32),dp(36))) }
+        sections.addView(controls,LinearLayout.LayoutParams(-1,dp(42)))
         composerSection.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
         val composer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(9)) }
-        val tools=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(4),0,0) }
+        val tools=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(0,dp(4),dp(24),0) }
         imageChoice=if(image)MaterialButton(this,null,com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
             text="沿用本次截图";isAllCaps=false;maxLines=1;ellipsize=TextUtils.TruncateAt.END;minWidth=0;minimumWidth=0
             setPadding(dp(12),0,dp(12),0);setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantAction)
@@ -301,7 +317,13 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         tools.addView(search,LinearLayout.LayoutParams(dp(48),dp(48)).apply { marginStart=dp(4) })
         tools.addView(send,LinearLayout.LayoutParams(dp(48),dp(48)).apply { marginStart=dp(4) })
         composer.addView(tools,LinearLayout.LayoutParams(-1,-2));composerSection.addView(composer,LinearLayout.LayoutParams(-1,-2))
-        body.addView(composerSection,LinearLayout.LayoutParams(-1,-2));setComposer(false)
+        sections.addView(composerSection,LinearLayout.LayoutParams(-1,-2))
+        body.addView(sections,FrameLayout.LayoutParams(-1,-1))
+        resize=compact(R.drawable.ic_resize,"拖动右下角调整窗口大小") {}.apply {
+            iconSize=dp(14);setPadding(dp(5),dp(5),dp(5),dp(5))
+        }
+        body.addView(resize,FrameLayout.LayoutParams(dp(24),dp(24),Gravity.BOTTOM or Gravity.END))
+        setComposer(false)
     } }
 
     fun setComposer(expanded: Boolean, draft: Boolean = false) {
