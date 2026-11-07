@@ -8,15 +8,32 @@ internal object TranscriptionSettings {
         require(value.isEmpty() || languageCode.matches(value)) { "音频语言请填写语言代码或选择自动识别" }
     }
 
+    /** Consume legacy card fields once, keeping the active card's effective prompt, including empty. */
+    fun migrateLegacyContext(data: Map<String, Any?>): Map<String, Any?> {
+        val services = data["services"] as? Map<*, *>
+        val profiles = services?.get("profiles") as? List<*>
+        val migrated = data + mapOf(
+            "transcriptionPrompt" to (activeLegacyProfile(data)?.get("transcriptionPrompt") as? String
+                ?: data["transcriptionPrompt"] as? String ?: AppConfig().transcriptionPrompt),
+            "transcriptionLanguage" to readLanguage(data))
+        if (profiles == null) return migrated
+        return migrated + ("services" to (services + ("profiles" to profiles.map { profile ->
+            (profile as? Map<*, *>)?.filterKeys { it != "transcriptionPrompt" && it != "language" } ?: profile
+        })))
+    }
+
+    private fun activeLegacyProfile(data: Map<String, Any?>?): Map<*, *>? {
+        val services = data?.get("services") as? Map<*, *>
+        val active = services?.get("activeTranscriptionId") as? String ?: return null
+        return (services["profiles"] as? List<*>)?.mapNotNull { it as? Map<*, *> }?.firstOrNull {
+            it["id"] == active && it["purpose"] == "TRANSCRIPTION"
+        }
+    }
+
     /** Missing global language imports only the active legacy profile; an explicit empty value wins. */
     fun readLanguage(data: Map<String, Any?>?): String {
         val value = if (data?.containsKey("transcriptionLanguage") == true) data["transcriptionLanguage"] else {
-            val services = data?.get("services") as? Map<*, *>
-            val active = services?.get("activeTranscriptionId") as? String
-            val profiles = services?.get("profiles") as? List<*>
-            profiles?.mapNotNull { it as? Map<*, *> }?.firstOrNull {
-                active != null && it["id"] == active && it["purpose"] == "TRANSCRIPTION"
-            }?.get("language")
+            activeLegacyProfile(data)?.get("language")
         }
         return (value as? String).orEmpty().trim().takeIf { it.isEmpty() || languageCode.matches(it) }.orEmpty()
     }

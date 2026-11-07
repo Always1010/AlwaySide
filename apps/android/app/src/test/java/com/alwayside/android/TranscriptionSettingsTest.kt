@@ -36,6 +36,39 @@ class TranscriptionSettingsTest {
         assertEquals("", TranscriptionSettings.multipart(config.copy(transcriptionPrompt = "", transcriptionLanguage = ""), "test-boundary"))
     }
 
+    @Test fun migrationPreservesTheActivePromptEvenAfterLanguageWasMigratedAndRunsOnlyOnce() {
+        val old = legacy + mapOf("transcriptionPrompt" to "default for new cards", "transcriptionLanguage" to "en")
+        val services = old["services"].wireObject()
+        val saved = old + ("services" to (services + ("profiles" to services.items("profiles").map { item ->
+            item.wireObject() + ("transcriptionPrompt" to if (item.wireObject()["id"] == "active") "Names: AlwaySide" else "inactive hint")
+        })))
+        val migrated = TranscriptionSettings.migrateLegacyContext(saved)
+        assertEquals("Names: AlwaySide", migrated["transcriptionPrompt"])
+        assertEquals("en", migrated["transcriptionLanguage"])
+        migrated["services"].wireObject().items("profiles").forEach {
+            assertFalse(it.wireObject().containsKey("transcriptionPrompt"))
+            assertFalse(it.wireObject().containsKey("language"))
+        }
+        assertEquals(migrated, TranscriptionSettings.migrateLegacyContext(migrated))
+        val cleared = migrated + ("transcriptionPrompt" to "")
+        assertEquals(cleared, TranscriptionSettings.migrateLegacyContext(cleared))
+        assertEquals("Names: AlwaySide", SettingsRecovery.reset(saved)["transcriptionPrompt"])
+    }
+
+    @Test fun migrationPreservesAnExplicitlyEmptyCardPromptAndFallsBackWithoutAnActiveCard() {
+        val services = legacy["services"].wireObject()
+        val saved = legacy + ("transcriptionPrompt" to "default hint") +
+            ("services" to (services + ("profiles" to services.items("profiles").map { item ->
+                item.wireObject() + ("transcriptionPrompt" to "")
+            })))
+        assertEquals("", TranscriptionSettings.migrateLegacyContext(saved)["transcriptionPrompt"])
+        assertEquals("", SettingsRecovery.reset(saved)["transcriptionPrompt"])
+        assertEquals("default hint", TranscriptionSettings.migrateLegacyContext(
+            saved + ("services" to (saved["services"].wireObject() + ("activeTranscriptionId" to null))))["transcriptionPrompt"])
+        assertEquals("default hint", TranscriptionSettings.migrateLegacyContext(
+            legacy + ("transcriptionPrompt" to "default hint"))["transcriptionPrompt"])
+    }
+
     @Test fun languageValidationRejectsInvalidCodesBeforeSendingOrSavingTemplates() {
         listOf("", "zh", "en", "yue", "zh-cn").forEach(TranscriptionSettings::validateLanguage)
         listOf("English", "zh,en", "en\r\ninjected").forEach { code ->

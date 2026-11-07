@@ -49,14 +49,16 @@ internal class SettingsStore(context: Context) {
         val data = JSONObject(prefs.getString("config", "{}") ?: "{}")
         val schema = data.optInt("schemaVersion", 1)
         require(schema in 1..4) { "不支持的配置版本" }
+        val publicFields = WireJson.decode(data.toString())
+        val migrated = TranscriptionSettings.migrateLegacyContext(publicFields)
         val defaults = AppConfig()
         val globals = defaults.copy(
             instructions = data.optString("instructions", defaults.instructions),
             defaultQuestion = data.optString("defaultQuestion", defaults.defaultQuestion),
             audioQuestion = data.optString("audioQuestion", defaults.audioQuestion),
             autoUpdateImage = data.optBoolean("autoUpdateImage", defaults.autoUpdateImage),
-            transcriptionPrompt = data.optString("transcriptionPrompt", defaults.transcriptionPrompt),
-            transcriptionLanguage = TranscriptionSettings.readLanguage(WireJson.decode(data.toString())),
+            transcriptionPrompt = migrated["transcriptionPrompt"] as String,
+            transcriptionLanguage = migrated["transcriptionLanguage"] as String,
             audioOutput = data.optString("audioOutput", defaults.audioOutput),
             textQuestion = data.optString("textQuestion", defaults.textQuestion),
         )
@@ -64,9 +66,8 @@ internal class SettingsStore(context: Context) {
         val catalog = ServiceCatalogCodec.decode(WireJson.decode(data.getJSONObject("services").toString())) { id ->
             readCredential("credential.$id")
         }
-        if (!data.has("transcriptionLanguage")) {
-            data.put("transcriptionLanguage", globals.transcriptionLanguage)
-            check(prefs.edit().putString("config", data.toString()).commit()) { "Settings migration failed" }
+        if (migrated != publicFields) {
+            check(prefs.edit().putString("config", WireJson.encode(migrated)).commit()) { "Settings migration failed" }
         }
         catalog.attach(globals)
     }
