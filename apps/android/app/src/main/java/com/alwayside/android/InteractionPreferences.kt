@@ -32,6 +32,8 @@ internal data class InteractionConfig(
     val collapseFollowUpByDefault: Boolean = true,
     val saveHistoryAudio: Boolean = true,
     val backgroundPlayback: Boolean = false,
+    val chatPointReading: Boolean = false,
+    val imagePointReading: Boolean = false,
     val recordingLimitAction: RecordingLimitAction = RecordingLimitAction.DISCARD,
     val useDefaultQuestion: Boolean = true,
     val menuWebSearch: Boolean? = null,
@@ -84,6 +86,8 @@ internal class InteractionPreferences(private val context: Context) {
             collapseFollowUpByDefault = prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
             saveHistoryAudio = prefs.getBoolean("saveHistoryAudio", d.saveHistoryAudio),
             backgroundPlayback = prefs.getBoolean("backgroundPlayback", d.backgroundPlayback),
+            chatPointReading = prefs.getBoolean("chatPointReading", false),
+            imagePointReading = prefs.getBoolean("imagePointReading", false),
             recordingLimitAction = RecordingLimitAction.from(prefs.getString("recordingLimitAction", null)),
             useDefaultQuestion = prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
             menuWebSearch = if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
@@ -114,6 +118,8 @@ internal class InteractionPreferences(private val context: Context) {
             .putBoolean("collapseFollowUpByDefault", value.collapseFollowUpByDefault)
             .putBoolean("saveHistoryAudio", value.saveHistoryAudio)
             .putBoolean("backgroundPlayback", value.backgroundPlayback)
+            .putBoolean("chatPointReading", value.chatPointReading)
+            .putBoolean("imagePointReading", value.imagePointReading)
             .putBoolean("useDefaultQuestion", value.useDefaultQuestion)
         for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
             val key = "binding_${recording}_${gesture.name}"

@@ -7,6 +7,11 @@ class InteractionDefaultsTest {
     @Test fun factoryBindingsUseOnlyTheAgreedFourBasicGestures() {
         val config = InteractionConfig()
         assertFalse(config.longPressSlide)
+        assertFalse(config.chatPointReading)
+        assertFalse(config.imagePointReading)
+        assertFalse(config.readingEnabled(ReadingOrigin.CHAT))
+        assertTrue(config.copy(imagePointReading = true).readingEnabled(ReadingOrigin.IMAGE))
+        assertFalse(config.copy(imagePointReading = true).readingEnabled(ReadingOrigin.CHAT))
         assertEquals(600, config.longPressMillis)
         assertEquals(24, config.slideDistanceDp)
         assertEquals(32, config.actionCircleSizeDp)
