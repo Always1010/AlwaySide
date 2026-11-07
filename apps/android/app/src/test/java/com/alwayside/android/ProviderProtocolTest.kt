@@ -35,6 +35,10 @@ class ProviderProtocolTest {
     @Test fun credentialFreeHttpsEndpointsPreserveProviderBasePaths() {
         assertEquals("https://api.openai.com/v1/responses", ProviderProtocol.endpoint("https://api.openai.com/v1/", "responses").toString())
         assertEquals("https://example.com/proxy/v1/audio/transcriptions", ProviderProtocol.endpoint("https://example.com/proxy/v1", "audio/transcriptions").toString())
+        assertEquals("https://api.openai.com/v1/audio/speech", ProviderProtocol.endpoint("https://api.openai.com/v1/", "audio/speech").toString())
+        assertEquals("https://example.com/proxy/v1/audio/speech", ProviderProtocol.endpoint("https://example.com/proxy/v1", "audio/speech").toString())
+        assertThrows(ProviderException::class.java) { ProviderProtocol.endpoint("https://example.com/v1", "audio/../speech") }
+        assertThrows(ProviderException::class.java) { ProviderProtocol.endpoint("https://example.com/v1", "audio/unknown") }
         listOf(
             "http://example.com/v1", "https://key@example.com/v1", "https://example.com/v1?key=secret",
             "https://example.com/v1#secret", "https://example.com/a/../v1",

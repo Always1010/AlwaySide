@@ -51,7 +51,7 @@ internal object ProviderProtocol {
             uri.rawQuery != null || uri.rawFragment != null || uri.port !in -1..65535 ||
             uri.port == 0 || uri.rawPath != uri.path || uri.normalize() != uri ||
             uri.path.orEmpty().contains("//") ||
-            !(route in setOf("responses", "chat/completions", "messages", "audio/transcriptions", "models") ||
+            !(route in setOf("responses", "chat/completions", "messages", "audio/transcriptions", "audio/speech", "models") ||
                 Regex("models/[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}:streamGenerateContent").matches(route)) ||
             query.any { (key, value) -> key !in setOf("alt", "pageSize", "pageToken", "limit", "after_id") || value.length > 4096 || value.any(Char::isISOControl) } ||
             (query.containsKey("alt") && query["alt"] != "sse")) {
