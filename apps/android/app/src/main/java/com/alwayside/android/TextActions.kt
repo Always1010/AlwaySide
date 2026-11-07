@@ -20,8 +20,10 @@ internal fun TextView.enableTextActions(selectable: Boolean = true, read: ((Stri
     // Activity windows use Android's result-aware implementation. Service overlays need
     // explicit read-only launches because their Context cannot startActivityForResult.
     if (read != null) {
+        val readingBound = getTag(R.id.point_reading_action) != null
         setTag(R.id.point_reading_action, read)
-        customSelectionActionModeCallback = ReadingTextActions(this, if (context.hasActivity()) null else OverlayTextActions(this))
+        if (!readingBound)
+            customSelectionActionModeCallback = ReadingTextActions(this, if (context.hasActivity()) null else OverlayTextActions(this))
     } else {
         if (getTag(R.id.point_reading_action) != null) {
             setTag(R.id.point_reading_action, null)
@@ -34,24 +36,36 @@ internal fun TextView.enableTextActions(selectable: Boolean = true, read: ((Stri
 private class ReadingTextActions(private val text: TextView, private val delegate: ActionMode.Callback?) : ActionMode.Callback {
     override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
         delegate?.onCreateActionMode(mode, menu)
-        if (InteractionPreferences(text.context).load().chatPointReading)
-            menu.add(Menu.NONE, R.id.point_reading_action, 0, "朗读")
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        updateReadingAction(menu)
         return true
     }
     override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
-        val changed = !InteractionPreferences(text.context).load().chatPointReading && menu.findItem(R.id.point_reading_action) != null
-        if (changed) menu.removeItem(R.id.point_reading_action)
+        val changed = updateReadingAction(menu)
         return (delegate?.onPrepareActionMode(mode, menu) ?: false) || changed
+    }
+    private fun selectedText(): String? {
+        val start = minOf(text.selectionStart, text.selectionEnd)
+        val end = maxOf(text.selectionStart, text.selectionEnd)
+        return if (start >= 0 && end <= text.text.length && end > start)
+            text.text.subSequence(start, end).toString().takeIf { it.isNotBlank() } else null
+    }
+    private fun updateReadingAction(menu: Menu): Boolean {
+        val available = InteractionPreferences(text.context).load().chatPointReading &&
+            text.getTag(R.id.point_reading_action) != null && selectedText() != null
+        val present = menu.findItem(R.id.point_reading_action) != null
+        if (available == present) return false
+        if (available) menu.add(Menu.NONE, R.id.point_reading_action, 0, "点读")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        else menu.removeItem(R.id.point_reading_action)
+        return true
     }
     override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
         if (item.itemId != R.id.point_reading_action) return delegate?.onActionItemClicked(mode, item) ?: false
-        val start = minOf(text.selectionStart, text.selectionEnd)
-        val end = maxOf(text.selectionStart, text.selectionEnd)
-        if (start >= 0 && end <= text.text.length && end > start) {
+        val selected = selectedText()
+        if (selected != null && InteractionPreferences(text.context).load().chatPointReading) {
             @Suppress("UNCHECKED_CAST")
             val read = text.getTag(R.id.point_reading_action) as? ((String) -> Unit)
-            read?.invoke(text.text.subSequence(start, end).toString())
+            read?.invoke(selected)
         }
         mode.finish()
         return true

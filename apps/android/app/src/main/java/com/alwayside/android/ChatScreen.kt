@@ -287,7 +287,6 @@ internal class ChatScreen(
         val nextReading=readingPreferences.load().chatPointReading
         if(readingEnabled!=nextReading) {
             readingEnabled=nextReading
-            disposeMessageRows();renderedHistorySize=-1
             if(readingEnabled) {
                 readingBar=ReadingBar(this,session.conversationId,ReadingOrigin.CHAT).also {
                     val root=view as LinearLayout
@@ -593,16 +592,7 @@ internal class ChatScreen(
             row.value = value
             changed = true
         }
-        if(readingEnabled && row.role=="assistant" && complete) {
-            row.text.visibility=View.GONE
-            var blocks=row.block.getChildAt(1) as? ReadingBlocksView
-            if(blocks==null) { blocks=ReadingBlocksView(this,session.conversationId);row.block.addView(blocks,1) }
-            if(blocks.tag!=value) { blocks.content(row.text.text,true);blocks.tag=value }
-        } else if(readingEnabled) {
-            row.text.visibility=View.VISIBLE
-            (row.block.getChildAt(1) as? ReadingBlocksView)?.let { row.block.removeView(it) }
-            if(complete)row.text.enableChatReading(session.conversationId)
-        }
+        row.text.enableChatReading(session.conversationId, complete)
         val html = suggestions.takeIf { row.role != "user" && it.isNotBlank() && it.length <= 32768 }.orEmpty()
         if (row.suggestions != html) {
             row.suggestionView?.let { row.block.removeView(it); it.destroy() }

@@ -53,13 +53,6 @@ class PointReadingCacheTest {
         assertNotEquals(voice.key("US"), voice.key("us"))
         assertNotEquals(voice.key("Hello."), voice.copy(voice = "other").key("Hello."))
         assertNotEquals(voice.key("Hello."), voice.copy(connection = "other").key("Hello."))
-        assertFalse(ReadingParagraphs.split("Hello.\n你好。\nhttps://example.com").last().english)
-        assertEquals(listOf(true, false), ReadingParagraphs.split("I'm down.\n我愿意。").map { it.english })
-        val labeled=ReadingParagraphs.split("英文原文：I'm down.\n中文翻译：我愿意。")
-        assertTrue(labeled.first().english)
-        assertEquals("英文原文：I'm down.",labeled.first().text)
-        assertEquals("I'm down.",labeled.first().speech)
-        assertFalse(labeled.last().english)
     }
     @Test fun inactiveStoreCreatesNothingAndEvictionKeepsTheActiveFile() = withCache { root ->
         val directory=java.io.File(root,"not-created")

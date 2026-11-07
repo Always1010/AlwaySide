@@ -178,7 +178,6 @@ class AssistantService : Service() {
         var scroll: ScrollView? = null
         var content: LinearLayout? = null
         var readingBar: ReadingBar? = null
-        var renderedReading = false
         var readingPresentation: AssistantWindowViews? = null
         var readingImageDialog: androidx.appcompat.app.AlertDialog? = null
         var transcriptReadingBound = false
@@ -953,11 +952,6 @@ class AssistantService : Service() {
     /** Keep message views stable while a streaming reply grows and only update changed text. */
     private fun renderFloatingMessages(node:FloatingConversation,messages:List<Triple<Boolean,String,String>>) {
         val container=node.response ?: return
-        val readingEnabled=preferences.load().chatPointReading
-        if(node.renderedReading!=readingEnabled) {
-            node.suggestionViews.values.forEach { it.destroy() };node.suggestionViews.clear()
-            container.removeAllViews();node.renderedReading=readingEnabled
-        }
         var remaining=100000
         val visible=messages.asReversed().mapNotNull { (user,text,suggestions) ->
             if(remaining<=0) null else Triple(user,text.takeLast(remaining),suggestions).also { remaining-=it.second.length }
@@ -976,18 +970,8 @@ class AssistantService : Service() {
                 message.tag=value
             }
             val complete=!(node.chat.busy && !user && index==visible.lastIndex && node.chat.partial==value)
-            if(readingEnabled && !user && complete) {
-                message.visibility=View.GONE
-                var reading=row.getChildAt(1) as? ReadingBlocksView
-                if(reading==null) { reading=ReadingBlocksView(uiContext,node.chat.conversationId);row.addView(reading,1) }
-                val stamp=value to complete
-                if(reading.tag!=stamp) { reading.content(message.text,complete);reading.tag=stamp }
-            } else {
-                message.visibility=View.VISIBLE
-                (row.getChildAt(1) as? ReadingBlocksView)?.let { row.removeView(it) }
-                if(readingEnabled && complete)message.enableTextActions(read={ text -> PointReadingController.get(this).read(node.chat.conversationId,ReadingOrigin.CHAT,text) })
-            }
-            val preserved=if(readingEnabled && !user && complete)2 else 1
+            message.enableChatReading(node.chat.conversationId, complete)
+            val preserved=1
             if(!user && suggestions.isNotBlank() && suggestions.length<=32768) {
                 val widgetKey="$index:$suggestions"
                 visibleSuggestionKeys.add(widgetKey)

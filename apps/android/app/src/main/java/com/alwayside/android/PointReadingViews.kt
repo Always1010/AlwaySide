@@ -7,67 +7,11 @@ import android.view.View
 import android.widget.LinearLayout
 import com.google.android.material.button.MaterialButton
 
-internal fun android.widget.TextView.enableChatReading(owner: String) {
-    enableTextActions(read = if (InteractionPreferences(context).load().chatPointReading) ({ selected ->
+internal fun android.widget.TextView.enableChatReading(owner: String, complete: Boolean = true) {
+    // Check the preference when opening the selection menu, so toggling never replaces message views.
+    enableTextActions(read = if (complete) ({ selected ->
         PointReadingController.get(context).read(owner, ReadingOrigin.CHAT, selected)
     }) else null)
-}
-
-/** Only inserted into enabled experiments. Native rendered spans are preserved in each block. */
-@android.annotation.SuppressLint("ViewConstructor") // Requires an owning conversation; never inflated from XML.
-internal class ReadingBlocksView(context: Context, private val owner: String) : LinearLayout(context) {
-    private val controller = PointReadingController.get(context)
-    private val playback = ChatAudioPlayback.get(context)
-    private val buttons = mutableListOf<Pair<String, MaterialButton>>()
-    private var signature = ""
-    private val observer: () -> Unit = { updateButtons() }
-    init { orientation = VERTICAL; setPadding(0, 0, 0, 0) }
-    fun content(rendered: CharSequence, complete: Boolean) {
-        removeAllViews(); buttons.clear()
-        var offset = 0
-        ReadingParagraphs.split(rendered.toString()).forEach { block ->
-            val slice = rendered.subSequence(offset, offset + block.text.length)
-            offset += block.text.length + 1
-            val line = LinearLayout(context).apply { gravity = Gravity.TOP }
-            val text = context.label("", 13f).apply {
-                setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
-                includeFontPadding = false; setLineSpacing(context.dp(4).toFloat(), 1f)
-                this.text = slice
-                enableTextActions(read = { read(it) })
-            }
-            line.addView(text, LayoutParams(0, -2, 1f))
-            if (complete && block.english && block.speech.length <= 3500) {
-                val button = context.iconButton(R.drawable.ic_line_audio, "朗读：${block.speech.take(70)}") { read(block.speech) }
-                buttons.add(block.speech to button)
-                line.addView(button)
-            }
-            addView(line, LayoutParams(-1, -2))
-        }
-        signature = ""; updateButtons()
-    }
-    private fun read(text: String) {
-        if (InteractionPreferences(context).load().chatPointReading)
-            controller.read(owner, ReadingOrigin.CHAT, text)
-    }
-    private fun updateButtons() {
-        val state = controller.state
-        val next = "${state.owner}:${state.text}:${state.generating}:${playback.currentState.playing}:${playback.readingKey}"
-        if (signature == next) return
-        signature = next
-        buttons.forEach { (text, button) ->
-            val selected = state.owner == owner && state.origin == ReadingOrigin.CHAT && state.text == normalizeReadingText(text)
-            val playing = selected && playback.readingKey == state.key && playback.currentState.playing
-            button.icon = context.prototypeIcon(if (playing) R.drawable.ic_line_pause else R.drawable.ic_line_audio)
-            button.alpha = if (selected && state.generating) 0.45f else 1f
-            button.accessible(when {
-                selected && state.generating -> "正在生成：${text.take(70)}"
-                playing -> "暂停朗读：${text.take(70)}"
-                else -> "朗读：${text.take(70)}"
-            })
-        }
-    }
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); controller.addObserver(observer); playback.addObserver(observer) }
-    override fun onDetachedFromWindow() { controller.removeObserver(observer); playback.removeObserver(observer); super.onDetachedFromWindow() }
 }
 
 @android.annotation.SuppressLint("ViewConstructor") // Requires an owning conversation and experiment.
