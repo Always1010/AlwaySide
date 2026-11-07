@@ -252,6 +252,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
                 if(AppAppearance.isNight)HINT else 0xFF929AA5.toInt())))
     }
     val input = TextInputEditText(inputLayout.context).apply {
+        enableTextActions(selectable = false)
         setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantBody)
         textSize=13f;setTextColor(INK);setHintTextColor(HINT);hint="想了解什么？"
         minLines=1;maxLines=3;minHeight=context.dp(50)
@@ -328,7 +329,7 @@ private fun Context.assistantCard(radiusDp:Int) = MaterialCardView(
 internal fun Context.assistantMessageRow(user: Boolean): ViewGroup {
     val message=label("",if(user)12f else 13f).apply {
         setTextAppearance(if(user)R.style.TextAppearance_AlwaySide_AssistantQuestion else R.style.TextAppearance_AlwaySide_AssistantBody)
-        setTextColor(INK);includeFontPadding=false;setTextIsSelectable(true)
+        setTextColor(INK);includeFontPadding=false;enableTextActions()
         movementMethod=android.text.method.LinkMovementMethod.getInstance()
         if(user) { setTextColor(ON_TONAL_SURFACE);setPadding(dp(12),dp(8),dp(12),dp(8)) }
     }

@@ -221,6 +221,7 @@ internal class ChatScreen(
                 boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
             }
             composer = TextInputEditText(composerLayout.context).apply {
+                enableTextActions(selectable = false)
                 setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
                 minHeight = dp(56); minLines = 1; maxLines = 4
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -537,7 +538,7 @@ internal class ChatScreen(
         val isUser = role == "user"
         val messageText = label("", if (isUser) 12f else 13f).apply {
             setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyLarge)
-            setTextIsSelectable(true)
+            enableTextActions()
             setLineSpacing(dp(4).toFloat(), 1f)
             if (isUser) { maxWidth = dp(320); setTextColor(ON_TONAL_SURFACE) }
         }
@@ -621,7 +622,7 @@ internal class ChatScreen(
         if (!ready || session.transcript.isBlank()) return
         MaterialAlertDialogBuilder(this).setTitle("原始音频转写")
             .setView(ScrollView(this).apply {
-                addView(column().apply { addView(label(session.transcript).apply { setTextIsSelectable(true) }) })
+                addView(column().apply { addView(label(session.transcript).apply { enableTextActions() }) })
             }).setPositiveButton("返回对话", null).show()
     }
 
@@ -658,7 +659,7 @@ internal class ChatScreen(
         if (!ready || session.sourceText.isBlank()) return
         MaterialAlertDialogBuilder(this).setTitle("选中文字")
             .setView(ScrollView(this).apply {
-                addView(column().apply { addView(label(session.sourceText).apply { setTextIsSelectable(true) }) })
+                addView(column().apply { addView(label(session.sourceText).apply { enableTextActions() }) })
             }).setPositiveButton("返回对话", null).show()
     }
 

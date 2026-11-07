@@ -713,7 +713,7 @@ class AssistantService : Service() {
             else node.transcript?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE;updateTranscriptCopy(node)}
         }}.also{sourceContent.addView(it)}
         node.sourceImage=ImageView(uiContext).apply { scaleType=ImageView.ScaleType.FIT_CENTER;visibility=View.GONE;accessible("本次截图预览");node.frame?.let{setImageBitmap(it.bitmap)} }.also{sourceContent.addView(it,LinearLayout.LayoutParams(-1,dp(110)))}
-        node.transcript=uiContext.label("",12f,true).apply { visibility=View.GONE;setTextIsSelectable(true);setLineSpacing(0f,1.3f);setPadding(0,dp(8),0,dp(8)) }.also{sourceContent.addView(it)}
+        node.transcript=uiContext.label("",12f,true).apply { visibility=View.GONE;enableTextActions();setLineSpacing(0f,1.3f);setPadding(0,dp(8),0,dp(8)) }.also{sourceContent.addView(it)}
         if(node.kind=="audio")node.transcriptCopy=icon(R.drawable.ic_copy,"复制转写原文") {
             val text=node.chat.transcript
             if(text.isNotBlank())runCatching {

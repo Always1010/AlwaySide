@@ -13,7 +13,7 @@ abstract class StagePresentation : DefaultTask() {
         files.sync {
             from(applicationSource.dir("java/com/alwayside/android")) {
                 include("AssistantPresentation.kt", "Ui.kt", "PrototypeIcons.kt",
-                    "AppAppearance.kt", "AppearanceMode.kt", "ThemeScheme.kt")
+                    "AppAppearance.kt", "AppearanceMode.kt", "ThemeScheme.kt", "TextActions.kt")
             }
             into(kotlinOutput.dir("com/alwayside/android"))
         }
