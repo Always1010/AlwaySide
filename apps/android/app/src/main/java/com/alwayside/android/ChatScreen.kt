@@ -48,7 +48,6 @@ internal class ChatScreen(
     private lateinit var composerLayout: TextInputLayout
     private lateinit var send: MaterialButton
     private lateinit var retry: MaterialButton
-    private lateinit var transcript: MaterialButton
     private lateinit var webSearch: MaterialButton
     private lateinit var reuse: MaterialCheckBox
     private lateinit var contextTools: LinearLayout
@@ -248,7 +247,7 @@ internal class ChatScreen(
         contextTools = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(4), dp(10), dp(10))
-            // Reserve only the space left by four 48dp actions, including on 320dp screens.
+            // Reserve only the space left by the action buttons, including on 320dp screens.
             addView(LinearLayout(this@ChatScreen).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 reuse = MaterialCheckBox(this@ChatScreen).apply {
@@ -265,8 +264,6 @@ internal class ChatScreen(
                 renderWebSearch()
             }.apply { isCheckable = true }
             addView(webSearch)
-            transcript = appIcon(android.R.drawable.ic_menu_info_details, "查看原始音频转写") { showTranscript() }
-            addView(transcript)
             retry = appIcon(android.R.drawable.ic_popup_sync, "重试上次请求") {
                 if (ready) { restoredStatus = ""; session.retry() }
             }
@@ -311,7 +308,6 @@ internal class ChatScreen(
         send.accessible(if (session.busy) "取消当前请求" else "发送问题")
         retry.visibility = if (session.canRetry) View.VISIBLE else View.GONE
         retry.accessible(session.retryLabel)
-        transcript.visibility = if (session.transcript.isNotBlank()) View.VISIBLE else View.GONE
         reuse.isEnabled = image != null && !session.busy
         webSearch.isEnabled = !session.busy
         renderWebSearch()
@@ -350,7 +346,7 @@ internal class ChatScreen(
             createEvidencePreview("选中文字", session.sourceText) { showSourceText() }
         }
         if (session.transcript.isNotBlank()) preview("transcript", session.transcript) {
-            createEvidencePreview("音频转写", session.transcript) { showTranscript() }
+            createEvidencePreview("音频转写", session.transcript)
         }
         if (evidencePreviews.keys.retainAll(previewKeys)) structureChanged = true
 
@@ -500,18 +496,35 @@ internal class ChatScreen(
         webSearch.accessible(if (selected) "联网搜索：开启，点按关闭" else "联网搜索：关闭，点按开启")
     }
 
-    private fun createEvidencePreview(title: String, text: String, expand: () -> Unit): View =
+    private fun createEvidencePreview(title: String, text: String, expand: (() -> Unit)? = null): View =
         MaterialCardView(this).apply {
             setCardBackgroundColor(SURFACE); strokeWidth = 0; cardElevation = 0f
             radius = dp(12).toFloat(); isClickable = true; isFocusable = true
-            accessible("展开完整$title"); setOnClickListener { expand() }
+            accessible("展开完整$title")
+            val heading = label("$title · 点按展开", 11f, true)
+            val content = label(text, 12f).apply {
+                maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(6), 0, 0)
+            }
+            var expanded = false
+            setOnClickListener {
+                if (expand != null) expand() else {
+                    expanded = !expanded
+                    content.maxLines = if (expanded) Int.MAX_VALUE else 3
+                    content.ellipsize = if (expanded) null else android.text.TextUtils.TruncateAt.END
+                    if (expanded) content.enableChatReading(session.conversationId) else {
+                        content.setTextIsSelectable(false)
+                        content.isClickable = false; content.isLongClickable = false
+                    }
+                    heading.text = "$title · 点按${if (expanded) "收起" else "展开"}"
+                    accessible(if (expanded) "收起$title" else "展开完整$title")
+                }
+            }
+            heading.setOnClickListener { performClick() }
             addView(column().apply {
                 setPadding(dp(16), dp(12), dp(16), dp(12))
-                addView(label("$title · 点按展开", 11f, true))
-                addView(label(text, 12f).apply {
-                    maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
-                    setPadding(0, dp(6), 0, 0)
-                })
+                addView(heading)
+                addView(content)
             })
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
         }
@@ -645,14 +658,6 @@ internal class ChatScreen(
         }
     }
 
-    private fun showTranscript() {
-        if (!ready || session.transcript.isBlank()) return
-        MaterialAlertDialogBuilder(this).setTitle("原始音频转写")
-            .setView(ScrollView(this).apply {
-                addView(column().apply { addView(label(session.transcript).apply { enableChatReading(session.conversationId) }) })
-            }).setPositiveButton("返回对话", null).show()
-    }
-
     private fun availableAudio(): java.io.File? =
         handoff?.audio?.file?.takeIf { it.isFile && it.length() > 44 }
             ?: if (::session.isInitialized && session.kind == "audio")
@@ -715,7 +720,7 @@ internal class ChatScreen(
         mediaView.text = ""
         mediaView.visibility = View.GONE
         composerLayout.isEnabled = false; send.isEnabled = false
-        retry.visibility = View.GONE; transcript.visibility = View.GONE; reuse.visibility = View.GONE
+        retry.visibility = View.GONE; reuse.visibility = View.GONE
         contextTools.visibility = View.GONE
     }
 
