@@ -220,6 +220,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         }.also { header.addIconAction(id,resource,description,action).actionView=it }
     }
     val favorite: MaterialButton
+    val discard = headerAction(3,R.drawable.ic_line_trash,"丢弃当前对话",actions.discard)
     val pin = headerAction(1,R.drawable.ic_pin,"固定窗口，点外部保持显示",actions.pin)
     val content = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(15),context.dp(13),context.dp(15),context.dp(8)) }
     val sourceContent = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;setPadding(context.dp(12),context.dp(5),context.dp(12),context.dp(5)) }
@@ -230,7 +231,6 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val noticeSlot = FrameLayout(context)
     // Reserve the corner for resizing; content actions never share its touch area.
     private val controls = LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL;setPadding(context.dp(8),0,context.dp(32),0) }
-    private val discardSlot = FrameLayout(context)
     val toggle = MaterialButton(context,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
         applyActionStyle();setTextAppearance(R.style.TextAppearance_AlwaySide_AssistantAction)
         iconSize=context.dp(14);iconPadding=context.dp(4);iconGravity=MaterialButton.ICON_GRAVITY_TEXT_END
@@ -245,7 +245,6 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
     val retry: MaterialButton
     val resize: MaterialButton
     val copy: MaterialButton
-    val discard: MaterialButton
     val composerSection = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     val imageChoice: MaterialButton?
     val inputLayout = TextInputLayout(context,null,com.google.android.material.R.attr.textInputOutlinedStyle).apply {
@@ -287,7 +286,6 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         val entry=FrameLayout(this)
         controls.addView(entry,LinearLayout.LayoutParams(0,dp(36),1f))
         entry.addView(toggle,FrameLayout.LayoutParams(-2,-1,Gravity.START or Gravity.CENTER_VERTICAL))
-        controls.addView(discardSlot,LinearLayout.LayoutParams(dp(36),dp(36)).apply { marginStart=dp(6);marginEnd=dp(6) })
         val trailing=FrameLayout(this)
         controls.addView(trailing,LinearLayout.LayoutParams(0,dp(36),1f))
         val contentActions=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
@@ -298,8 +296,6 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         cancel=compact(R.drawable.ic_line_stop,"停止当前回答",actions.cancel).apply { visibility=View.GONE }
         retry=compact(android.R.drawable.ic_popup_sync,"重试原问题与证据",actions.retry).apply { visibility=View.GONE }
         listOf(cancel,retry).forEach { requestState.addView(it,LinearLayout.LayoutParams(dp(36),dp(36))) }
-        discard=compact(R.drawable.ic_line_trash,"丢弃当前对话",actions.discard)
-        discardSlot.addView(discard,FrameLayout.LayoutParams(-1,-1))
         copy=compact(R.drawable.ic_copy,"复制最近回答",actions.copy)
         favorite=compact(R.drawable.ic_line_star,"收藏会话",actions.favorite).apply { setToggleCheckedStateOnClick(false) }
         listOf(copy,favorite).forEach { contentActions.addView(it,LinearLayout.LayoutParams(dp(32),dp(36))) }
