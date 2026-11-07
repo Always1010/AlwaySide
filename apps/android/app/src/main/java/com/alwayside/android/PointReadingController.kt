@@ -69,13 +69,13 @@ internal class PointReadingController private constructor(private val context: C
                     require(ReadingPreferences(context).voice() == voice) { "朗读配置已改变，请重试" }
                     val bytes = synthesize(configuration, voice, text, cancel)
                     cancel.throwIfCancelled()
-                    disposable = File.createTempFile("point-reading-", ".mp3", context.cacheDir)
+                    disposable = File.createTempFile("point-reading-", ".${voice.format}", context.cacheDir)
                     disposable.writeBytes(bytes)
                     require(validAudio(disposable)) { "服务未返回可播放的音频，请检查朗读接口与模型" }
                     val favorites = HistoryStore(context).index().conversations.filter { it.isFavorite }.map { it.id }.toSet()
                     cancel.throwIfCancelled()
                     require(cache.current(owner, ticket)) { "会话已删除，点读已取消" }
-                    val archive = runCatching { cache.put(key, owner, ticket, bytes, favorites, playback.currentFile) }.getOrNull()
+                    val archive = runCatching { cache.put(key, owner, ticket, bytes, favorites, playback.currentFile, voice.format) }.getOrNull()
                     saved = archive != null
                     target = archive ?: disposable
                     if (saved) { disposable.delete(); disposable = null }
@@ -155,6 +155,7 @@ internal class PointReadingController private constructor(private val context: C
 
     private fun synthesize(config: AppConfig, voice: ReadingVoice, text: String, cancel: RequestCancellation): ByteArray {
         require(config.apiKey.length <= 4096 && config.apiKey.all { it.code in 33..126 }) { "朗读 Key 格式无效" }
+        if (ReadingPresets.realtime(voice.model)) return RealtimeReading.synthesize(config, text, voice.voice, cancel)
         val body = WireJson.encode(mapOf("model" to voice.model, "voice" to voice.voice,
             "input" to text, "response_format" to "mp3")).toByteArray(Charsets.UTF_8)
         return HttpTransport().request(config, "audio/speech", "application/json", body.size.toLong(), cancel,

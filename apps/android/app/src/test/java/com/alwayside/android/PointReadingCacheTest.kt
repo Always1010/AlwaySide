@@ -5,6 +5,20 @@ import org.junit.Test
 import java.nio.file.Files
 
 class PointReadingCacheTest {
+    @Test fun realtimeWavAndLegacyMp3ShareQuotaAndSurviveReopeningWithoutChangingLegacyKeys() = withCache { root ->
+        val cache=PointReadingCache(root,8)
+        val legacy=ReadingVoice("service","tts-1","alloy")
+        assertEquals(readingDigest(listOf("speech-v1","service","tts-1","alloy","mp3","Hi").joinToString("\u0000")),legacy.key("Hi"))
+        val current=ReadingVoice("service",ReadingPresets.DEFAULT_MODEL,ReadingPresets.DEFAULT_VOICE)
+        assertEquals("wav",current.format)
+        cache.put(legacy.key("Hi"),"old",cache.ticket("old"),byteArrayOf(1,2),emptySet())
+        cache.put(current.key("Hi"),"new",cache.ticket("new"),byteArrayOf(3,4),emptySet(),format=current.format)
+        val reopened=PointReadingCache(root,8)
+        assertEquals("mp3",reopened.get(legacy.key("Hi"),"old",reopened.ticket("old"))!!.extension)
+        assertEquals("wav",reopened.get(current.key("Hi"),"new",reopened.ticket("new"))!!.extension)
+        assertEquals(4,reopened.bytes().toInt())
+        reopened.clear();assertEquals(0,reopened.bytes().toInt())
+    }
     @Test fun cachedAudioSurvivesReopeningAndSharedOwnersAreIndependent() = withCache { root ->
         val cache = PointReadingCache(root)
         val key = ReadingVoice("service", "model", "voice").key("Hello.")

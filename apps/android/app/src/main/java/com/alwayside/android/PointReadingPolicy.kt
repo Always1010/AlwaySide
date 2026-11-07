@@ -11,7 +11,8 @@ internal fun InteractionConfig.readingEnabled(origin: ReadingOrigin): Boolean = 
 }
 
 internal data class ReadingVoice(val connection: String = "", val model: String = "", val voice: String = "alloy") {
-    fun key(text: String): String = readingDigest(listOf("speech-v1", connection, model, voice, "mp3",
+    val format: String get() = if (ReadingPresets.realtime(model)) "wav" else "mp3"
+    fun key(text: String): String = readingDigest(listOf(if (format == "wav") "realtime-reading-v1" else "speech-v1", connection, model, voice, format,
         normalizeReadingText(text)).joinToString("\u0000"))
 }
 

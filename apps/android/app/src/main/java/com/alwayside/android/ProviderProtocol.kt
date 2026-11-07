@@ -12,6 +12,7 @@ internal class RequestCancellation {
     @Volatile private var cancelled = false
     val isCancelled: Boolean get() = cancelled
     private var connection: HttpURLConnection? = null
+    private var socket: java.net.Socket? = null
 
     fun cancel() {
         val active = synchronized(this) {
@@ -19,6 +20,8 @@ internal class RequestCancellation {
             connection.also { connection = null }
         }
         active?.disconnect()
+        val openSocket = synchronized(this) { socket.also { socket = null } }
+        runCatching { openSocket?.close() }
     }
 
     fun throwIfCancelled() {
@@ -28,7 +31,7 @@ internal class RequestCancellation {
     internal fun attach(active: HttpURLConnection) {
         synchronized(this) {
             throwIfCancelled()
-            check(connection == null) { "取消令牌不能同时用于多个请求" }
+            check(connection == null && socket == null) { "取消令牌不能同时用于多个请求" }
             connection = active
         }
         // Covers cancellation immediately after attaching and before opening the socket.
@@ -38,6 +41,11 @@ internal class RequestCancellation {
     internal fun detach(active: HttpURLConnection) {
         synchronized(this) { if (connection === active) connection = null }
     }
+    internal fun attach(active: java.net.Socket) {
+        synchronized(this) { throwIfCancelled(); check(socket == null && connection == null); socket = active }
+        throwIfCancelled()
+    }
+    internal fun detach(active: java.net.Socket) { synchronized(this) { if (socket === active) socket = null } }
 }
 
 internal class ProviderException(message: String, val summary: String = "请求失败，请查看详情") : Exception(message)
@@ -51,9 +59,10 @@ internal object ProviderProtocol {
             uri.rawQuery != null || uri.rawFragment != null || uri.port !in -1..65535 ||
             uri.port == 0 || uri.rawPath != uri.path || uri.normalize() != uri ||
             uri.path.orEmpty().contains("//") ||
-            !(route in setOf("responses", "chat/completions", "messages", "audio/transcriptions", "audio/speech", "models") ||
+            !(route in setOf("responses", "chat/completions", "messages", "audio/transcriptions", "audio/speech", "models", "realtime") ||
                 Regex("models/[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}:streamGenerateContent").matches(route)) ||
-            query.any { (key, value) -> key !in setOf("alt", "pageSize", "pageToken", "limit", "after_id") || value.length > 4096 || value.any(Char::isISOControl) } ||
+            query.any { (key, value) -> key !in setOf("alt", "pageSize", "pageToken", "limit", "after_id", "model") || value.length > 4096 || value.any(Char::isISOControl) } ||
+            (query.containsKey("model") && (route != "realtime" || !ReadingPresets.realtime(query["model"].orEmpty()))) ||
             (query.containsKey("alt") && query["alt"] != "sse")) {
             throw ProviderException("API 地址或接口路径无效，请使用不含账号、查询参数或片段的 HTTPS 基础地址")
         }

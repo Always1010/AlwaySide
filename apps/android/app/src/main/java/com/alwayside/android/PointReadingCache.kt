@@ -16,7 +16,7 @@ internal class PointReadingCache(private val directory: File, private val capaci
 
     @Synchronized fun get(key: String, owner: String, ticket: Ticket): File? {
         if (!current(owner, ticket)) return null
-        val target = audio(key)
+        val target = listOf("mp3", "wav").map { audio(key, it) }.firstOrNull { it.isFile } ?: return null
         if (!target.isFile || target.length() == 0L) return null
         addOwner(key, owner)
         target.setLastModified(System.currentTimeMillis())
@@ -24,7 +24,7 @@ internal class PointReadingCache(private val directory: File, private val capaci
     }
 
     @Synchronized fun put(key: String, owner: String, ticket: Ticket, bytes: ByteArray,
-        protectedOwners: Set<String>, active: File? = null): File? {
+        protectedOwners: Set<String>, active: File? = null, format: String = "mp3"): File? {
         if (!current(owner, ticket)) return null
         require(bytes.isNotEmpty() && bytes.size <= MAX_AUDIO_BYTES) { "朗读音频大小无效" }
         check(directory.isDirectory || directory.mkdirs()) { "无法保存点读音频" }
@@ -38,7 +38,7 @@ internal class PointReadingCache(private val directory: File, private val capaci
             if (candidate.delete()) { used -= length; refs(candidate.nameWithoutExtension).delete() }
         }
         if (used + bytes.size > capacity) return null
-        val target = audio(key)
+        val target = audio(key, format)
         val temporary = File(directory, "$key.part")
         try {
             temporary.outputStream().use { output -> output.write(bytes); output.fd.sync() }
@@ -73,10 +73,10 @@ internal class PointReadingCache(private val directory: File, private val capaci
     }
 
     @Synchronized fun bytes(): Long = audioFiles().sumOf(File::length)
-    @Synchronized fun discard(key: String) { audio(key).delete(); refs(key).delete() }
-    private fun audioFiles() = directory.listFiles()?.filter { it.extension == "mp3" && valid(it.nameWithoutExtension) } ?: emptyList()
+    @Synchronized fun discard(key: String) { listOf("mp3", "wav").forEach { audio(key, it).delete() }; refs(key).delete() }
+    private fun audioFiles() = directory.listFiles()?.filter { it.extension in setOf("mp3", "wav") && valid(it.nameWithoutExtension) } ?: emptyList()
     private fun valid(key: String) = Regex("[a-f0-9]{64}").matches(key)
-    private fun audio(key: String): File { require(valid(key)); return File(directory, "$key.mp3") }
+    private fun audio(key: String, format: String): File { require(valid(key) && format in setOf("mp3", "wav")); return File(directory, "$key.$format") }
     private fun refs(key: String): File { require(valid(key)); return File(directory, "$key.refs") }
     private fun owners(key: String): Set<String> {
         val file = refs(key)
