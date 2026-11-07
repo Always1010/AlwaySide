@@ -90,6 +90,7 @@ internal class ChatScreen(
     private var playbackForeground = true
     private var readingEnabled = false
     private var readingBar: ReadingBar? = null
+    private var readingImageDialog: androidx.appcompat.app.AlertDialog? = null
     private val readingPreferences = InteractionPreferences(this)
     private val readingListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "chatPointReading" && ready && !closing) render()
@@ -401,7 +402,7 @@ internal class ChatScreen(
                 structureChanged = true
             }
             contentChanged = updateMessageRow(partialAnswerRow!!, session.partial,
-                if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文") || contentChanged
+                if (session.busy) "正在生成" else "未完成的回复，尚未加入上下文", complete=false) || contentChanged
         } else if (partialAnswerRow != null) {
             partialAnswerRow?.dispose(); partialAnswerRow = null
             structureChanged = true
@@ -521,6 +522,11 @@ internal class ChatScreen(
             setCardBackgroundColor(SURFACE); strokeWidth = 0; cardElevation = 0f; radius = dp(12).toFloat()
             isClickable = true; isFocusable = true; accessible("查看$title，可双指缩放")
             setOnClickListener {
+                if(InteractionPreferences(this@ChatScreen).load().imagePointReading) {
+                    readingImageDialog?.dismiss()
+                    readingImageDialog=showImagePointReading(this@ChatScreen,bitmap,session.conversationId)
+                    return@setOnClickListener
+                }
                 val dialog = MaterialAlertDialogBuilder(this@ChatScreen).setTitle(title)
                     .setView(ScreenshotView(this@ChatScreen, bitmap))
                     .setPositiveButton("返回对话", null).create()
@@ -580,26 +586,22 @@ internal class ChatScreen(
         return MessageRow(role, block, messageText, notice)
     }
 
-    private fun updateMessageRow(row: MessageRow, value: String, evidence: String, suggestions: String = ""): Boolean {
+    private fun updateMessageRow(row: MessageRow, value: String, evidence: String, suggestions: String = "", complete: Boolean = true): Boolean {
         var changed = false
         if (row.value != value) {
             row.text.text = MarkdownText.render(value)
             row.value = value
             changed = true
-            if(readingEnabled && row.role=="assistant") {
-                row.text.visibility=View.GONE
-                var blocks=row.block.getChildAt(1) as? ReadingBlocksView
-                if(blocks==null) { blocks=ReadingBlocksView(this,session.conversationId);row.block.addView(blocks,1) }
-                blocks.content(row.text.text,row!==partialAnswerRow)
-                blocks.tag=value to (row!==partialAnswerRow)
-            } else if(readingEnabled) row.text.enableTextActions(read={ selected ->
-                PointReadingController.get(this).read(session.conversationId,ReadingOrigin.CHAT,selected)
-            })
         }
-        if(readingEnabled && row.role=="assistant") {
-            val blocks=row.block.getChildAt(1) as? ReadingBlocksView
-            val stamp=value to (row!==partialAnswerRow)
-            if(blocks!=null && blocks.tag!=stamp) { blocks.content(row.text.text,row!==partialAnswerRow);blocks.tag=stamp }
+        if(readingEnabled && row.role=="assistant" && complete) {
+            row.text.visibility=View.GONE
+            var blocks=row.block.getChildAt(1) as? ReadingBlocksView
+            if(blocks==null) { blocks=ReadingBlocksView(this,session.conversationId);row.block.addView(blocks,1) }
+            if(blocks.tag!=value) { blocks.content(row.text.text,true);blocks.tag=value }
+        } else if(readingEnabled) {
+            row.text.visibility=View.VISIBLE
+            (row.block.getChildAt(1) as? ReadingBlocksView)?.let { row.block.removeView(it) }
+            if(complete)row.text.enableChatReading(session.conversationId)
         }
         val html = suggestions.takeIf { row.role != "user" && it.isNotBlank() && it.length <= 32768 }.orEmpty()
         if (row.suggestions != html) {
@@ -740,6 +742,7 @@ internal class ChatScreen(
     }
 
     fun dispose(retaining: Boolean = false) {
+        readingImageDialog?.dismiss();readingImageDialog=null
         disposeMessageRows()
         evidencePreviews.clear()
         if (closing) return

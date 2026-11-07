@@ -18,7 +18,7 @@ internal class PointReadingController private constructor(private val context: C
     private val worker = Executors.newSingleThreadExecutor()
     private val preferences = InteractionPreferences(context)
     private val playback = ChatAudioPlayback.get(context)
-    val cache = PointReadingCache(File(context.noBackupFilesDir, "point_reading_audio"))
+    val cache = cacheFor(context)
     private var epoch = 0L
     private var cancellation: RequestCancellation? = null
     private var file: File? = null
@@ -93,7 +93,15 @@ internal class PointReadingController private constructor(private val context: C
                         if (!saved) toast("本次音频未长期保存，请检查存储空间或清理点读缓存")
                     }
                 }
-            } catch (_: java.util.concurrent.CancellationException) { disposable?.delete() }
+            } catch (_: java.util.concurrent.CancellationException) {
+                disposable?.delete()
+                main.post {
+                    if(epoch==token) {
+                        cancellation=null;state=state.copy(generating=false,error="朗读已取消，请重试")
+                        publish()
+                    }
+                }
+            }
             catch (error: Exception) {
                 disposable?.delete()
                 main.post {
@@ -134,11 +142,14 @@ internal class PointReadingController private constructor(private val context: C
         cache.removeOwner(owner)
         main.post { if (state.owner == owner) stop() }
     }
-    fun clear(keepFavorites: Boolean) {
+    fun clear(keepFavorites: Boolean, finished: () -> Unit = {}) {
         stop()
         worker.execute {
-            val protected = if (keepFavorites) HistoryStore(context).index().conversations.filter { it.isFavorite }.map { it.id }.toSet() else emptySet()
-            cache.clear(protected)
+            val success=runCatching {
+                val protected = if (keepFavorites) HistoryStore(context).index().conversations.filter { it.isFavorite }.map { it.id }.toSet() else emptySet()
+                cache.clear(protected)
+            }.isSuccess
+            main.post { if(!success)toast("无法清理点读缓存，请重试");finished() }
         }
     }
 
@@ -174,17 +185,27 @@ internal class PointReadingController private constructor(private val context: C
     }
     private fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_LONG).show()
     companion object {
+        // get() always supplies applicationContext; no Activity or overlay is retained here.
+        @android.annotation.SuppressLint("StaticFieldLeak")
         @Volatile private var instance: PointReadingController? = null
+        private val stores = java.util.concurrent.ConcurrentHashMap<String,PointReadingCache>()
+        private fun cacheFor(context: Context): PointReadingCache {
+            val directory=File(context.noBackupFilesDir,"point_reading_audio")
+            return stores.computeIfAbsent(directory.absolutePath) { PointReadingCache(directory) }
+        }
         fun get(context: Context): PointReadingController = instance ?: PointReadingController(context.applicationContext).also { instance = it }
         fun stopIfCreated() { instance?.stop() }
+        fun stopOriginIfCreated(owner: String, origin: ReadingOrigin) {
+            instance?.let { if(it.state.owner==owner && it.state.origin==origin)it.stop() }
+        }
         fun hiddenIfCreated() { instance?.let { it.hidden(it.state.owner) } }
         fun delete(context: Context, owner: String) {
             instance?.let { it.deleted(owner); return }
-            PointReadingCache(File(context.noBackupFilesDir, "point_reading_audio")).removeOwner(owner)
+            cacheFor(context).removeOwner(owner)
         }
         fun clearAll(context: Context) {
             instance?.let { current -> current.main.post { current.stop() }; current.cache.clear(); return }
-            PointReadingCache(File(context.noBackupFilesDir, "point_reading_audio")).clear()
+            cacheFor(context).clear()
         }
     }
 }

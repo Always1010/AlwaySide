@@ -93,7 +93,7 @@ class AssistantService : Service() {
     private val preferencesListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         val updated = preferences.load()
         if (updated != config) {
-            val readingChanged=updated.chatPointReading!=config.chatPointReading
+            val readingChanged=updated.chatPointReading!=config.chatPointReading || updated.imagePointReading!=config.imagePointReading
             config = updated
             cancelGestures()
             removeMenu()
@@ -180,6 +180,9 @@ class AssistantService : Service() {
         var readingBar: ReadingBar? = null
         var renderedReading = false
         var readingPresentation: AssistantWindowViews? = null
+        var readingImageDialog: androidx.appcompat.app.AlertDialog? = null
+        var transcriptReadingBound = false
+        var imageReadingBound = false
         init {
             chat = ChatSession(this@AssistantService) { refresh(this) }
             chat.newConversation(kind = kind)
@@ -655,6 +658,7 @@ class AssistantService : Service() {
     }
     private fun hideUnpinned(except: FloatingConversation?=null) { nodes.values.filter { it!==except && !it.pinned }.forEach { hideWindow(it) } }
     private fun hideWindow(node: FloatingConversation, stopAudio: Boolean = true) {
+        node.readingImageDialog?.dismiss();node.readingImageDialog=null
         node.root?.let { if(stopAudio)getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken,0);runCatching { it.detach() } }
         node.suggestionViews.values.forEach { (it.parent as? ViewGroup)?.removeView(it); it.destroy() };node.suggestionViews.clear()
         node.root=null;node.layout=null;node.response=null;node.status=null;node.requestNotice=null;node.source=null;node.sourceImage=null;node.transcript=null
@@ -663,6 +667,7 @@ class AssistantService : Service() {
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.discard=null;node.pin=null;node.favorite=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
         node.composer=null;node.composerToggle=null
         node.readingBar=null;node.readingPresentation=null
+        node.transcriptReadingBound=false;node.imageReadingBound=false
         playback.setVisible(node, null, false, retaining = !stopAudio)
     }
     private fun icon(resource: Int, description: String, run: () -> Unit) = uiContext.iconButton(resource,description,run)
@@ -682,7 +687,7 @@ class AssistantService : Service() {
             y=if(config.rememberWindowPosition&&saved!=null)((size.second-height-dp(60))*saved.yFraction).toInt()+dp(8) else (size.second-height-dp(32))/2
         }
         clamp(layout)
-        val root=AssistantConversationWindow(uiContext) { if(!node.pinned) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
+        val root=AssistantConversationWindow(uiContext) { if(!node.pinned && node.readingImageDialog?.isShowing!=true) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
         root.isFocusableInTouchMode=true
         val presentation=AssistantWindowViews(uiContext,when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"},
             node.kind=="photo",AssistantWindowActions(
@@ -876,13 +881,31 @@ class AssistantService : Service() {
     }
     private fun refresh(node:FloatingConversation){
         if(!alive||node.detached)return
+        val imageReadingEnabled=preferences.load().imagePointReading
+        if(node.sourceImage!=null && node.imageReadingBound!=imageReadingEnabled)node.sourceImage?.apply {
+            node.imageReadingBound=imageReadingEnabled
+            if(imageReadingEnabled) {
+                accessible("截图预览，点按打开图片点读")
+                setOnClickListener {
+                    if(preferences.load().imagePointReading)node.frame?.bitmap?.let { bitmap ->
+                        node.readingImageDialog?.dismiss()
+                        node.readingImageDialog=showImagePointReading(uiContext,bitmap,node.chat.conversationId,overlay=true)
+                    }
+                }
+            } else {
+                setOnClickListener(null);isClickable=false;accessible("本次截图预览")
+            }
+        }
         val readingEnabled=preferences.load().chatPointReading
         if(readingEnabled && node.readingBar==null && node.readingPresentation!=null) {
             node.readingBar=ReadingBar(uiContext,node.chat.conversationId,ReadingOrigin.CHAT).also { node.readingPresentation?.addReadingBar(it) }
         } else if(!readingEnabled && node.readingBar!=null) {
             (node.readingBar?.parent as? ViewGroup)?.removeView(node.readingBar);node.readingBar=null
         }
-        node.transcript?.enableTextActions(read=if(readingEnabled)({ text -> PointReadingController.get(this).read(node.chat.conversationId,ReadingOrigin.CHAT,text) }) else null)
+        if(node.transcript!=null && node.transcriptReadingBound!=readingEnabled) {
+            node.transcriptReadingBound=readingEnabled
+            node.transcript?.enableTextActions(read=if(readingEnabled)({ text -> PointReadingController.get(this).read(node.chat.conversationId,ReadingOrigin.CHAT,text) }) else null)
+        }
         ProbeState.requesting=nodes.values.any{it.chat.busy};bubbleVisual?.working=ProbeState.requesting
         node.source?.text=when(node.kind){"photo"->imageDescription(node)+"  ▾";"text"->"所选原文  ▾";else->if(node.chat.transcript.isNotBlank())"转写原文 · ${String.format(Locale.getDefault(),"%.1f",node.clip?.seconds ?: 0f)} 秒  ▾" else "内部音频 · 不附图"}
         val sourceText=if(node.kind=="text")node.chat.sourceText else node.chat.transcript
@@ -953,16 +976,18 @@ class AssistantService : Service() {
                 message.tag=value
             }
             val complete=!(node.chat.busy && !user && index==visible.lastIndex && node.chat.partial==value)
-            if(readingEnabled && !user) {
+            if(readingEnabled && !user && complete) {
                 message.visibility=View.GONE
                 var reading=row.getChildAt(1) as? ReadingBlocksView
                 if(reading==null) { reading=ReadingBlocksView(uiContext,node.chat.conversationId);row.addView(reading,1) }
                 val stamp=value to complete
                 if(reading.tag!=stamp) { reading.content(message.text,complete);reading.tag=stamp }
-            } else if(readingEnabled) {
-                message.enableTextActions(read={ text -> PointReadingController.get(this).read(node.chat.conversationId,ReadingOrigin.CHAT,text) })
+            } else {
+                message.visibility=View.VISIBLE
+                (row.getChildAt(1) as? ReadingBlocksView)?.let { row.removeView(it) }
+                if(readingEnabled && complete)message.enableTextActions(read={ text -> PointReadingController.get(this).read(node.chat.conversationId,ReadingOrigin.CHAT,text) })
             }
-            val preserved=if(readingEnabled && !user)2 else 1
+            val preserved=if(readingEnabled && !user && complete)2 else 1
             if(!user && suggestions.isNotBlank() && suggestions.length<=32768) {
                 val widgetKey="$index:$suggestions"
                 visibleSuggestionKeys.add(widgetKey)

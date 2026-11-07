@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GeometryTest {
+    @Test fun zoomedAndPannedImageSelectionUsesItsCurrentTransform() {
+        val display=Bounds(-300f,-100f,900f,500f)
+        assertEquals(PixelCrop(600,300,600,300),Geometry.crop(Bounds(0f,50f,300f,200f),display,2400,1200))
+        assertEquals(PixelCrop(600,300,600,300),Geometry.crop(Bounds(300f,200f,0f,50f),display,2400,1200))
+        assertNull(Geometry.crop(Bounds(950f,0f,990f,100f),display,2400,1200))
+    }
     @Test fun letterboxAndReversedDragMapToSamePixels() {
         val display = Geometry.fit(1000,2000,600,800)
         assertEquals(Bounds(100f,0f,500f,800f),display)

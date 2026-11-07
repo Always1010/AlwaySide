@@ -34,11 +34,16 @@ internal fun TextView.enableTextActions(selectable: Boolean = true, read: ((Stri
 private class ReadingTextActions(private val text: TextView, private val delegate: ActionMode.Callback?) : ActionMode.Callback {
     override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
         delegate?.onCreateActionMode(mode, menu)
-        menu.add(Menu.NONE, R.id.point_reading_action, 0, "朗读")
-            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        if (InteractionPreferences(text.context).load().chatPointReading)
+            menu.add(Menu.NONE, R.id.point_reading_action, 0, "朗读")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
         return true
     }
-    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = delegate?.onPrepareActionMode(mode, menu) ?: false
+    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
+        val changed = !InteractionPreferences(text.context).load().chatPointReading && menu.findItem(R.id.point_reading_action) != null
+        if (changed) menu.removeItem(R.id.point_reading_action)
+        return (delegate?.onPrepareActionMode(mode, menu) ?: false) || changed
+    }
     override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
         if (item.itemId != R.id.point_reading_action) return delegate?.onActionItemClicked(mode, item) ?: false
         val start = minOf(text.selectionStart, text.selectionEnd)

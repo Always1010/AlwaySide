@@ -14,6 +14,7 @@ internal fun android.widget.TextView.enableChatReading(owner: String) {
 }
 
 /** Only inserted into enabled experiments. Native rendered spans are preserved in each block. */
+@android.annotation.SuppressLint("ViewConstructor") // Requires an owning conversation; never inflated from XML.
 internal class ReadingBlocksView(context: Context, private val owner: String) : LinearLayout(context) {
     private val controller = PointReadingController.get(context)
     private val playback = ChatAudioPlayback.get(context)
@@ -69,6 +70,7 @@ internal class ReadingBlocksView(context: Context, private val owner: String) : 
     override fun onDetachedFromWindow() { controller.removeObserver(observer); playback.removeObserver(observer); super.onDetachedFromWindow() }
 }
 
+@android.annotation.SuppressLint("ViewConstructor") // Requires an owning conversation and experiment.
 internal class ReadingBar(context: Context, private val owner: String, private val origin: ReadingOrigin) : LinearLayout(context) {
     private val controller = PointReadingController.get(context)
     private val playback = ChatAudioPlayback.get(context)
