@@ -201,11 +201,11 @@ class MainActivity : ThemedActivity() {
         navigation.openHistory();showCurrent()
     }
 
-    private fun openSettings() {
-        if(navigation.current == AppPage.SETTINGS)return
+    private fun openSettings(page: String? = null) {
+        if(navigation.current == AppPage.SETTINGS && page == null)return
         leaveSettings {
             historyScreen?.prepareToLeave()
-            hideKeyboard();navigation.openSettings();createSettings()
+            hideKeyboard();navigation.openSettings();createSettings(page)
         }
     }
 
@@ -337,7 +337,7 @@ class MainActivity : ThemedActivity() {
     private fun route(entry: AppEntry.Request) {
         when(entry.page) {
             AppPage.HISTORY -> openHistory()
-            AppPage.SETTINGS -> openSettings()
+            AppPage.SETTINGS -> openSettings(entry.settingsPage)
             AppPage.CHAT -> openChat(entry.conversationId,entry.autoAskText)
             AppPage.TUTORIAL -> openTutorial()
             AppPage.PREPARATION -> openPreparation()

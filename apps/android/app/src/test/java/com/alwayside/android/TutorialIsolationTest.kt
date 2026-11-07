@@ -82,7 +82,8 @@ class TutorialIsolationTest {
     companion object {
         private val resourceClasses=setOf("com/alwayside/android/R","androidx/appcompat/R","android/R")
         private const val inMemoryAppearance = "com/alwayside/android/AppAppearance"
-        private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction","AssistantBubbleView","AssistantPresentationKt","TapSequence",
+        private val sharedClasses=listOf("AssistantWindowViews","AssistantWindowActions","AssistantMenuViews","AssistantMenuAction",
+            "AssistantMenuTileView","AssistantMenuOptionsViews","AssistantMenuUiKt","AssistantBubbleView","AssistantPresentationKt","TapSequence",
             "BubbleTouchController","BubbleTouchControllerKt","BubbleGestureHintsView","BubbleGestureHintsViewKt",
             "BubbleGestureHint","BubbleGestureStateMachine","LongPressSlideTutorial","LongPressSlideLesson","BubbleHaptics")
         private fun audited(name: String)=name.startsWith("Tutorial") || sharedClasses.any { name=="$it.class" || name.startsWith("$it$") }

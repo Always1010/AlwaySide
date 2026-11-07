@@ -37,6 +37,7 @@ internal data class InteractionConfig(
     val recordingLimitAction: RecordingLimitAction = RecordingLimitAction.DISCARD,
     val useDefaultQuestion: Boolean = true,
     val menuWebSearch: Boolean? = null,
+    val menuItems: List<AssistantMenuAction> = AssistantMenuAction.defaults,
     val longPressSlide: Boolean = false,
     val longPressMillis: Int = 600,
     val slideDistanceDp: Int = 24,
@@ -91,6 +92,7 @@ internal class InteractionPreferences(private val context: Context) {
             recordingLimitAction = RecordingLimitAction.from(prefs.getString("recordingLimitAction", null)),
             useDefaultQuestion = prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
             menuWebSearch = if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
+            menuItems = AssistantMenuAction.decode(prefs.getString("menuItems", null)),
             longPressSlide = prefs.getBoolean("longPressSlide", false),
             longPressMillis = prefs.getInt("longPressMillis", 600).coerceIn(400, 1500),
             slideDistanceDp = prefs.getInt("slideDistanceDp", d.slideDistanceDp).coerceIn(16, 40).let { it / 4 * 4 },
@@ -105,6 +107,7 @@ internal class InteractionPreferences(private val context: Context) {
         require(value.slideDistanceDp in 16..40 && value.slideDistanceDp % 4 == 0)
         require(value.actionCircleSizeDp in 28..40 && value.actionCircleSizeDp % 4 == 0)
         require(GestureBindings.valid(value.resolvedBindings()))
+        require(value.menuItems.distinct() == value.menuItems)
         val edit=prefs.edit().putInt("gestureBindingsVersion", 2).putBoolean("longPressSlide", value.longPressSlide)
             .putInt("longPressMillis", value.longPressMillis).remove("slideWindowMillis")
             .putInt("slideDistanceDp", value.slideDistanceDp).putInt("actionCircleSizeDp", value.actionCircleSizeDp)
@@ -121,6 +124,7 @@ internal class InteractionPreferences(private val context: Context) {
             .putBoolean("chatPointReading", value.chatPointReading)
             .putBoolean("imagePointReading", value.imagePointReading)
             .putBoolean("useDefaultQuestion", value.useDefaultQuestion)
+            .putString("menuItems", AssistantMenuAction.encode(value.menuItems))
         for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
             val key = "binding_${recording}_${gesture.name}"
             val binding = value.resolvedBindings().firstOrNull { it.gesture == gesture && it.recording == recording }

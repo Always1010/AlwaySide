@@ -1,0 +1,5 @@
+<resources>
+    <item name="menu_move_before" type="id" />
+    <item name="menu_move_after" type="id" />
+    <item name="menu_remove" type="id" />
+</resources>

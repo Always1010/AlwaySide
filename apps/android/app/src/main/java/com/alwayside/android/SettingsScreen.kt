@@ -46,6 +46,7 @@ internal class SettingsScreen(
         PROMPTS("提示词", "默认问题与音频输出", android.R.drawable.ic_menu_edit),
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
+        MENU("自定义菜单", "添加、移除与排列悬浮工具", R.drawable.ic_line_menu),
         GESTURES("快捷动作", "功能与手势绑定", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "窗口行为与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "历史上限、录音与媒体保留", android.R.drawable.ic_menu_recent_history),
@@ -81,6 +82,7 @@ internal class SettingsScreen(
     private val choiceSheets = mutableSetOf<SettingsChoiceSheet>()
     private var disposed = false
     private var serviceUi: ServiceSettingsUi? = null
+    private var menuSettingsUi: MenuSettingsUi? = null
     private var serviceToolbar: MaterialToolbar? = null
     private val serviceEntry = initialPage?.takeIf { it in setOf("API", "ANSWER", "TRANSCRIPTION") } ?: "AI"
     private var renderedConnectionId: String? = null
@@ -158,6 +160,14 @@ internal class SettingsScreen(
         }
         // The host handles both toolbar and system Back, including direct entries from preparation.
         val header = materialToolbar(next.title, onBack).apply {
+            if (next == Page.MENU) {
+                addIconAction(4202, R.drawable.ic_line_retry, "恢复默认排列") { menuSettingsUi?.reset() }
+                addIconAction(4203, R.drawable.ic_line_info, "自定义菜单说明") {
+                    MaterialAlertDialogBuilder(this@SettingsScreen).setTitle("自定义菜单")
+                        .setMessage("点击减号移除工具，点击加号添加。长按工具拖动到目标位置可调整顺序，也可点击工具选择前移或后移。修改后立即保存。\n\n设置和关闭悬浮球都可移除；仍可从应用内打开设置或关闭悬浮球。工具全部移除后，悬浮菜单会保留添加工具入口。\n\n联网搜索和使用默认提问方式是独立勾选项，不参与工具排序。恢复默认只恢复工具排列，不改变这两个选项。")
+                        .setPositiveButton("知道了", null).showTracked()
+                }
+            }
             if (next == Page.PROMPTS) {
                 addIconAction(4201, android.R.drawable.ic_menu_agenda, "模板") { finishEditing { showTemplateActions() } }
                     .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
@@ -202,6 +212,7 @@ internal class SettingsScreen(
             Page.PROMPTS -> promptPage(config)
             Page.APPEARANCE -> appearancePage()
             Page.BALL -> ballPage(interaction)
+            Page.MENU -> menuPage(config, interaction)
             Page.GESTURES -> gesturePage(interaction)
             Page.WINDOW -> windowPage(config, interaction)
             Page.MEDIA -> mediaPage(interaction)
@@ -228,6 +239,23 @@ internal class SettingsScreen(
         addRow(settingsListRow(value.title, value.description) {
             if (value == Page.HELP) onHelp() else showPage(value)
         })
+    }
+
+    private fun menuPage(config: AppConfig, interaction: InteractionConfig) {
+        val editor = MenuSettingsUi(this, interaction.menuItems) { items ->
+            persistInteraction { it.copy(menuItems = items) }
+        }
+        menuSettingsUi = editor
+        body.addView(editor.view, LinearLayout.LayoutParams(-1, -2))
+        section("提问选项")
+        val options = AssistantMenuOptionsViews(this, interaction.menuWebSearch ?: config.webSearch,
+            interaction.useDefaultQuestion, readable && ProviderCapabilities.search(config),
+            onWebSearchChanged = { selected ->
+                if (!persistInteraction { it.copy(menuWebSearch = selected) }) showPage(Page.MENU)
+            }, onDefaultQuestionChanged = { selected ->
+                if (!persistInteraction { it.copy(useDefaultQuestion = selected) }) showPage(Page.MENU)
+            })
+        body.addView(settingsListGroup(options.view), LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun appearancePage() {
@@ -818,6 +846,7 @@ internal class SettingsScreen(
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
     private fun clearDraft() {
+        menuSettingsUi?.dispose(); menuSettingsUi = null
         closeEditor?.invoke(); activeEdit = null; closeEditor = null
         fieldOpeners.clear()
         valueViews.clear(); selections.clear(); ballPreview = null; colorPalette = null; credentialState = null; group = null

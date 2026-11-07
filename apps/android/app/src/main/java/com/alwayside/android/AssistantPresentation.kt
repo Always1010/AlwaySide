@@ -6,7 +6,6 @@ import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
 import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
@@ -18,7 +17,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import kotlin.math.abs
@@ -119,74 +117,7 @@ internal class AssistantBubbleView(context: Context, private val size: Int = 36,
     }
 }
 
-internal enum class AssistantMenuAction { SCREEN, AUDIO, CANCEL_AUDIO, CROP, LAST, PLAY, HISTORY, SETTINGS, STOP }
-
 internal fun Context.assistantWindowHeightDp() = (432 * resources.configuration.fontScale.coerceAtLeast(1f)).toInt()
-
-internal class AssistantMenuViews(context: Context, recording: Boolean = false, hasClip: Boolean = false,
-    webSearch: Boolean = false, useDefaultQuestion: Boolean = true, webSearchAvailable: Boolean = true,
-    onWebSearchChanged: (Boolean) -> Unit = {}, onDefaultQuestionChanged: (Boolean) -> Unit = {},
-    onAction: (AssistantMenuAction) -> Unit) {
-    val view = LinearLayout(context).apply {
-        orientation=LinearLayout.VERTICAL;setPadding(context.dp(4),context.dp(4),context.dp(4),context.dp(4))
-        background=card(SURFACE,context.dp(12).toFloat());elevation=0f;clipToOutline=true
-    }
-    val buttons = linkedMapOf<AssistantMenuAction,MaterialButton>()
-    val preferredWidthDp = (188 * context.resources.configuration.fontScale.coerceAtLeast(1f)).toInt()
-    init { with(context) {
-        fun item(action: AssistantMenuAction, resource: Int, title: String) {
-            val row=MaterialButton(this,null,androidx.appcompat.R.attr.borderlessButtonStyle).apply {
-                text=title;icon=prototypeIcon(resource);iconSize=dp(18);iconPadding=dp(8)
-                gravity=Gravity.CENTER_VERTICAL or Gravity.START;isAllCaps=false
-                setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge)
-                applyActionStyle(false);iconTint=ColorStateList.valueOf(MUTED);stateListAnimator=null;elevation=0f;translationZ=0f
-                setTextColor(INK);cornerRadius=dp(8);insetTop=0;insetBottom=0
-                minHeight=dp(40);minimumHeight=dp(40);minWidth=0;minimumWidth=0
-                textSize=13f;typeface=Typeface.create("sans-serif",Typeface.NORMAL);letterSpacing=0f;maxLines=2
-                setPadding(dp(8),dp(6),dp(8),dp(6));accessible(title)
-                setOnClickListener { onAction(action) }
-            }
-            buttons[action]=row;view.addView(row,LinearLayout.LayoutParams(-1,-2))
-        }
-        item(AssistantMenuAction.SCREEN,R.drawable.ic_line_scan,"截图问答")
-        item(AssistantMenuAction.AUDIO,R.drawable.ic_line_audio,if(recording)"结束录音并处理" else "听一段")
-        if(recording)item(AssistantMenuAction.CANCEL_AUDIO,R.drawable.ic_line_close,"取消并丢弃录音")
-        item(AssistantMenuAction.CROP,R.drawable.ic_line_crop,"框选问答")
-        if(hasClip)item(AssistantMenuAction.PLAY,R.drawable.ic_line_play,"回听上一段")
-        item(AssistantMenuAction.LAST,R.drawable.ic_line_text,"最近悬浮对话")
-        view.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)).apply {
-            setMargins(dp(8),dp(4),dp(8),dp(4))
-        })
-        fun option(title:String,checked:Boolean,description:String,enabled:Boolean=true,changed:(Boolean)->Unit) {
-            val check=MaterialCheckBox(this).apply {
-                text=title;isChecked=checked;textSize=13f;setTextColor(INK);letterSpacing=0f
-                minHeight=dp(38);minimumHeight=dp(38);minWidth=0;minimumWidth=0
-                setPadding(dp(8),0,dp(8),0);compoundDrawablePadding=dp(4)
-                buttonTintList=ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),intArrayOf(ACCENT,MUTED))
-                accessible(title);tooltipText=description;isEnabled=enabled||checked
-                setOnCheckedChangeListener { _,selected -> isEnabled=enabled||selected;changed(selected) }
-            }
-            view.addView(check,LinearLayout.LayoutParams(-1,-2))
-        }
-        option("联网搜索",webSearch,if(webSearchAvailable)"允许新悬浮会话搜索网页；关闭后仍需联网调用模型" else "当前模型或协议不支持搜索，可关闭已有选择",webSearchAvailable,onWebSearchChanged)
-        option("使用默认提问方式",useDefaultQuestion,"关闭后展开输入框，补充问题再发送",changed=onDefaultQuestionChanged)
-        view.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)).apply {
-            setMargins(dp(8),dp(4),dp(8),dp(4))
-        })
-        val footer=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL }
-        fun footerAction(action:AssistantMenuAction,resource:Int,title:String) {
-            val button=iconButton(resource,title) { onAction(action) }.apply {
-                iconSize=dp(18);minWidth=0;minimumWidth=0;minHeight=dp(40);minimumHeight=dp(40)
-                stateListAnimator=null;elevation=0f;translationZ=0f
-            }
-            buttons[action]=button;footer.addView(button,LinearLayout.LayoutParams(0,dp(40),1f))
-        }
-        footerAction(AssistantMenuAction.HISTORY,R.drawable.ic_line_history,"对话记录")
-        footerAction(AssistantMenuAction.SETTINGS,R.drawable.ic_line_settings,"设置")
-        footerAction(AssistantMenuAction.STOP,R.drawable.ic_line_power,"关闭悬浮球")
-        view.addView(footer,LinearLayout.LayoutParams(-1,-2))
-    } }
-}
 
 internal class AssistantWindowActions(
     val pin: () -> Unit = {}, val expand: () -> Unit = {}, val toggle: () -> Unit = {},

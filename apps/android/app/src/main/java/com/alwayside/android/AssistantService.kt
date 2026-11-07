@@ -591,6 +591,11 @@ class AssistantService : Service() {
         val presentation = AssistantMenuViews(uiContext,recorder != null,nodes["audio"]?.clip != null,
             webSearch=config.menuWebSearch ?: defaultSearch,useDefaultQuestion=config.useDefaultQuestion,
             webSearchAvailable=menuApi?.let(ProviderCapabilities::search) ?: false,
+            items=config.menuItems,
+            onCustomize={
+                removeMenu();hideUnpinned()
+                startActivity(AppEntry.intent(this,AppPage.SETTINGS,settingsPage="MENU").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            },
             onWebSearchChanged={saveMenuConfig(config.copy(menuWebSearch=it))},
             onDefaultQuestionChanged={saveMenuConfig(config.copy(useDefaultQuestion=it))}) { action ->
             removeMenu()
@@ -616,7 +621,7 @@ class AssistantService : Service() {
         val menuY=((ball?.y ?: dp(120))-dp(50)).coerceIn(dp(8),(size.second-h-dp(60)).coerceAtLeast(dp(8)))
         body.addView(ScrollView(uiContext).apply {
             isVerticalScrollBarEnabled=false;isFillViewport=true;addView(items)
-            background=card(SURFACE,dp(12).toFloat());clipToOutline=true;elevation=0f
+            background=card(SURFACE,dp(24).toFloat());clipToOutline=true;elevation=0f
         },FrameLayout.LayoutParams(w,h,Gravity.TOP or Gravity.START).apply { leftMargin=menuX;topMargin=menuY })
         val layout=params(-1,-1,true).apply {
             flags=flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED

@@ -109,7 +109,7 @@ class DocMediaActivity : ThemedActivity() {
         }
         val scroll = ScrollView(this).apply { addView(menu.view); isFillViewport = false }
         panel = FrameLayout(this).apply {
-            background = card(SURFACE,dp(12).toFloat())
+            background = card(SURFACE,dp(24).toFloat())
             addView(scroll)
         }
         val width=minOf(dp(menu.preferredWidthDp),root.width-dp(64))

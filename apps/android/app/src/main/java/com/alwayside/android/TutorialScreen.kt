@@ -157,7 +157,7 @@ internal class TutorialScreen(
                 if(action==AssistantMenuAction.SCREEN)act(TutorialAction.CAPTURE)
                 else explain("本项先介绍「截图问答」，其他功能可在实际使用时操作。")
             }
-            menu=ScrollView(this).apply { isVerticalScrollBarEnabled=false;addView(shared.view);background=card(SURFACE,dp(12).toFloat());clipToOutline=true }
+            menu=ScrollView(this).apply { isVerticalScrollBarEnabled=false;addView(shared.view);background=card(SURFACE,dp(24).toFloat());clipToOutline=true }
             menuWidthDp=shared.preferredWidthDp
             scene.addView(menu,FrameLayout.LayoutParams(dp(menuWidthDp),-2))
             target=shared.buttons[AssistantMenuAction.SCREEN]
