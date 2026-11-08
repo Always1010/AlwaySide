@@ -35,11 +35,22 @@ internal object HistoryCollection {
         HistoryArchive.validate(incoming)
         val previous = state.conversations.find { it.id == incoming.id }
         if (previous != null && previous.updatedAt > incoming.updatedAt) return state
-        val next = if (previous == null) incoming.copy(
+        // A queued snapshot or a still-open floating session must not undo a manual rename.
+        val customTitle = previous?.customTitle?.ifBlank { incoming.customTitle } ?: incoming.customTitle
+        val titled = if (customTitle.isEmpty()) incoming else incoming.copy(title = customTitle, customTitle = customTitle)
+        val next = if (previous == null) titled.copy(
             historyEnteredAt = queueTime(state, now), tags = incoming.tags.filter { it in state.tags },
-        ) else incoming.copy(favoriteAt = previous.favoriteAt, tags = previous.tags,
+        ) else titled.copy(favoriteAt = previous.favoriteAt, tags = previous.tags,
             historyEnteredAt = if (incoming.updatedAt > previous.updatedAt) queueTime(state, now) else previous.historyEnteredAt)
         return retain(state.copy(conversations = state.conversations.filterNot { it.id == next.id } + next), next.id)
+    }
+
+    fun rename(state: HistoryState, id: String, title: String): HistoryState {
+        ConversationTitle.validateCustom(title)
+        check(state.conversations.any { it.id == id }) { "会话不存在" }
+        return state.copy(conversations = state.conversations.map {
+            if (it.id == id) it.copy(title = title, customTitle = title) else it
+        })
     }
 
     fun favorite(state: HistoryState, id: String, favorite: Boolean, now: Long): HistoryState {

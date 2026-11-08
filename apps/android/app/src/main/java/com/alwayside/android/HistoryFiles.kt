@@ -86,7 +86,8 @@ internal class HistoryFiles(
         val bytes = files.read(name) ?: error("会话文件缺失，未修改历史记录")
         val body = HistoryArchive.decodeRecord(decode(bytes))
         check(body.id == summary.id && body.updatedAt == summary.updatedAt
-            && body.title == summary.title && body.kind == summary.kind) { "会话索引不一致" }
+            && (body.title == summary.title || summary.customTitle.isNotEmpty())
+            && body.kind == summary.kind) { "会话索引不一致" }
         // Collection metadata is authoritative in v3 and need not rewrite the immutable body.
         return HistorySummary.restore(body, summary)
     }

@@ -227,6 +227,7 @@ internal class ChatScreen(
             overflowIcon = prototypeIcon(R.drawable.ic_line_more).apply { setTint(INK) }
             addIconAction(4, R.drawable.ic_line_star, "收藏会话") { toggleFavorite() }.isEnabled = false
             addOverflowIconAction(1, R.drawable.ic_line_copy, "复制整段会话") { copyConversation() }
+            addOverflowIconAction(10, R.drawable.ic_line_edit, "重命名") { renameConversation() }.isEnabled = false
             addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
                 icon = playbackIcon; isVisible = false
             }
@@ -491,6 +492,7 @@ internal class ChatScreen(
     }
 
     private fun renderCollectionActions() {
+        toolbar.menu.findItem(10)?.isEnabled = ready
         val label = if (favorite) "取消收藏" else "收藏会话"
         toolbar.menu.findItem(4)?.apply {
             icon = prototypeIcon(if (favorite) R.drawable.ic_star_filled else R.drawable.ic_line_star)
@@ -516,6 +518,16 @@ internal class ChatScreen(
             renderCollectionActions()
             toast(if (favorite) "已收藏" else "已取消收藏")
         }.onFailure { toast(it.message?.take(120) ?: "无法保存收藏，请重试") }
+    }
+
+    private fun renameConversation() {
+        if (!ready || closing) return
+        activity.showConversationTitleDialog(session.title) { title ->
+            if (closing) error("请重新打开聊天后修改标题")
+            if (collectionStore.summary(session.conversationId) == null) collectionStore.save(session.snapshot())
+            collectionStore.rename(session.conversationId, title)
+            render()
+        }
     }
 
     private fun renderWebSearch() {

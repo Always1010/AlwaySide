@@ -50,6 +50,7 @@ internal data class StoredConversation(
     val favoriteAt: Long = 0,
     val historyEnteredAt: Long = 0,
     val tags: List<String> = emptyList(),
+    val customTitle: String = "",
 ) {
     val isFavorite: Boolean get() = favoriteAt > 0
 }

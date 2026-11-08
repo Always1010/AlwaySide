@@ -9,7 +9,8 @@ internal object HistoryArchive {
         validate(value)
         return linkedMapOf(
             "id" to value.id, "updatedAt" to value.updatedAt,
-            "title" to ConversationTitle.resolve(value.title, value.messages),
+            "title" to ConversationTitle.resolve(value.title, value.messages, value.customTitle),
+            "customTitle" to value.customTitle,
             "messages" to value.messages.map { linkedMapOf("role" to it.role, "text" to it.text,
                 "evidence" to it.evidence, "searchSuggestions" to it.searchSuggestions) },
             "evidence" to value.evidence, "transcript" to value.transcript, "kind" to value.kind,
@@ -41,16 +42,22 @@ internal object HistoryArchive {
             is List<*> -> raw.map { it as? String ?: error("会话标签格式错误") }
             else -> error("会话标签格式错误")
         }
+        val customTitle = when (val raw = entry["customTitle"]) {
+            null -> ""
+            is String -> raw
+            else -> error("会话标题格式错误")
+        }
         return StoredConversation(required("id"),
             (entry["updatedAt"] as? Number)?.toLong() ?: error("会话时间错误"),
-            ConversationTitle.resolve(required("title"), messages), messages, entry["evidence"] as? String ?: "",
+            ConversationTitle.resolve(required("title"), messages, customTitle), messages, entry["evidence"] as? String ?: "",
             entry["transcript"] as? String ?: "", entry["kind"] as? String ?: "text",
             entry["status"] as? String ?: "已完成", entry["sourceText"] as? String ?: "",
             (entry["favoriteAt"] as? Number)?.toLong() ?: 0,
-            (entry["historyEnteredAt"] as? Number)?.toLong() ?: 0, tags).also(::validate)
+            (entry["historyEnteredAt"] as? Number)?.toLong() ?: 0, tags, customTitle).also(::validate)
     }
 
     fun validate(value: StoredConversation) {
+        if (value.customTitle.isNotEmpty()) ConversationTitle.validateCustom(value.customTitle)
         require(value.id.isNotBlank() && value.id.length <= 128) { "会话编号无效" }
         require(value.messages.all { it.role in setOf("user", "assistant", "system") }) { "会话角色无效" }
         require(value.kind in setOf("photo", "audio", "text")) { "会话类型无效" }

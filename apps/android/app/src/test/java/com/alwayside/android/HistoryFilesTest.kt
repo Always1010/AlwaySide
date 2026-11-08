@@ -240,6 +240,40 @@ class HistoryFilesTest {
         assertEquals(302, loaded.messages.size)
     }
 
+    @Test fun manualRenameIsAtomicSurvivesReloadAndCannotBeOverwrittenByQueuedAnswers() {
+        val disk = Disk()
+        val files = repository(disk)
+        val original = value("renamed", 1).copy(messages = listOf(
+            ChatMessage("user", "请翻译"), ChatMessage("assistant", "## 中英对照\n原文与译文")))
+        files.commit(files.loadIndex(), HistoryState(listOf(original)))
+        val record = disk.records().single()
+        val bytes = disk.values.getValue(record).clone()
+        disk.readNames.clear(); disk.writeNames.clear()
+        disk.rejectWrite = { it == HistoryFiles.MANIFEST }
+        assertThrows(IOException::class.java) { files.change { HistoryCollection.rename(it, original.id, "新标题") } }
+        assertEquals(original.title, repository(disk).loadIndex().conversations.single().title)
+        disk.rejectWrite = { false }
+        files.change { HistoryCollection.rename(it, original.id, "新标题") }
+        // A title equal to the original question is still an explicit name, not a legacy auto title.
+        files.change { HistoryCollection.rename(it, original.id, "请翻译") }
+        assertTrue(disk.writeNames.all { it == HistoryFiles.MANIFEST })
+        assertArrayEquals(bytes, disk.values[record])
+        val reopened = repository(disk)
+        val renamed = original.copy(title = "请翻译", customTitle = "请翻译")
+        assertEquals(renamed, reopened.find(original.id))
+        assertEquals(renamed, HistoryArchive.decodeRecord(HistoryArchive.record(renamed)))
+        // Both an older queued snapshot and a later answer still carry the old automatic title.
+        reopened.change(original.id) { HistoryCollection.save(it, original, 10) }
+        assertEquals(renamed, repository(disk).find(original.id))
+        val answered = original.copy(updatedAt = 2, messages = original.messages + ChatMessage("assistant", "新回答"))
+        reopened.change(original.id) { HistoryCollection.save(it, answered, 11) }
+        val loaded = repository(disk).find(original.id)!!
+        assertEquals("请翻译", loaded.title)
+        assertEquals("请翻译", loaded.customTitle)
+        assertEquals(answered.messages, loaded.messages)
+        assertEquals(2L, loaded.updatedAt)
+    }
+
     @Test fun versionTwoMigrationIsAtomicAndReadsEachBodyOnceWithoutRewritingIt() {
         val disk = Disk()
         val originals = listOf(value("a", 1), value("b", 2))

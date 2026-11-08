@@ -199,6 +199,30 @@ class ChatSessionTest {
         assertEquals(32, ConversationTitle.fromAnswer("😀".repeat(40)).codePointCount(0, 64))
     }
 
+    @Test fun manualTitleChangesDuringAnAnswerSurviveCompletionRestoreAndFloatingHandoff() {
+        var manual = ""
+        val h = Harness(readCustomTitle = { manual })
+        h.session.submit(h.config, "请翻译", null, "text")
+        manual = "请翻译"
+        assertEquals(manual, h.session.title)
+        h.worker.runNext(); h.drainMain()
+        assertEquals(manual, h.saved.single().title)
+        manual = "订阅续费提醒"
+        val handoff = HandedOffConversation(h.session, null, {})
+        assertEquals(manual, handoff.session.title)
+        val saved = h.session.snapshot()
+        assertEquals(manual, saved.customTitle)
+        val restored = Harness()
+        restored.session.newConversation(saved)
+        restored.session.submit(restored.config, "继续解释", null, "text")
+        restored.worker.runNext(); restored.drainMain()
+        assertEquals(manual, restored.session.title)
+        assertEquals(manual, restored.saved.single().customTitle)
+        restored.session.newConversation()
+        assertEquals("文字待提问", restored.session.title)
+        assertEquals("", restored.session.snapshot().customTitle)
+    }
+
     @Test fun completionOnlyExplainsContextLimitOnceTwentyFourMessagesAreAvailable() {
         val h = Harness()
         repeat(13) { round ->
@@ -681,6 +705,7 @@ class ChatSessionTest {
     }
 
     private class Harness(val subtitles: AudioQuestionSubtitles? = null,
+        readCustomTitle: ((String) -> String?)? = null,
         async: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null) {
         val config = AppConfig(apiKey = "fixture-key")
         val gateway = FakeGateway()
@@ -689,7 +714,7 @@ class ChatSessionTest {
         private val archive = linkedMapOf<String, StoredConversation>()
         val saved: List<StoredConversation> get() = archive.values.toList()
         val session = ChatSession(gateway, { posted.addLast(it) }, worker, { archive[it.id] = it }, {},
-            saveHistoryAsync = async, subtitleRequest = { _, _ -> subtitles })
+            saveHistoryAsync = async, subtitleRequest = { _, _ -> subtitles }, readCustomTitle = readCustomTitle)
 
         fun drainMain() {
             var count = 0

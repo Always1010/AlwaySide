@@ -21,12 +21,14 @@ internal class ChatSession(
     private val credentialsCurrent: (AppConfig, Boolean, Boolean) -> Boolean = { _, _, _ -> true },
     private val saveHistoryAsync: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null,
     private val subtitleRequest: ((StoredConversation, File) -> AudioQuestionSubtitles?)? = null,
+    private val readCustomTitle: ((String) -> String?)? = null,
 ) {
     constructor(context: Context, changed: () -> Unit) : this(
         AiProvider(), androidDispatcher(), Executors.newSingleThreadExecutor(),
         HistoryStore(context)::save, changed,
         credentialValidator(context), HistoryStore(context)::saveAsync,
         { snapshot, source -> SubtitleController.get(context).questionRequest(snapshot, source) },
+        { id -> HistoryStore(context).summary(id)?.customTitle },
     )
     private var observer: (() -> Unit)? = null
     private var closed = false
@@ -53,7 +55,9 @@ internal class ChatSession(
     var transcript = ""; private set
     private var selectedText = ""
     private var answerTitle = ""
-    val title: String get() = answerTitle.ifBlank {
+    private var customTitle = ""
+    private fun currentCustomTitle(): String = runCatching { readCustomTitle?.invoke(id) }.getOrNull() ?: customTitle
+    val title: String get() = currentCustomTitle().ifBlank { answerTitle }.ifBlank {
         val label = when (kind) { "photo" -> "截图"; "audio" -> "音频"; else -> "文字" }
         label + if (busy) "处理中" else "待提问"
     }
@@ -217,8 +221,9 @@ internal class ChatSession(
         this.kind = saved?.kind ?: kind
         updatedAt = saved?.updatedAt ?: System.currentTimeMillis()
         messages.clear(); messages.addAll(saved?.messages.orEmpty())
+        customTitle = saved?.customTitle.orEmpty()
         answerTitle = if (saved != null && saved.messages.any { it.role == "assistant" })
-            ConversationTitle.resolve(saved.title, saved.messages) else ""
+            ConversationTitle.resolve(saved.title, saved.messages, saved.customTitle) else ""
         partial = ""; question = ""; transcript = saved?.transcript.orEmpty(); cachedAudio = null
         selectedText = saved?.sourceText.orEmpty().take(ChatPrompt.MAX_SOURCE_CHARS)
         evidence = "未附媒体"
@@ -233,7 +238,8 @@ internal class ChatSession(
     fun snapshot(): StoredConversation {
         val pending = if (question.isNotBlank()) listOf(ChatMessage("user", question, evidence)) else emptyList()
         val all = messages.toList() + pending
-        return StoredConversation(id, updatedAt, title, all, evidence, transcript, kind, status, sourceText)
+        return StoredConversation(id, updatedAt, title, all, evidence, transcript, kind, status, sourceText,
+            customTitle = currentCustomTitle())
     }
     private fun archive() {
         updatedAt = maxOf(System.currentTimeMillis(), updatedAt + 1)

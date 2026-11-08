@@ -29,6 +29,7 @@ class HistoryArchiveTest {
         assertFalse(legacy.isFavorite)
         assertEquals(0, legacy.historyEnteredAt)
         assertTrue(legacy.tags.isEmpty())
+        assertEquals("", legacy.customTitle)
     }
 
     @Test fun invalidStructureIsRejectedInsteadOfSilentlyDroppingMessages() {
@@ -38,7 +39,9 @@ class HistoryArchiveTest {
         val invalid = listOf(
             valid.copy(id = ""), valid.copy(id = "x".repeat(129)),
             valid.copy(messages = listOf(ChatMessage("tool", "未支持角色"))), valid.copy(kind = "unknown"),
-            valid.copy(tags = listOf("重复", "重复")), valid.copy(favoriteAt = -1))
+            valid.copy(tags = listOf("重复", "重复")), valid.copy(favoriteAt = -1),
+            valid.copy(customTitle = " "), valid.copy(customTitle = "多行\n标题"),
+            valid.copy(customTitle = "长".repeat(65)))
         invalid.forEach { value ->
             assertThrows(IllegalArgumentException::class.java) { HistoryArchive.record(value) }
         }
@@ -46,6 +49,7 @@ class HistoryArchiveTest {
         val invalidRecords = listOf(
             base + ("id" to ""), base + ("messages" to listOf(mapOf("role" to "tool", "text" to "正文"))),
             base + ("kind" to "unknown"), base + ("tags" to listOf(3)),
+            base + ("customTitle" to 3),
         )
         invalidRecords.forEach { record ->
             assertThrows(RuntimeException::class.java) { HistoryArchive.decodeRecord(record) }

@@ -41,6 +41,7 @@ internal class HistoryStore(private val context: Context) {
         HistoryCollection.favorite(it, id, favorite, System.currentTimeMillis())
     }
     fun setTags(id: String, tags: List<String>) = change { HistoryCollection.setTags(it, id, tags) }
+    fun rename(id: String, title: String) = change { HistoryCollection.rename(it, id, title.trim()) }
     fun editTags(ids: List<String>, edits: Map<String, Boolean>, collectMissing: Boolean) = change {
         HistoryCollection.editTags(it, ids, edits, collectMissing, System.currentTimeMillis())
     }

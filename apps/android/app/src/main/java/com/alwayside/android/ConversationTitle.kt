@@ -2,7 +2,15 @@ package com.alwayside.android
 
 /** Derive a useful local title from existing answer text, with no additional model request. */
 internal object ConversationTitle {
-    fun resolve(stored: String, messages: List<ChatMessage>): String {
+    const val MAX_CUSTOM_LENGTH = 64
+
+    fun validateCustom(title: String) {
+        require(title.isNotBlank() && title == title.trim() && title.length <= MAX_CUSTOM_LENGTH &&
+            title.none { it.isISOControl() }) { "标题须为 1–64 个字符，且不能包含换行" }
+    }
+
+    fun resolve(stored: String, messages: List<ChatMessage>, customTitle: String = ""): String {
+        if (customTitle.isNotEmpty()) return customTitle
         val answer = messages.firstOrNull { it.role == "assistant" && it.text.isNotBlank() } ?: return stored
         val question = messages.firstOrNull { it.role == "user" }?.text?.take(60)
         return if (stored.isBlank() || stored == question) fromAnswer(answer.text).ifBlank { stored } else stored

@@ -363,6 +363,12 @@ internal class HistoryListScreen(
                     isClickable = false; isFocusable = false; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 }, showArrow = false, onClick = { dialog.dismiss(); run() }))
         }
+        entry(R.drawable.ic_line_edit, "重命名") {
+            activity.showConversationTitleDialog(value.title) { title ->
+                store.rename(value.id, title)
+                refresh()
+            }
+        }
         entry(R.drawable.ic_line_tag, if (value.isFavorite) "设置标签" else "收藏并设置标签") {
             tagDialogs.editTags(listOf(value.id), collectMissing = !value.isFavorite)
         }
