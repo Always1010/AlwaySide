@@ -78,7 +78,7 @@ internal class LaboratorySettingsUi(
             })
         }
         readingToggle("聊天点读", config.chatPointReading,
-            "默认关闭。开启后，长按选中文字，再在选择菜单中点「点读」。聊天正文保持原有排版，不预先添加段落按钮，单击文字不会朗读。不会修改你的提示词。\n\n首次朗读会将所选文字发送到配置的语音服务，可能收费；语音由 AI 合成。生成成功后自动保存在本机，重播不再请求。关闭立即退出点读，保留已存音频。") { value, enabled -> value.copy(chatPointReading = enabled) }
+            "长按选中文字，在选择菜单中点「点读」。成功保存后，原文留下淡色虚线标记，单击标记可重播，长按仍可选择和复制。消息旁的扬声器可查看点读片段。\n\n相同文字与朗读配置可跨对话复用音频。首次生成会将所选文字发送到语音服务，可能收费；语音由 AI 合成。旧标记保留原音色，音频清理后需主动重新生成。关闭点读会停止朗读，保留音频与标记。") { value, enabled -> value.copy(chatPointReading = enabled) }
         readingToggle("图片点读", config.imagePointReading,
             "默认关闭。开启后，可从截图预览进入图片点读，框选文字并主动识别，确认文字后朗读。普通看图手势不变。\n\n识别会把所选图片区域发送给当前图文问答服务，可能收费；不会修改翻译提示词或聊天记录。识别可能有误，请先核对。关闭会退出图片点读，保留已存音频。") { value, enabled -> value.copy(imagePointReading = enabled) }
         content.addView(settingsListGroup(readingRows), LinearLayout.LayoutParams(-1, -2))

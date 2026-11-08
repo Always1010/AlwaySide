@@ -7,12 +7,21 @@ import java.nio.file.StandardCopyOption
 
 /** App-private persistent audio. Constructing this store never creates a directory. */
 internal class PointReadingCache(private val directory: File, private val capacity: Long = 256L * 1024 * 1024) {
+    val marks = PointReadingMarks(File(directory, "marks"))
     data class Ticket(val generation: Long, val ownerRevision: Long)
     private var generation = 0L
     private val revisions = mutableMapOf<String, Long>()
 
     @Synchronized fun ticket(owner: String) = Ticket(generation, revisions[owner] ?: 0)
     @Synchronized fun current(owner: String, ticket: Ticket) = ticket == ticket(owner)
+
+    @Synchronized fun contains(key: String): Boolean = listOf("mp3", "wav").any { audio(key, it).let { file -> file.isFile && file.length() > 0 } }
+
+    @Synchronized fun remember(owner: String, ticket: Ticket, mark: ReadingMark): Boolean {
+        if (!current(owner, ticket) || !contains(mark.key)) return false
+        marks.put(owner, mark)
+        return true
+    }
 
     @Synchronized fun get(key: String, owner: String, ticket: Ticket): File? {
         if (!current(owner, ticket)) return null
@@ -50,6 +59,7 @@ internal class PointReadingCache(private val directory: File, private val capaci
 
     @Synchronized fun removeOwner(owner: String) {
         revisions[owner] = (revisions[owner] ?: 0) + 1
+        marks.removeOwner(owner)
         val id = readingDigest(owner)
         audioFiles().forEach { file ->
             val key = file.nameWithoutExtension

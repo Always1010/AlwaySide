@@ -13,7 +13,7 @@ import java.util.concurrent.Executors
 internal class PointReadingController private constructor(private val context: Context) {
     data class State(val owner: String = "", val origin: ReadingOrigin = ReadingOrigin.CHAT,
         val text: String = "", val key: String = "", val generating: Boolean = false,
-        val saved: Boolean = false, val error: String = "")
+        val saved: Boolean = false, val error: String = "", val anchor: ReadingAnchor? = null)
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val preferences = InteractionPreferences(context)
@@ -23,6 +23,7 @@ internal class PointReadingController private constructor(private val context: C
     private var cancellation: RequestCancellation? = null
     private var file: File? = null
     private var temporary: File? = null
+    private val pendingAnchors = linkedSetOf<ReadingAnchor>()
     private val observers = mutableSetOf<() -> Unit>()
     var state = State(); private set
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -36,16 +37,41 @@ internal class PointReadingController private constructor(private val context: C
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
     private fun publish() = observers.toList().forEach { it() }
 
-    fun read(owner: String, origin: ReadingOrigin, selected: String, toggle: Boolean = true) {
+    fun read(owner: String, origin: ReadingOrigin, selected: String, toggle: Boolean = true, anchor: ReadingAnchor? = null) {
+        startRead(owner, origin, selected, toggle, anchor, ReadingPreferences(context).voice())
+    }
+
+    /** Replaying a marker must never fall through to a network request, even for corrupt audio. */
+    fun playMark(owner: String, mark: ReadingMark, missing: () -> Unit) {
+        startRead(owner, ReadingOrigin.CHAT, mark.anchor.quote, false, mark.anchor, mark.voice, cachedOnly = true, missing = missing)
+    }
+
+    fun removeMark(owner: String, mark: ReadingMark) {
+        if (state.owner == owner && state.generating && state.anchor?.id == mark.id) stop()
+        worker.execute {
+            val success = runCatching { cache.marks.remove(owner, mark.id) }.isSuccess
+            main.post { publish(); if (!success) toast("无法移除点读标记，请重试") }
+        }
+    }
+
+    private class MissingAudio : Exception()
+    private fun startRead(owner: String, origin: ReadingOrigin, selected: String, toggle: Boolean,
+        anchor: ReadingAnchor?, voice: ReadingVoice, cachedOnly: Boolean = false, missing: () -> Unit = {}) {
         if (!preferences.load().readingEnabled(origin)) return
         if (ProbeState.recording) { toast("请先结束内部录音，再使用点读"); return }
         val text = normalizeReadingText(selected)
         if (text.isBlank()) return
         if (text.length > 3500) { toast("点读内容过长，请选取较短的一段"); return }
-        val voice = ReadingPreferences(context).voice()
         val key = voice.key(text)
+        if (state.generating && state.owner == owner && state.origin == origin && state.key == key) {
+            if (anchor != null) pendingAnchors.add(anchor)
+            return
+        }
         if (toggle && state.owner == owner && state.origin == origin && state.key == key) {
-            if (state.generating) return // Repeated taps never duplicate a paid request.
+            if (anchor != null && state.saved) {
+                state = state.copy(anchor = anchor)
+                remember(owner, anchor, voice, key)
+            }
             if (playback.readingKey == key && playback.isActive(owner)) { playback.toggle(); return }
             file?.takeIf(File::isFile)?.let { playback.playReading(owner, it, key, text); return }
         }
@@ -53,7 +79,8 @@ internal class PointReadingController private constructor(private val context: C
         val token = ++epoch
         val cancel = RequestCancellation().also { cancellation = it }
         val ticket = cache.ticket(owner)
-        state = State(owner, origin, text, key, generating = true)
+        if (anchor != null) pendingAnchors.add(anchor)
+        state = State(owner, origin, text, key, generating = true, anchor = anchor)
         publish()
         worker.execute {
             var disposable: File? = null
@@ -65,6 +92,7 @@ internal class PointReadingController private constructor(private val context: C
                 val target: File
                 if (stored != null) { saved = true; target = stored }
                 else {
+                    if (cachedOnly) throw MissingAudio()
                     val configuration = ReadingPreferences(context).request(context)
                     require(ReadingPreferences(context).voice() == voice) { "朗读配置已改变，请重试" }
                     val bytes = synthesize(configuration, voice, text, cancel)
@@ -88,6 +116,10 @@ internal class PointReadingController private constructor(private val context: C
                     } else {
                         cancellation = null; file = target; temporary = transient
                         state = state.copy(generating = false, saved = saved)
+                        if (saved && origin == ReadingOrigin.CHAT) {
+                            pendingAnchors.toList().forEach { remember(owner, it, voice, key, ticket) }
+                        }
+                        pendingAnchors.clear()
                         publish()
                         playback.playReading(owner, target, key, text)
                         if (!saved) toast("本次音频未长期保存，请检查存储空间或清理点读缓存")
@@ -99,6 +131,14 @@ internal class PointReadingController private constructor(private val context: C
                     if(epoch==token) {
                         cancellation=null;state=state.copy(generating=false,error="朗读已取消，请重试")
                         publish()
+                    }
+                }
+            }
+            catch (_: MissingAudio) {
+                main.post {
+                    if (epoch == token && !cancel.isCancelled) {
+                        stop()
+                        missing()
                     }
                 }
             }
@@ -120,17 +160,30 @@ internal class PointReadingController private constructor(private val context: C
         }
     }
 
+    private fun remember(owner: String, anchor: ReadingAnchor, voice: ReadingVoice, key: String,
+        ticket: PointReadingCache.Ticket = cache.ticket(owner)) {
+        worker.execute {
+            val result = runCatching { cache.remember(owner, ticket, ReadingMark(anchor, key, voice)) }
+            main.post {
+                publish()
+                if (result.isFailure) toast("音频已保存，但点读位置保存失败，请重试")
+            }
+        }
+    }
+
     fun replay() {
         if (state.text.isNotBlank() && !state.generating) {
             if (ProbeState.recording) { toast("请先结束内部录音"); return }
             val source = file?.takeIf(File::isFile)
             if (source != null && preferences.load().readingEnabled(state.origin))
                 playback.playReading(state.owner, source, state.key, state.text)
-            else read(state.owner, state.origin, state.text, toggle = false)
+            else if (state.saved) toast("音频已清理，请从原文标记重新生成")
+            else read(state.owner, state.origin, state.text, toggle = false, anchor = state.anchor)
         }
     }
     fun stop() {
         epoch++; cancellation?.cancel(); cancellation = null
+        pendingAnchors.clear()
         if (playback.readingKey.isNotEmpty()) playback.stop()
         temporary?.let { ChatAudioPlayback.deleteTemporaryAudio(it) }; temporary = null; file = null
         state = State(); publish()
@@ -149,7 +202,7 @@ internal class PointReadingController private constructor(private val context: C
                 val protected = if (keepFavorites) HistoryStore(context).index().conversations.filter { it.isFavorite }.map { it.id }.toSet() else emptySet()
                 cache.clear(protected)
             }.isSuccess
-            main.post { if(!success)toast("无法清理点读缓存，请重试");finished() }
+            main.post { publish(); if(!success)toast("无法清理点读缓存，请重试");finished() }
         }
     }
 
@@ -205,8 +258,8 @@ internal class PointReadingController private constructor(private val context: C
             cacheFor(context).removeOwner(owner)
         }
         fun clearAll(context: Context) {
-            instance?.let { current -> current.main.post { current.stop() }; current.cache.clear(); return }
-            cacheFor(context).clear()
+            instance?.let { current -> current.main.post { current.stop() }; current.cache.clear(); current.cache.marks.clear(); return }
+            cacheFor(context).let { it.clear(); it.marks.clear() }
         }
     }
 }

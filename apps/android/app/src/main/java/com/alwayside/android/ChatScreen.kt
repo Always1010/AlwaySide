@@ -381,7 +381,8 @@ internal class ChatScreen(
                     committedQuestion && index == messages.lastIndex && message.role == "assistant" -> partialAnswerRow
                     else -> null
                 } ?: createMessageRow(message.role)
-                if (existing == null) updateMessageRow(row, message.text, message.evidence, message.searchSuggestions)
+                if (existing == null) updateMessageRow(row, message.text, message.evidence, message.searchSuggestions,
+                    readingBlock = ReadingAnchor.message(index, message.role))
                 nextRows[message] = row
                 row
             }
@@ -399,7 +400,8 @@ internal class ChatScreen(
                 pendingQuestionRow = createMessageRow("user")
                 structureChanged = true
             }
-            contentChanged = updateMessageRow(pendingQuestionRow!!, session.question, session.evidence) || contentChanged
+            contentChanged = updateMessageRow(pendingQuestionRow!!, session.question, session.evidence,
+                readingBlock = ReadingAnchor.message(messages.size, "user")) || contentChanged
         } else if (pendingQuestionRow != null) {
             pendingQuestionRow?.dispose(); pendingQuestionRow = null
             structureChanged = true
@@ -525,7 +527,7 @@ internal class ChatScreen(
                     expanded = !expanded
                     content.maxLines = if (expanded) Int.MAX_VALUE else 3
                     content.ellipsize = if (expanded) null else android.text.TextUtils.TruncateAt.END
-                    if (expanded) content.enableChatReading(session.conversationId) else {
+                    if (expanded) content.enableChatReading(session.conversationId, block = "transcript") else {
                         content.setTextIsSelectable(false)
                         content.isClickable = false; content.isLongClickable = false
                     }
@@ -611,14 +613,15 @@ internal class ChatScreen(
         return MessageRow(role, block, messageText, notice)
     }
 
-    private fun updateMessageRow(row: MessageRow, value: String, evidence: String, suggestions: String = "", complete: Boolean = true): Boolean {
+    private fun updateMessageRow(row: MessageRow, value: String, evidence: String, suggestions: String = "", complete: Boolean = true,
+        readingBlock: String = "partial"): Boolean {
         var changed = false
         if (row.value != value) {
             row.text.text = MarkdownText.render(value)
             row.value = value
             changed = true
         }
-        row.text.enableChatReading(session.conversationId, complete)
+        row.text.enableChatReading(session.conversationId, complete, block = readingBlock)
         val html = suggestions.takeIf { row.role != "user" && it.isNotBlank() && it.length <= 32768 }.orEmpty()
         if (row.suggestions != html) {
             row.suggestionView?.let { row.block.removeView(it); it.destroy() }

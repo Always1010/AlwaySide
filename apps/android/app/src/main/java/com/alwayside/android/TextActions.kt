@@ -61,6 +61,7 @@ private class SelectionTextActions(private val text: TextView) : ActionMode.Call
 
     override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
         activeMode = mode
+        text.setTag(R.id.point_reading_selection, true)
         translator = text.context.systemTextTranslator()
         updateMenu(menu)
         // Framework PROCESS_TEXT items are added after onCreateActionMode returns.
@@ -162,7 +163,10 @@ private class SelectionTextActions(private val text: TextView) : ActionMode.Call
     }
 
     override fun onDestroyActionMode(mode: ActionMode) {
-        if (activeMode === mode) { activeMode = null; translator = null }
+        if (activeMode === mode) {
+            activeMode = null; translator = null
+            text.setTag(R.id.point_reading_selection, false)
+        }
     }
 }
 

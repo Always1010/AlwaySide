@@ -288,8 +288,8 @@ internal fun Context.assistantMessageRow(user: Boolean): ViewGroup {
         movementMethod=android.text.method.LinkMovementMethod.getInstance()
         if(user) { setTextColor(ON_TONAL_SURFACE);setPadding(dp(12),dp(8),dp(12),dp(8)) }
     }
-    return (if(user)assistantCard(15).apply { addView(message) }
-        else LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;addView(message) }).apply {
+    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;addView(message) }
+    return (if(user)assistantCard(15).apply { addView(body) } else body).apply {
         tag=user;layoutParams=LinearLayout.LayoutParams(if(user)-2 else -1,-2).apply {
             gravity=if(user)Gravity.END else Gravity.START;if(user)marginStart=dp(24);bottomMargin=dp(12)
         }

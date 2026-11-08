@@ -7,11 +7,17 @@ import android.view.View
 import android.widget.LinearLayout
 import com.google.android.material.button.MaterialButton
 
-internal fun android.widget.TextView.enableChatReading(owner: String, complete: Boolean = true) {
+internal fun android.widget.TextView.enableChatReading(owner: String, complete: Boolean = true,
+    block: String = "source", overlay: Boolean = false) {
+    val binding = (getTag(R.id.point_reading_binding) as? ChatReadingBinding)
+        ?: ChatReadingBinding(this).also { setTag(R.id.point_reading_binding, it) }
+    binding.bind(owner, block, complete, overlay)
     // Check the preference when opening the selection menu, so toggling never replaces message views.
     enableTextActions(read = if (complete) ({ selected ->
-        PointReadingController.get(context).read(owner, ReadingOrigin.CHAT, selected)
+        binding.readSelection(selected)
     }) else null)
+    // LinkMovementMethod cannot select arbitrary ranges. Links are handled as short taps by the binding.
+    movementMethod = android.text.method.ArrowKeyMovementMethod.getInstance()
 }
 
 @android.annotation.SuppressLint("ViewConstructor") // Requires an owning conversation and experiment.

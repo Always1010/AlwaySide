@@ -184,7 +184,6 @@ class AssistantService : Service() {
         var readingBar: ReadingBar? = null
         var readingPresentation: AssistantWindowViews? = null
         var readingImageDialog: androidx.appcompat.app.AlertDialog? = null
-        var transcriptReadingBound = false
         var imageReadingBound = false
         init {
             chat = ChatSession(this@AssistantService) { refresh(this) }
@@ -676,7 +675,7 @@ class AssistantService : Service() {
         node.input=null;node.send=null;node.cancel=null;node.retry=null;node.copy=null;node.discard=null;node.pin=null;node.favorite=null;node.imageChoice=null;node.search=null;node.scroll=null;node.content=null
         node.composer=null;node.composerToggle=null
         node.readingBar=null;node.readingPresentation=null
-        node.transcriptReadingBound=false;node.imageReadingBound=false
+        node.imageReadingBound=false
         playback.setVisible(node, null, false, retaining = !stopAudio)
     }
     private fun icon(resource: Int, description: String, run: () -> Unit) = uiContext.iconButton(resource,description,run)
@@ -919,21 +918,20 @@ class AssistantService : Service() {
         } else if(!readingEnabled && node.readingBar!=null) {
             (node.readingBar?.parent as? ViewGroup)?.removeView(node.readingBar);node.readingBar=null
         }
-        if(node.transcript!=null && node.transcriptReadingBound!=readingEnabled) {
-            node.transcriptReadingBound=readingEnabled
-            node.transcript?.enableTextActions(read=if(readingEnabled)({ text -> PointReadingController.get(this).read(node.chat.conversationId,ReadingOrigin.CHAT,text) }) else null)
-        }
         ProbeState.requesting=nodes.values.any{it.chat.busy};bubbleVisual?.working=ProbeState.requesting
         node.source?.text=when(node.kind){"photo"->imageDescription(node)+"  ▾";"text"->"所选原文  ▾";else->if(node.chat.transcript.isNotBlank())"转写原文 · ${String.format(Locale.getDefault(),"%.1f",node.clip?.seconds ?: 0f)} 秒  ▾" else "内部音频 · 不附图"}
         val sourceText=if(node.kind=="text")node.chat.sourceText else node.chat.transcript
         node.transcript?.let { if(it.text.toString()!=sourceText)it.text=sourceText }
+        node.transcript?.enableChatReading(node.chat.conversationId, block=if(node.kind=="text")"source" else "transcript", overlay=true)
         updateTranscriptCopy(node)
         val messages=buildList {
             node.chat.messages.withIndex().toList().takeLast(12).forEach { (index,message) ->
-                if(!(node.automaticFirstQuestion&&index==0&&message.role=="user")) add(Triple(message.role=="user",message.text,message.searchSuggestions))
+                if(!(node.automaticFirstQuestion&&index==0&&message.role=="user")) add(FloatingReadingMessage(
+                    message.role=="user",message.text,message.searchSuggestions,ReadingAnchor.message(index,message.role)))
             }
-            if(node.chat.question.isNotBlank()&&!(node.automaticFirstQuestion&&node.chat.messages.isEmpty())) add(Triple(true,node.chat.question,""))
-            if(node.chat.partial.isNotBlank()) add(Triple(false,node.chat.partial,""))
+            if(node.chat.question.isNotBlank()&&!(node.automaticFirstQuestion&&node.chat.messages.isEmpty())) add(FloatingReadingMessage(
+                true,node.chat.question,"",ReadingAnchor.message(node.chat.messages.size,"user")))
+            if(node.chat.partial.isNotBlank()) add(FloatingReadingMessage(false,node.chat.partial,"","partial",complete=false))
         }
         val scroll=node.scroll;val nearBottom=scroll==null||(scroll.scrollY+scroll.height>=(node.content?.height ?: 0)-dp(48))
         renderFloatingMessages(node,messages)
@@ -968,38 +966,40 @@ class AssistantService : Service() {
         else if(!node.chat.busy&&node.chat.status!=lastFinished){lastFinished=node.chat.status;ProbeState.lastEvent=node.chat.status}
     }
     /** Keep message views stable while a streaming reply grows and only update changed text. */
-    private fun renderFloatingMessages(node:FloatingConversation,messages:List<Triple<Boolean,String,String>>) {
+    private data class FloatingReadingMessage(val user:Boolean,val text:String,val suggestions:String,val block:String,val complete:Boolean=true)
+    private fun renderFloatingMessages(node:FloatingConversation,messages:List<FloatingReadingMessage>) {
         val container=node.response ?: return
         var remaining=100000
-        val visible=messages.asReversed().mapNotNull { (user,text,suggestions) ->
-            if(remaining<=0) null else Triple(user,text.takeLast(remaining),suggestions).also { remaining-=it.second.length }
+        val visible=messages.asReversed().mapNotNull { message ->
+            if(remaining<=0) null else message.copy(text=message.text.takeLast(remaining)).also { remaining-=it.text.length }
         }.asReversed()
         val visibleSuggestionKeys=mutableSetOf<String>()
-        visible.forEachIndexed { index,(user,value,suggestions) ->
+        visible.forEachIndexed { index,item ->
+            val user=item.user;val value=item.text;val suggestions=item.suggestions
             var row=container.getChildAt(index)
             if(row==null || row.tag!=user) {
                 if(row!=null)container.removeViewAt(index)
                 row=uiContext.assistantMessageRow(user)
                 container.addView(row,index)
             }
-            val message=(row as ViewGroup).getChildAt(0) as TextView
+            val body=if(row is com.google.android.material.card.MaterialCardView)row.getChildAt(0) as ViewGroup else row as ViewGroup
+            val message=body.getChildAt(0) as TextView
             if(message.tag!=value) {
                 message.text=MarkdownText.render(value)
                 message.tag=value
             }
-            val complete=!(node.chat.busy && !user && index==visible.lastIndex && node.chat.partial==value)
-            message.enableChatReading(node.chat.conversationId, complete)
-            val preserved=1
+            message.enableChatReading(node.chat.conversationId,item.complete,block=item.block,overlay=true)
+            val preserved=2 // Text and the binding's hidden-or-visible records button.
             if(!user && suggestions.isNotBlank() && suggestions.length<=32768) {
                 val widgetKey="$index:$suggestions"
                 visibleSuggestionKeys.add(widgetKey)
                 val widget=node.suggestionViews.getOrPut(widgetKey) { uiContext.searchSuggestionsView(suggestions) }
-                if(widget.parent!==row) {
+                if(widget.parent!==body) {
                     (widget.parent as? ViewGroup)?.removeView(widget)
-                    while(row.childCount>preserved)row.removeViewAt(preserved)
-                    row.addView(widget)
+                    while(body.childCount>preserved)body.removeViewAt(preserved)
+                    body.addView(widget)
                 }
-            } else while(row.childCount>preserved)row.removeViewAt(preserved)
+            } else while(body.childCount>preserved)body.removeViewAt(preserved)
         }
         node.suggestionViews.keys.filterNot { it in visibleSuggestionKeys }.toList().forEach { key ->
             node.suggestionViews.remove(key)?.let { (it.parent as? ViewGroup)?.removeView(it); it.destroy() }
