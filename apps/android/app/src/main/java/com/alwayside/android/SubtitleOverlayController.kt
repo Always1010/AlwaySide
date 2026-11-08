@@ -132,8 +132,8 @@ internal class SubtitleOverlayController private constructor(private val context
                 readingBundle = SubtitleReading.project(currentSource, selected)
             }
             val current = requireNotNull(readingBundle)
-            shown.render(SubtitleOverlayState.text(current, SubtitleReading.activeIndex(current.cues, player.position.toLong(), player.currentState.playing),
-                preferences.mode()), preferences.mode(), player.currentState.playing, player.position, player.duration)
+            shown.render(current, SubtitleReading.activeIndex(current.cues, player.position.toLong(), player.currentState.playing),
+                preferences.mode(), player.currentState.playing, player.position, player.duration)
             if (created) player.refreshMediaControls()
         } catch (_: RuntimeException) { unavailable() }
     }
