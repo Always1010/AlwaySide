@@ -4,21 +4,26 @@ package com.alwayside.android
 internal class SubtitleOverlayState {
     private var session = -1L
     private var dismissed = false
+    private var activated = false
     private val panels = mutableMapOf<Any, String>()
 
-    fun playback(session: Long) {
-        if (this.session != session) { this.session = session; dismissed = false }
+    fun playback(session: Long, playing: Boolean) {
+        if (this.session != session) { this.session = session; dismissed = false; activated = false }
+        if (playing) activated = true
     }
 
     fun dismiss() { dismissed = true }
-    fun restore() { dismissed = false }
+    fun restore(activate: Boolean = true) {
+        dismissed = false
+        if (activate) activated = true
+    }
     fun panel(token: Any, owner: String?, visible: Boolean) {
         if (visible && owner != null) panels[token] = owner else panels.remove(token)
     }
 
     fun shouldShow(owner: String?, enabled: Boolean, hasSubtitles: Boolean,
                    originalAudio: Boolean, screenAvailable: Boolean): Boolean =
-        enabled && owner != null && hasSubtitles && originalAudio && screenAvailable &&
+        activated && enabled && owner != null && hasSubtitles && originalAudio && screenAvailable &&
             !dismissed && owner !in panels.values
 
     companion object {

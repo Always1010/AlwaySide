@@ -39,7 +39,7 @@ internal class SubtitleOverlayController private constructor(private val context
         if (key == "backgroundPlaybackSubtitles") {
             enabled = interaction.load().backgroundPlaybackSubtitles
             permission = Settings.canDrawOverlays(context)
-            if (enabled) state.restore()
+            if (enabled) state.restore(activate = false)
             sync()
         }
     }
@@ -103,7 +103,7 @@ internal class SubtitleOverlayController private constructor(private val context
 
     private fun sync() {
         val player = playback
-        state.playback(player.playbackSession)
+        state.playback(player.playbackSession, player.currentState.playing)
         val owner = player.conversationId
         val original = owner != null && player.readingKey.isEmpty() &&
             !player.currentState.preparing && player.currentState.remaining != null
@@ -161,7 +161,7 @@ internal class SubtitleOverlayController private constructor(private val context
     private fun displayAllowed(): Boolean {
         permission = Settings.canDrawOverlays(context)
         val error = when {
-            !enabled -> "请先在设置中开启「后台播放显示字幕」"
+            !enabled -> "请先在设置中开启「播放自动显示字幕」"
             !permission -> "请先允许显示在其他应用上层"
             else -> null
         }

@@ -4,6 +4,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SubtitleOverlayStateTest {
+    @Test fun automaticCaptionsWaitForPlaybackAndStayVisibleWhenPaused() {
+        val state = SubtitleOverlayState()
+        state.playback(1, playing = false)
+        assertFalse(state.visible())
+        state.restore(activate = false) // Enabling the setting does not start a paused preview.
+        assertFalse(state.visible())
+        state.playback(1, playing = true)
+        assertTrue(state.visible())
+        state.playback(1, playing = false)
+        assertTrue(state.visible())
+        state.dismiss()
+        state.playback(1, playing = true)
+        assertFalse(state.visible())
+        state.playback(2, playing = false)
+        assertFalse(state.visible())
+        state.restore() // Explicitly opening floating captions also works before playback.
+        assertTrue(state.visible())
+    }
+
     @Test fun openingPausedCaptionsPreviewsTheFirstCueWithoutChangingPlaybackTiming() {
         val cues = listOf(SubtitleCue(1, 1500, 2500, "First"), SubtitleCue(2, 6000, 7000, "Next"))
         assertEquals(0, SubtitleOverlayState.displayIndex(cues, 0, playing = false))
@@ -21,15 +40,15 @@ class SubtitleOverlayStateTest {
 
     @Test fun closeOnlySuppressesThisPlaybackSessionAndReplayingTheSameRecordingRestoresCaptions() {
         val state = SubtitleOverlayState()
-        state.playback(1)
+        state.playback(1, playing = true)
         assertTrue(state.visible())
         state.dismiss()
         // Position updates, pause/resume and a panel handoff retain the same session.
-        repeat(3) { state.playback(1); assertFalse(state.visible()) }
+        repeat(3) { state.playback(1, playing = it % 2 == 0); assertFalse(state.visible()) }
         val panel = Any()
         state.panel(panel, "audio", true); state.panel(panel, "audio", false)
         assertFalse(state.visible())
-        state.playback(2)
+        state.playback(2, playing = true)
         assertTrue(state.visible())
         state.dismiss(); state.restore()
         assertTrue(state.visible())
@@ -37,7 +56,7 @@ class SubtitleOverlayStateTest {
 
     @Test fun missingCaptionsDisabledPreferenceReadingAudioAndLockScreenNeverShowAWindow() {
         val state = SubtitleOverlayState()
-        state.playback(1)
+        state.playback(1, playing = true)
         assertFalse(state.visible(owner = null))
         assertFalse(state.visible(enabled = false))
         assertFalse(state.visible(captions = false))
@@ -49,6 +68,7 @@ class SubtitleOverlayStateTest {
 
     @Test fun onlyTheMatchingVisibleFullPanelSuppressesTheFloatingCaptions() {
         val state = SubtitleOverlayState()
+        state.playback(1, playing = true)
         val first = Any(); val second = Any()
         state.panel(first, "other", true)
         assertTrue(state.visible())
