@@ -570,6 +570,8 @@ internal class HistoryListScreen(
                 if (!closeSwipe() && !dismissedSwipeOnTouch) toggleAudio(value.id)
             }.apply {
                 icon = drawable; iconSize = activity.dp(32)
+                // Fit the enlarged progress icon inside the 48dp touch target.
+                setPadding(activity.dp(8), activity.dp(8), activity.dp(8), activity.dp(8))
                 iconTint = ColorStateList.valueOf(ACCENT)
                 isCheckable = false
             }
