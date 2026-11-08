@@ -1,5 +1,6 @@
 package com.alwayside.android
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.ClipData
@@ -42,6 +43,7 @@ internal class ChatScreen(
     private lateinit var toolbar: MaterialToolbar
     private lateinit var statusView: TextView
     private lateinit var mediaView: TextView
+    private lateinit var scrollToTop: MaterialButton
     private lateinit var messagesView: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var composer: TextInputEditText
@@ -240,15 +242,33 @@ internal class ChatScreen(
             }
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(64)))
-        statusView = label("", 11f, true).apply { setPadding(dp(22), dp(8), dp(22), 0) }
-        root.addView(statusView)
-        mediaView = label("", 10f, true).apply { setPadding(dp(22), dp(4), dp(22), 0) }
-        root.addView(mediaView)
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(22), dp(8), dp(10), 0)
+            addView(LinearLayout(this@ChatScreen).apply {
+                orientation = LinearLayout.VERTICAL
+                statusView = label("", 11f, true)
+                addView(statusView)
+                mediaView = label("", 10f, true).apply { setPadding(0, dp(4), 0, 0) }
+                addView(mediaView)
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            scrollToTop = iconButton(R.drawable.ic_line_top, "回到顶部") {
+                if (ValueAnimator.areAnimatorsEnabled()) scroll.smoothScrollTo(0, 0)
+                else scroll.scrollTo(0, 0)
+            }.apply {
+                iconSize = dp(24)
+                visibility = View.INVISIBLE
+            }
+            addView(scrollToTop)
+        }, LinearLayout.LayoutParams(-1, -2))
         messagesView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(16), dp(22), dp(16))
         }
         scroll = ScrollView(this).apply {
             isFillViewport = true; isVerticalScrollBarEnabled = false; addView(messagesView)
+            setOnScrollChangeListener { _, _, y, _, _ ->
+                scrollToTop.visibility = if (y > dp(48)) View.VISIBLE else View.INVISIBLE
+            }
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)))
