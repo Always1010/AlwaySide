@@ -93,11 +93,11 @@ internal class ChatScreen(
     private var subtitleDialog: androidx.appcompat.app.AlertDialog? = null
     private val subtitlePreferences = SubtitlePreferences(this)
     private val subtitleListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        if (ready && !closing) toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlePreferences.anyEnabled()
+        if (ready && !closing) toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlesEnabled()
     }
     private val readingPreferences = InteractionPreferences(this)
     private val readingListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "chatPointReading" && ready && !closing) render()
+        if (key in setOf("chatPointReading", "backgroundPlaybackSubtitles") && ready && !closing) render()
     }
     private val playbackObserver: () -> Unit = {
         if (ready && !closing) updatePlayback(playback.stateFor(session.conversationId))
@@ -305,7 +305,7 @@ internal class ChatScreen(
         conversationTitle = session.title
         toolbar.title = conversationTitle
         toolbar.menu.findItem(3)?.isVisible = availableAudio() != null
-        toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlePreferences.anyEnabled()
+        toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlesEnabled()
         renderCollectionActions()
         val hasPending = session.question.isNotBlank()
         val providerLabel = if (session.busy || session.question.isNotBlank()) session.requestProviderLabel else ProviderCapabilities.label(activeConnection)
@@ -681,10 +681,12 @@ internal class ChatScreen(
     }
 
     fun showSubtitles() {
-        if (!ready || closing || session.kind != "audio" || !subtitlePreferences.anyEnabled()) return
+        if (!ready || closing || session.kind != "audio" || !subtitlesEnabled()) return
         subtitleDialog?.dismiss()
         subtitleDialog = SubtitlePanel(activity, { session.snapshot() }, ::availableAudio).show()
     }
+
+    private fun subtitlesEnabled() = subtitlePreferences.anyEnabled() || readingPreferences.load().backgroundPlaybackSubtitles
 
     private fun updatePlayback(state: ChatAudioPlayback.State) {
         playbackIcon.update(state)

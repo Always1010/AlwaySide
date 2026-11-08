@@ -367,6 +367,8 @@ internal class SettingsScreen(
         section("音频播放")
         check("backgroundPlayback", "后台播放", config.backgroundPlayback,
             help = "开启后，离开聊天、切换应用或锁屏仍继续播放，可通过系统媒体控件暂停或停止。\n\n关闭时，离开当前聊天即停止播放。强行停止应用或重启手机会结束播放。")
+        check("backgroundPlaybackSubtitles", "后台播放显示字幕", config.backgroundPlaybackSubtitles,
+            help = "播放已有字幕的音频时，离开完整字幕面板后显示字幕浮窗。没有字幕时不显示，也不会自动制作或联网。\n\n后台能否继续播放仍由「后台播放」控制。浮窗可选择中文、英文或双语；× 只关闭本次浮窗，音频继续，下次重新播放时恢复。\n\n需要允许显示在其他应用上层。锁屏隐藏，解锁后恢复。")
         section("录音", "时长和上限策略从下次录音生效；0 表示不限时长。\n\n自动处理还需开启菜单中的「使用默认提问方式」；手动结束的行为在「结果窗口」设置。")
         input("recordingMaxMinutes", "录音时长上限", "单位：分钟；1～${RecordingLimits.MAX_MINUTES}，0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
         choice("recordingLimitAction", "达到上限后", config.recordingLimitAction.value, RecordingLimitAction.choices,
@@ -580,10 +582,17 @@ internal class SettingsScreen(
                         "saveHistoryImages" -> it.copy(saveHistoryImages = value)
                         "saveHistoryAudio" -> it.copy(saveHistoryAudio = value)
                         "backgroundPlayback" -> it.copy(backgroundPlayback = value)
+                        "backgroundPlaybackSubtitles" -> it.copy(backgroundPlaybackSubtitles = value)
                         else -> error("Unknown toggle")
                     } }
                 }
                 if (!ok) { restoring = true; button.isChecked = !value; restoring = false }
+                else if (name == "backgroundPlaybackSubtitles" && value && !android.provider.Settings.canDrawOverlays(this@SettingsScreen)) {
+                    runCatching { activity.startActivity(android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:$packageName"))) }
+                        .onFailure { toast("请在系统设置中允许显示在其他应用上层") }
+                }
             }
         })
         addRow(row)

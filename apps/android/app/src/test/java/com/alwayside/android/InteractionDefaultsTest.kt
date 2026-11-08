@@ -17,6 +17,8 @@ class InteractionDefaultsTest {
         assertFalse(config.longPressSlide)
         assertFalse(config.chatPointReading)
         assertFalse(config.imagePointReading)
+        assertFalse(config.backgroundPlaybackSubtitles)
+        assertFalse(config.copy(backgroundPlaybackSubtitles = true).backgroundPlayback)
         assertFalse(config.readingEnabled(ReadingOrigin.CHAT))
         assertTrue(config.copy(imagePointReading = true).readingEnabled(ReadingOrigin.IMAGE))
         assertFalse(config.copy(imagePointReading = true).readingEnabled(ReadingOrigin.CHAT))

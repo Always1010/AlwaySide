@@ -66,6 +66,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     var readingKey: String = ""; private set
     var mediaTitle: String = "原始音频"; private set
     var speed: Float = 1f; private set
+    var playbackSession: Long = 0; private set
     private var readingSpeed = 1f
     val currentFile: File? get() = file
     private var file: File? = null
@@ -96,7 +97,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
             if (!state.playing) return
             try {
                 updatePosition(current, playing = true)
-                handler.postDelayed(this, if (observers.isEmpty()) 1000 else 50)
+                handler.postDelayed(this, if (observers.isNotEmpty()) 50 else if (SubtitleOverlayController.tracking) 100 else 1000)
             } catch (_: Exception) { failed() }
         }
     }
@@ -117,6 +118,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     fun play(id: String, source: File) {
         PointReadingController.stopIfCreated()
         stop(releaseHosting = false)
+        playbackSession++
         speed = 1f
         conversationId = id
         file = source
@@ -126,6 +128,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
 
     fun playReading(id: String, source: File, key: String, text: String) {
         stop(releaseHosting = false)
+        playbackSession++
         speed = readingSpeed; readingKey = key; mediaTitle = "点读 · ${text.take(60)}"
         conversationId = id; file = source
         publish(State(preparing = true, remaining = 1f))
@@ -282,6 +285,8 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
             (state.remaining == null) != (next.remaining == null)
         state = next
         observers.toList().forEach { it() }
+        // Caption window failures must never fail or stop the audio transport.
+        runCatching { SubtitleOverlayController.playbackChanged(context) }
         if (changed) service?.updatePlayback()
     }
 

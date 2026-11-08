@@ -52,10 +52,7 @@ internal class SubtitlePanel(
     private val observer: () -> Unit = { render() }
     private val playbackObserver: () -> Unit = { tick() }
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        if (!preferences.anyEnabled()) dialog?.dismiss()
-        else {
-            displayMode = preferences.display(); renderedBundle = null; rowsBuilt = false; render()
-        }
+        displayMode = preferences.display(); renderedBundle = null; rowsBuilt = false; render()
     }
 
     init {
@@ -116,6 +113,7 @@ internal class SubtitlePanel(
                 shown.setOnDismissListener { detach() }
                 shown.show()
                 attached = true
+                SubtitleOverlayController.panelVisible(activity, this, owner, true)
                 preferences.addListener(listener)
                 controller.addObserver(observer)
                 playback.addObserver(playbackObserver)
@@ -126,6 +124,7 @@ internal class SubtitlePanel(
     private fun detach() {
         if (!attached) return
         attached = false
+        SubtitleOverlayController.panelVisible(activity, this, owner, false)
         childDialog?.dismiss(); childDialog = null
         preferences.removeListener(listener)
         controller.removeObserver(observer)
@@ -251,7 +250,16 @@ internal class SubtitlePanel(
     }
     private fun menu(it: View) {
         PopupMenu(activity, it).apply {
-            menu.add("重新制作").setOnMenuItemClickListener { confirmGeneration(true); true }
+            if (InteractionPreferences(activity).load().backgroundPlaybackSubtitles &&
+                playback.isActive(owner) && playback.readingKey.isEmpty() && controller.record(owner, method).playable != null) {
+                menu.add("显示字幕浮窗").setOnMenuItemClickListener {
+                    dialog?.dismiss(); SubtitleOverlayController.restore(activity); true
+                }
+            }
+            menu.add("重新制作").apply {
+                isEnabled = preferences.enabled(method)
+                setOnMenuItemClickListener { confirmGeneration(true); true }
+            }
             menu.add("删除字幕").setOnMenuItemClickListener {
                 val selected = method
                 showChild(MaterialAlertDialogBuilder(activity).setTitle("删除${selected.title}字幕？")
