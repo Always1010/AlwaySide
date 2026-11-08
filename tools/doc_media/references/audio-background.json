@@ -1,0 +1,12 @@
+{
+  "source_asset": "docs/images/A02-double-tap-audio.gif",
+  "source_blob": "6d380105127153e6923ac3f4fc078e27d7184fc7",
+  "frame_time_ms": 2000,
+  "crop_at_logical_width_432": [
+    44,
+    192,
+    388,
+    409
+  ],
+  "scope": "External audio player backdrop only; playback state may use the pause icon."
+}

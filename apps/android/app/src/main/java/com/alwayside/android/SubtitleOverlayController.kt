@@ -161,7 +161,7 @@ internal class SubtitleOverlayController private constructor(private val context
     private fun displayAllowed(): Boolean {
         permission = Settings.canDrawOverlays(context)
         val error = when {
-            !enabled -> "请先在设置中开启「播放自动显示字幕」"
+            !enabled -> "请先在设置中开启「音频播放时显示字幕」"
             !permission -> "请先允许显示在其他应用上层"
             else -> null
         }

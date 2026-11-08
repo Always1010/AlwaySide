@@ -1,0 +1,18 @@
+{
+  "source_commit": "79deacaa0541999bf637074f7fe5eb632f730e89",
+  "assets": {
+    "A01-long-press-followup.gif": "dd28ed4413aba345f6b774bcbf14d68138b58c8b",
+    "A02-double-tap-audio.gif": "6d380105127153e6923ac3f4fc078e27d7184fc7",
+    "A04-triple-tap-cancel.gif": "b03dd3b863d8eb73062931f2b717e76e1983b32a",
+    "S01-screenshot-medium.png": "3278003a8ca4925a454ca6015deb1f09a15278d2",
+    "S02-followup-result.png": "4d09e81c99ac468eff8c6e9fbe282a0d1c21ace7",
+    "S04-audio-original.png": "16152a10e0a19e3579d3dd58f1b39e2eb5c529aa",
+    "S05-audio-translation.png": "5c5f61f3b7968317de3863149284fda4daf4890b",
+    "S06-floating-menu.png": "7e5b869a308e141f55ea6536401c3a8359f69c10"
+  },
+  "logical_size": [
+    432,
+    960
+  ],
+  "scope": "Brand, status strip, frame, typography hierarchy, gesture annotations and teaching rhythm. Native controls follow the current App."
+}

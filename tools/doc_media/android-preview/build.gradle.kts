@@ -15,7 +15,10 @@ abstract class StagePresentation : DefaultTask() {
                 include("AssistantPresentation.kt", "AssistantMenuModel.kt", "AssistantMenuUi.kt", "Ui.kt", "PrototypeIcons.kt",
                     "AppAppearance.kt", "AppearanceMode.kt", "ThemeScheme.kt", "TextActions.kt",
                     "BubbleGestureStateMachine.kt", "GestureBindings.kt", "InteractionPreferences.kt",
-                    "RecordingLimits.kt", "RecordingCompletion.kt")
+                    "RecordingLimits.kt", "RecordingCompletion.kt", "AudioPlaybackIcon.kt",
+                    "SubtitlePanel.kt", "SubtitleOverlayPreferences.kt", "SubtitleDisplaySettings.kt",
+                    "SubtitleAppearance.kt", "SubtitleReading.kt", "SubtitleReadingPreferences.kt",
+                    "SubtitleModels.kt", "SubtitleFormat.kt", "SubtitleOverlayWindow.kt", "SubtitleOverlayState.kt")
             }
             into(kotlinOutput.dir("com/alwayside/android"))
         }

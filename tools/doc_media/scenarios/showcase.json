@@ -2,14 +2,56 @@
   "schema": 1,
   "reading": {
     "title": "Weekend plans",
-    "original": "After a long week, nobody wanted a complicated plan. “How about grabbing something to eat and walking by the river?” Alex asked. “I'm down,” Sam said. “As long as we don't have to book anything.”",
+    "original": "After a long week, nobody wanted a complicated plan.\n\n“How about grabbing something to eat and walking by the river?” Alex asked.\n\n“I'm down,” Sam said. “As long as we don't have to book anything.”",
     "translation": "忙了一周，大家都不想安排得太复杂。\n\n“要不随便吃点东西，再去河边散散步？”亚历克斯提议。\n\n“我可以，”山姆说，“只要不用提前预订就行。”",
     "question": "I'm down为什么这里是我可以，而不是心情低落？",
-    "answer": "这里的 I'm down 表示“我愿意参加”。前一句是邀请，后一句又补充了参加条件。\n\n它相当于 I'm down for that，所以这里译成“我可以”，而非心情低落。"
+    "answer": "这里的 I'm down 表示“我愿意参加”。前一句是邀请，后一句又补充了参加条件。\n\n它相当于 I'm down for that，所以这里译成“我可以”，而非心情低落。",
+    "bilingual": "After a long week, nobody wanted a complicated plan.\n忙了一周，大家都不想安排得太复杂。\n\n“How about grabbing something to eat and walking by the river?” Alex asked.\n“要不随便吃点东西，再去河边散散步？”亚历克斯提议。\n\n“I'm down,” Sam said. “As long as we don't have to book anything.”\n“我可以，”山姆说，“只要不用提前预订就行。”"
   },
   "audio": {
     "original": "Before we finish today's meeting, I'd like to go over the plan for the next two weeks. The first priority is to complete the onboarding flow and make sure a new user can reach the main feature without asking for help. Please keep the instructions short, but do not remove information that people need to make a decision.\n\nBy Wednesday, the design team will share the updated screens. Engineering can then review the navigation and identify any states that are still missing, especially loading, permission requests, and connection failures. We should also test what happens when someone leaves the app and returns later.\n\nFor the demo, let's use a short reading example and a longer audio clip. The goal is to show how the assistant handles realistic content, including an answer that needs scrolling and a transcript that is longer than one paragraph. Please send your feedback before Friday, and include a screenshot whenever a layout issue is difficult to describe.",
-    "translation": "在结束今天的会议之前，我想回顾一下未来两周的计划。首要任务是完成新手引导流程，确保新用户无需求助，就能进入主要功能。说明文字应当简短，但不能删掉用户做决定时需要的信息。\n\n设计团队将在周三之前分享更新后的界面。随后，工程团队可以检查导航流程，并找出仍然缺少的状态，尤其是加载中、权限请求和连接失败。我们还应该测试用户离开应用、稍后返回时会发生什么。\n\n演示时，我们使用一段阅读材料，以及一段更长的音频。目的是展示助手如何处理接近实际使用的内容，包括需要滚动查看的回答，以及超过一个段落的转录原文。请在周五之前提交反馈；如果布局问题很难用文字描述，请附上截图。"
+    "translation": "在结束今天的会议之前，我想回顾一下未来两周的计划。首要任务是完成新手引导流程，确保新用户无需求助，就能进入主要功能。说明文字应当简短，但不能删掉用户做决定时需要的信息。\n\n设计团队将在周三之前分享更新后的界面。随后，工程团队可以检查导航流程，并找出仍然缺少的状态，尤其是加载中、权限请求和连接失败。我们还应该测试用户离开应用、稍后返回时会发生什么。\n\n演示时，我们使用一段阅读材料，以及一段更长的音频。目的是展示助手如何处理接近实际使用的内容，包括需要滚动查看的回答，以及超过一个段落的转录原文。请在周五之前提交反馈；如果布局问题很难用文字描述，请附上截图。",
+    "title": "Team planning",
+    "pageTitle": "音频示例",
+    "eyebrow": "LISTENING NOTE",
+    "subtitle": "Next two weeks",
+    "source": "Meeting recording",
+    "durationSeconds": 78,
+    "positionSeconds": 12,
+    "replayDurationMs": 78000,
+    "subtitleCues": [
+      {
+        "start": 0,
+        "end": 6800,
+        "english": "Before we finish today's meeting, I'd like to go over the plan for the next two weeks.",
+        "chinese": "在结束今天的会议之前，我想回顾一下未来两周的计划。"
+      },
+      {
+        "start": 6800,
+        "end": 16000,
+        "english": "The first priority is to complete the onboarding flow and make sure a new user can reach the main feature without asking for help.",
+        "chinese": "首要任务是完成新手引导流程，确保新用户无需求助，就能进入主要功能。"
+      },
+      {
+        "start": 16000,
+        "end": 22800,
+        "english": "Please keep the instructions short, but do not remove information that people need to make a decision.",
+        "chinese": "说明文字应当简短，但不能删掉用户做决定时需要的信息。"
+      },
+      {
+        "start": 22800,
+        "end": 28500,
+        "english": "By Wednesday, the design team will share the updated screens.",
+        "chinese": "设计团队将在周三之前分享更新后的界面。"
+      },
+      {
+        "start": 28500,
+        "end": 39500,
+        "english": "Engineering can then review the navigation and identify any states that are still missing, especially loading, permission requests, and connection failures.",
+        "chinese": "随后，工程团队可以检查导航流程，并找出仍然缺少的状态，尤其是加载中、权限请求和连接失败。"
+      }
+    ],
+    "bilingual": "Before we finish today's meeting, I'd like to go over the plan for the next two weeks. The first priority is to complete the onboarding flow and make sure a new user can reach the main feature without asking for help. Please keep the instructions short, but do not remove information that people need to make a decision.\n在结束今天的会议之前，我想回顾一下未来两周的计划。首要任务是完成新手引导流程，确保新用户无需求助，就能进入主要功能。说明文字应当简短，但不能删掉用户做决定时需要的信息。\n\nBy Wednesday, the design team will share the updated screens. Engineering can then review the navigation and identify any states that are still missing, especially loading, permission requests, and connection failures. We should also test what happens when someone leaves the app and returns later.\n设计团队将在周三之前分享更新后的界面。随后，工程团队可以检查导航流程，并找出仍然缺少的状态，尤其是加载中、权限请求和连接失败。我们还应该测试用户离开应用、稍后返回时会发生什么。\n\nFor the demo, let's use a short reading example and a longer audio clip. The goal is to show how the assistant handles realistic content, including an answer that needs scrolling and a transcript that is longer than one paragraph. Please send your feedback before Friday, and include a screenshot whenever a layout issue is difficult to describe.\n演示时，我们使用一段阅读材料，以及一段更长的音频。目的是展示助手如何处理接近实际使用的内容，包括需要滚动查看的回答，以及超过一个段落的转录原文。请在周五之前提交反馈；如果布局问题很难用文字描述，请附上截图。"
   },
   "scenes": {
     "S06-floating-menu": {
@@ -20,9 +62,14 @@
         {
           "at": 0,
           "action": "menu",
-          "caption": "单击悬浮球，展开快捷菜单。"
+          "caption": "单击悬浮球，展开快捷菜单。",
+          "teaching": {
+            "title": "S06 更新后的悬浮菜单",
+            "detail": "单击悬浮球 · 选择常用操作"
+          }
         }
-      ]
+      ],
+      "presentation": "original-teaching"
     },
     "A01-long-press-followup": {
       "kind": "reading",
@@ -34,132 +81,254 @@
           "at": 0,
           "action": "hold",
           "caption": "长按悬浮球，直接截图问答。",
-          "cue": {
-            "target": "bubble",
-            "kind": "long-press"
+          "teaching": {
+            "step": 1,
+            "title": "长按：直接截图问答",
+            "detail": "按住屏幕边缘的悬浮球，直到触发截图。",
+            "callout": [
+              "长按悬浮球",
+              "按住不放，不用展开菜单"
+            ]
           }
         },
         {
-          "at": 1000,
-          "action": "screenshot",
-          "caption": "先查看这段对话的中文翻译。"
+          "at": 650,
+          "action": "hold",
+          "caption": "按住不放，触发截图。",
+          "teaching": {
+            "step": 1,
+            "title": "按住不放，触发截图",
+            "detail": "保持按住，松开后继续查看截图结果。",
+            "callout": [
+              "正在长按",
+              "保持按住"
+            ],
+            "pressed": true
+          }
         },
         {
-          "at": 2600,
+          "at": 1350,
           "action": "hold",
-          "caption": "点“继续提问”，补充对俚语的疑问。",
+          "caption": "截图后生成回答。",
+          "teaching": {
+            "step": 2,
+            "title": "截图后，按预设问题提问",
+            "detail": "根据当前画面，查看原文和中文翻译。",
+            "processing": true
+          }
+        },
+        {
+          "at": 1750,
+          "action": "screenshot",
+          "caption": "分段查看原文与中文翻译。",
+          "teaching": {
+            "step": 2,
+            "title": "先查看这段对话的对照翻译",
+            "detail": "原文在上、译文在下，按段核对。"
+          }
+        },
+        {
+          "at": 2750,
+          "action": "scroll-page",
+          "caption": "继续查看山姆回答我可以的语境。",
+          "teaching": {
+            "step": 2,
+            "title": "看清原文里“我可以”的语境",
+            "detail": "邀请吃饭散步，山姆回答“我可以”。"
+          },
+          "cue": {
+            "target": "scroll",
+            "kind": "swipe-up"
+          }
+        },
+        {
+          "at": 3600,
+          "action": "hold",
+          "caption": "点击继续提问。",
+          "teaching": {
+            "step": 3,
+            "title": "点击「继续提问」",
+            "detail": "针对原文中容易误解的表达继续追问。"
+          },
           "cue": {
             "target": "toggle",
             "kind": "tap"
           }
         },
         {
-          "at": 3000,
+          "at": 4050,
           "action": "compose",
-          "caption": "展开原生追问输入框。"
+          "caption": "展开追问输入框。",
+          "teaching": {
+            "step": 3,
+            "title": "追问 I'm down 在这里的意思",
+            "detail": "为什么是“我可以”，而不是“心情低落”？"
+          }
         },
         {
-          "at": 3400,
+          "at": 4350,
           "action": "type",
-          "caption": "输入：I'm down为什么这里是我可以，而不是心情低落？"
+          "caption": "输入已确认的俚语追问。",
+          "teaching": {
+            "step": 3,
+            "title": "追问 I'm down 在这里的意思",
+            "detail": "为什么是“我可以”，而不是“心情低落”？"
+          }
         },
         {
-          "at": 4800,
+          "at": 5600,
           "action": "hold",
-          "caption": "发送追问，沿用本次截图上下文。",
+          "caption": "点击发送追问。",
+          "teaching": {
+            "step": 3,
+            "title": "点击发送追问",
+            "detail": "沿用本次截图，继续讨论原文。"
+          },
           "cue": {
             "target": "send",
             "kind": "tap"
           }
         },
         {
-          "at": 5200,
+          "at": 6050,
           "action": "send",
-          "caption": "根据同一段对话继续解释。"
+          "caption": "追问已发出，正在生成回答。",
+          "teaching": {
+            "step": 4,
+            "title": "追问已发出，正在生成回答",
+            "detail": "问题保留在上方，回答显示在下方。"
+          }
         },
         {
-          "at": 5500,
+          "at": 6450,
           "action": "answer",
-          "caption": "这里的回答结合了前一句邀请和后一句参加条件。"
+          "caption": "追问后的回答正在出现。",
+          "teaching": {
+            "step": 4,
+            "title": "追问后的回答正在出现",
+            "detail": "结合前一句邀请和后一句参加条件解释。"
+          }
         },
         {
-          "at": 6900,
+          "at": 7500,
           "action": "scroll-bottom",
-          "caption": "I'm down = 我愿意参加；完整回答见小窗。"
+          "caption": "结合前后的对话，解释口语含义。",
+          "teaching": {
+            "step": 4,
+            "title": "结合前后的对话，解释口语含义",
+            "detail": "前句是邀请，后句是参加条件，因此表示愿意。"
+          }
         }
+      ],
+      "presentation": "original-teaching",
+      "steps": 4,
+      "reviewAt": [
+        0,
+        1100,
+        2400,
+        4800,
+        7000,
+        12400
       ]
     },
     "A02-double-tap-audio": {
       "kind": "audio",
-      "duration": 15000,
+      "duration": 8500,
       "still": false,
       "events": [
         {
           "at": 0,
           "action": "hold",
-          "caption": "双击悬浮球，开始录音。",
+          "caption": "双击悬浮球，录下当前播放的一段音频。",
           "cue": {
             "target": "bubble",
             "kind": "double-tap"
+          },
+          "teaching": {
+            "step": 1,
+            "title": "双击：开始录音",
+            "detail": "快速连续点两下，录下当前播放的音频。",
+            "callout": [
+              "双击悬浮球",
+              "快速连点"
+            ]
           }
         },
         {
-          "at": 900,
+          "at": 800,
           "action": "record",
-          "caption": "录音中：悬浮球显示原生波形。"
+          "caption": "播放器继续播放，悬浮球显示录音状态。",
+          "teaching": {
+            "step": 2,
+            "title": "录音中，播放器继续播放",
+            "detail": "双击结束并处理，三击取消并丢弃。",
+            "recording": true
+          }
         },
         {
-          "at": 2300,
+          "at": 1500,
           "action": "hold",
           "caption": "再次双击，结束录音并处理。",
           "cue": {
             "target": "bubble",
             "kind": "double-tap"
+          },
+          "teaching": {
+            "step": 2,
+            "title": "再次双击：结束并处理",
+            "detail": "同一个双击动作，结束当前录音。",
+            "callout": [
+              "再次双击，结束录音",
+              "快速连点"
+            ],
+            "recording": true
           }
         },
         {
-          "at": 3100,
+          "at": 2200,
           "action": "audio",
-          "caption": "先查看转录原文；较长内容可上下滚动。"
+          "caption": "展开转写原文，核对音频内容。",
+          "teaching": {
+            "step": 3,
+            "title": "展开转写原文，核对内容",
+            "detail": "原文保留原语言和自然段落。"
+          }
         },
         {
-          "at": 5000,
-          "action": "scroll-middle",
-          "caption": "向上滑动，继续阅读转录原文。",
+          "at": 3900,
+          "action": "scroll-audio-answer",
+          "caption": "向上滑动，查看原文下方的双语回答。",
+          "teaching": {
+            "step": 4,
+            "title": "向上滑动，查看双语回答",
+            "detail": "原文在上、译文在下，按段对照。"
+          },
+          "duration": 1600,
           "cue": {
             "target": "scroll",
             "kind": "swipe-up"
           }
         },
         {
-          "at": 6200,
-          "action": "translation-start",
-          "caption": "收起原文，查看中文翻译。"
-        },
-        {
-          "at": 8700,
-          "action": "scroll-bottom",
-          "caption": "向上滑动，继续阅读中文译文。",
-          "cue": {
-            "target": "scroll",
-            "kind": "swipe-up"
-          }
-        },
-        {
-          "at": 9700,
+          "at": 5500,
           "action": "hold",
-          "caption": "中文译文保留原意与段落。"
-        },
-        {
-          "at": 11900,
-          "action": "original",
-          "caption": "点开原文，可返回核对转录内容。"
-        },
-        {
-          "at": 13400,
-          "action": "translation-start",
-          "caption": "原文与中文翻译在同一个原生小窗内。"
+          "caption": "原文与译文，按段对照阅读。",
+          "teaching": {
+            "step": 4,
+            "title": "原文与译文，按段对照",
+            "detail": "每段英文后紧跟对应中文译文。"
+          }
         }
+      ],
+      "presentation": "original-teaching",
+      "steps": 4,
+      "reviewAt": [
+        300,
+        1100,
+        1800,
+        3400,
+        4800,
+        8400
       ]
     },
     "A04-triple-tap-cancel": {
@@ -170,7 +339,17 @@
         {
           "at": 0,
           "action": "record",
-          "caption": "录音中。"
+          "caption": "录音中。",
+          "teaching": {
+            "step": 1,
+            "title": "不想保留这段录音？",
+            "detail": "录音过程中，可快速连点三下取消。",
+            "callout": [
+              "录音中，三击取消",
+              "仅在录音状态下演示"
+            ],
+            "recording": true
+          }
         },
         {
           "at": 1100,
@@ -179,13 +358,307 @@
           "cue": {
             "target": "bubble",
             "kind": "triple-tap"
+          },
+          "teaching": {
+            "step": 1,
+            "title": "快速连续点三下",
+            "detail": "取消并丢弃本次录音。",
+            "callout": [
+              "三击：取消并丢弃",
+              "快速连点"
+            ],
+            "recording": true
           }
         },
         {
           "at": 2000,
           "action": "cancel",
-          "caption": "录音已取消，悬浮球恢复空闲状态。"
+          "caption": "录音已取消，悬浮球恢复空闲状态。",
+          "teaching": {
+            "step": 2,
+            "title": "取消后回到空闲状态",
+            "detail": "这段录音不会发送转写或生成回答。",
+            "cancelled": true
+          }
         }
+      ],
+      "presentation": "original-teaching",
+      "steps": 2,
+      "reviewAt": [
+        0,
+        1100,
+        1400,
+        1800,
+        2400,
+        4500
+      ]
+    },
+    "S01-screenshot-medium": {
+      "kind": "reading",
+      "duration": 1400,
+      "still": true,
+      "events": [
+        {
+          "at": 0,
+          "action": "screenshot",
+          "caption": "截图后，按原文在上、译文在下分段对照。",
+          "teaching": {
+            "title": "S01 口语对话的对照翻译",
+            "detail": "原文与译文分段对照 · 可继续追问"
+          }
+        }
+      ],
+      "presentation": "original-teaching"
+    },
+    "S02-followup-result": {
+      "kind": "reading",
+      "duration": 1400,
+      "still": true,
+      "events": [
+        {
+          "at": 0,
+          "action": "followup-result",
+          "caption": "沿用截图继续追问，结合上下文理解表达。",
+          "teaching": {
+            "title": "S02 结合对话理解口语",
+            "detail": "沿用本次截图 · 结合前后文继续解释"
+          }
+        }
+      ],
+      "requiresAnswer": true,
+      "presentation": "original-teaching"
+    },
+    "S04-audio-original": {
+      "kind": "audio",
+      "duration": 1400,
+      "still": true,
+      "events": [
+        {
+          "at": 0,
+          "action": "audio",
+          "caption": "展开转写原文，核对听到的内容。",
+          "teaching": {
+            "title": "S04 展开完整转录原文",
+            "detail": "保留原语言与段落 · 长内容可滚动查看"
+          }
+        }
+      ],
+      "presentation": "original-teaching"
+    },
+    "S05-audio-translation": {
+      "kind": "audio",
+      "duration": 1400,
+      "still": true,
+      "events": [
+        {
+          "at": 0,
+          "action": "audio",
+          "caption": "查看这段音频的分段双语回答。",
+          "teaching": {
+            "title": "S05 音频原文与译文对照",
+            "detail": "原文在上，译文在下 · 按段对照阅读"
+          }
+        },
+        {
+          "at": 200,
+          "action": "translation-start",
+          "caption": "原文在上、译文在下，分段对照阅读。",
+          "teaching": {
+            "title": "S05 音频原文与译文对照",
+            "detail": "原文在上，译文在下 · 按段对照阅读"
+          }
+        }
+      ],
+      "presentation": "original-teaching"
+    },
+    "A05-audio-playback": {
+      "kind": "replay",
+      "duration": 3500,
+      "still": false,
+      "events": [
+        {
+          "at": 0,
+          "action": "hold",
+          "caption": "在应用内查看保存的音频会话。",
+          "teaching": {
+            "step": 1,
+            "title": "打开已保存的音频会话",
+            "detail": "已开启「音频播放时显示字幕」。"
+          }
+        },
+        {
+          "at": 300,
+          "action": "replay-play",
+          "caption": "点击播放，字幕浮窗自动出现。",
+          "cue": {
+            "target": "replayPlay",
+            "kind": "tap"
+          },
+          "teaching": {
+            "step": 2,
+            "title": "点击播放，自动显示字幕",
+            "detail": "已有字幕随录音播放，无需手动打开。"
+          }
+        }
+      ],
+      "presentation": "original-teaching",
+      "steps": 2,
+      "reviewAt": [
+        0,
+        350,
+        1200,
+        1550,
+        2000,
+        3450
+      ],
+      "autoSubtitles": true,
+      "replayStartMs": 5500
+    },
+    "A06-audio-subtitles": {
+      "kind": "replay",
+      "duration": 12200,
+      "still": false,
+      "events": [
+        {
+          "at": 0,
+          "action": "replay-play",
+          "caption": "播放同一段已保存的会议录音。",
+          "teaching": {
+            "step": 1,
+            "title": "播放已保存的会议录音",
+            "detail": "已有字幕可随音频一起查看。"
+          }
+        },
+        {
+          "at": 600,
+          "action": "hold",
+          "caption": "打开字幕面板，边听边看。",
+          "cue": {
+            "target": "replaySubtitles",
+            "kind": "tap"
+          },
+          "teaching": {
+            "step": 1,
+            "title": "点击字幕，边听边看",
+            "detail": "打开这段录音已有的字幕面板。"
+          }
+        },
+        {
+          "at": 1000,
+          "action": "replay-subtitles",
+          "caption": "打开字幕面板，边听边看。",
+          "teaching": {
+            "step": 1,
+            "title": "字幕跟随播放",
+            "detail": "当前句随音频播放位置变化。"
+          }
+        },
+        {
+          "at": 4200,
+          "action": "hold",
+          "caption": "切换中文字幕。",
+          "cue": {
+            "target": "subtitleChinese",
+            "kind": "tap"
+          },
+          "teaching": {
+            "step": 2,
+            "title": "切换中文字幕",
+            "detail": "用中文理解正在播放的内容。"
+          }
+        },
+        {
+          "at": 4600,
+          "action": "replay-chinese",
+          "caption": "切换中文字幕。",
+          "teaching": {
+            "step": 2,
+            "title": "查看中文字幕",
+            "detail": "字幕仍跟随同一段录音。"
+          }
+        },
+        {
+          "at": 6600,
+          "action": "hold",
+          "caption": "切换双语字幕，对照原文和译文。",
+          "cue": {
+            "target": "subtitleBilingual",
+            "kind": "tap"
+          },
+          "teaching": {
+            "step": 2,
+            "title": "切换双语，对照原文和译文",
+            "detail": "按需选择更适合的阅读方式。"
+          }
+        },
+        {
+          "at": 7000,
+          "action": "replay-bilingual",
+          "caption": "切换双语字幕，对照原文和译文。",
+          "teaching": {
+            "step": 2,
+            "title": "原文与译文双语对照",
+            "detail": "切换语言不会重新开始播放。"
+          }
+        },
+        {
+          "at": 8500,
+          "action": "hold",
+          "caption": "点击当前字幕，从句首重听。",
+          "cue": {
+            "target": "subtitleSeek",
+            "kind": "tap"
+          },
+          "teaching": {
+            "step": 3,
+            "title": "点击当前字幕，从句首重听",
+            "detail": "当前句从 00:06 开始。"
+          }
+        },
+        {
+          "at": 8900,
+          "action": "replay-seek",
+          "caption": "回到 00:06，重听这一句。",
+          "teaching": {
+            "step": 3,
+            "title": "回到 00:06，重听这一句",
+            "detail": "字幕保持当前句，播放进度回到句首。"
+          }
+        },
+        {
+          "at": 9700,
+          "action": "hold",
+          "caption": "在字幕面板暂停播放。",
+          "cue": {
+            "target": "subtitlePlay",
+            "kind": "tap"
+          },
+          "teaching": {
+            "step": 4,
+            "title": "在字幕面板暂停",
+            "detail": "保留当前播放位置。"
+          }
+        },
+        {
+          "at": 10100,
+          "action": "replay-panel-pause",
+          "caption": "在字幕面板暂停播放。",
+          "teaching": {
+            "step": 4,
+            "title": "暂停后，字幕停在当前句",
+            "detail": "需要时可继续播放。"
+          }
+        }
+      ],
+      "presentation": "original-teaching",
+      "steps": 4,
+      "reviewAt": [
+        500,
+        3000,
+        5600,
+        7800,
+        9500,
+        12100
       ]
     }
   }

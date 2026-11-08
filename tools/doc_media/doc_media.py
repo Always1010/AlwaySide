@@ -24,8 +24,13 @@ LOCAL = ROOT / ".local/doc-media"
 PACKAGE = "com.alwayside.docmedia"
 APK = PROJECT / "build/outputs/apk/debug/AlwaySideDocPreview-debug.apk"
 PROVENANCE = PROJECT / "build/doc-media-provenance.json"
-SHARED = ("AssistantPresentation.kt", "Ui.kt", "PrototypeIcons.kt", "AppAppearance.kt",
-          "AppearanceMode.kt", "ThemeScheme.kt")
+SHARED = ("AssistantPresentation.kt", "AssistantMenuModel.kt", "AssistantMenuUi.kt",
+          "Ui.kt", "PrototypeIcons.kt", "AppAppearance.kt", "AppearanceMode.kt", "ThemeScheme.kt",
+          "TextActions.kt", "BubbleGestureStateMachine.kt", "GestureBindings.kt",
+          "InteractionPreferences.kt", "RecordingLimits.kt", "RecordingCompletion.kt", "AudioPlaybackIcon.kt",
+          "SubtitlePanel.kt", "SubtitleOverlayPreferences.kt", "SubtitleDisplaySettings.kt",
+          "SubtitleAppearance.kt", "SubtitleReading.kt", "SubtitleReadingPreferences.kt",
+          "SubtitleModels.kt", "SubtitleFormat.kt", "SubtitleOverlayWindow.kt", "SubtitleOverlayState.kt")
 
 
 def run(args, *, env=None, binary=False, check=True):
@@ -165,6 +170,12 @@ def capture(args):
                         (destination / filename).write_bytes(source.read())
         write_json(destination / "provenance.json", provenance)
         completion = read_json(destination / "manifest.json")
+        if config[name].get("steps"):
+            steps = {event["caption"]: event["teaching"]["step"] for event in config[name]["events"]}
+            shown = {steps[frame["caption"]] for frame in completion["frames"] if frame["caption"] in steps}
+            missing = set(range(1, config[name]["steps"] + 1)) - shown
+            if missing:
+                raise RuntimeError(f"Teaching steps missing from capture: {name}: {sorted(missing)}")
         if config[name].get("requiresAnswer") and (
                 completion.get("finalAnswer") != read_json(SCENARIOS)["reading"]["answer"] or
                 not completion.get("finalAnswerVisible")):
@@ -203,6 +214,10 @@ def render(args):
     output.mkdir(parents=True)
     results = []
     for name in selected:
+        if config[name].get("presentation") == "original-teaching":
+            from teaching_presentation import render_scene
+            results.append(render_scene(source / name, output, config[name], font_path(args.font)))
+            continue
         manifest = read_json(source / name / "manifest.json")
         native_width, native_height = manifest["width"], manifest["height"]
         scale = 800 / native_width
@@ -233,7 +248,7 @@ def render(args):
             draw = ImageDraw.Draw(canvas)
             draw.text((36, 40), "AlwaySide", font=title_font, fill="#202428")
             draw.rounded_rectangle((624,40,828,86),radius=22,fill="#E8EDF7")
-            draw.text((644, 48), "原生组件演示", font=small, fill="#52617C")
+            draw.text((644, 48), "操作示意", font=small, fill="#52617C")
             draw.rounded_rectangle((left-1,top-1,left+800,top+height),radius=36,outline="#DCE0E5",width=2)
             y, line = height + 162, ""
             for char in frame["caption"]:
@@ -242,7 +257,7 @@ def render(args):
                     line, y = "", y + 46
                 line += char
             draw.text((48, y), line, font=font, fill="#202428")
-            draw.text((48, height + 272), "原生界面 · 预设内容 · 手势标记为后期叠加", font=small, fill="#68717C")
+            draw.text((48, height + 272), "操作示意 · 预设内容", font=small, fill="#68717C")
             if not still:
                 progress=min(1,frame["at"]/max(1,records[-1]["at"]))
                 draw.line((48,height+308,816,height+308),fill="#DCE0E5",width=4)
@@ -293,8 +308,12 @@ def render(args):
                 strip.paste(sample, (0, index * sample.height))
             palette = strip.quantize(colors=240)
             paletted = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in rendered]
-            paletted[0].save(target, save_all=True, append_images=paletted[1:], duration=durations,
-                             loop=0, optimize=False, disposal=1)
+            # Keep the approved colors, then encode transparent frame differences so a moving
+            # waveform and footer do not force the unchanged answer text into every GIF frame.
+            for index, frame in enumerate(paletted):
+                rendered[index] = frame.convert("RGB")
+            rendered[0].save(target, save_all=True, append_images=rendered[1:], duration=durations,
+                             loop=0, optimize=True, disposal=1)
             # QA contact sheet is local-only and is never exported to docs by `export`.
             sheet = Image.new("RGB", (final_width * 3, rendered[0].height * 2), "white")
             for index, pos in enumerate((0, len(rendered)//4, len(rendered)//2,
