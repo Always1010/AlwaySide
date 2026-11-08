@@ -10,10 +10,7 @@ internal object ConversationTitle {
 
     fun fromAnswer(answer: String): String {
         val text = answer.lineSequence().map { line ->
-            line.trim()
-                .replace(Regex("^\\s*(?:#{1,6}\\s+|>\\s*|[-*+]\\s+|\\d+[.)、]\\s*)"), "")
-                .let(::stripLinks)
-                .replace(Regex("[*_`]+"), "")
+            plainLine(line)
                 .replace(Regex("^(?:翻译如下|以下是(?:中文)?翻译|以下是解释|解释如下|中文翻译|译文)\\s*[:：]\\s*"), "")
                 .replace(Regex("\\s+"), " ").trim()
         }.firstOrNull { line ->
@@ -23,6 +20,12 @@ internal object ConversationTitle {
         val count = text.codePointCount(0, text.length)
         return text.substring(0, text.offsetByCodePoints(0, minOf(32, count)))
     }
+
+    /** Shared Markdown decoration cleanup; callers choose whitespace and length limits. */
+    fun plainLine(source: String): String = source.trim()
+        .replace(Regex("^\\s*(?:#{1,6}\\s+|>\\s*|[-*+]\\s+|\\d+[.)、]\\s*)"), "")
+        .let(::stripLinks)
+        .replace(Regex("[*_`]+"), "")
 
     /** Preserve the former flat link/image syntax without rescanning unmatched suffixes. */
     private fun stripLinks(source: String): String {

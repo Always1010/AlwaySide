@@ -607,7 +607,7 @@ internal class HistoryListScreen(
             val preview = value.messages.lastOrNull { it.role == "assistant" }?.text.orEmpty()
                 .ifBlank { value.messages.lastOrNull()?.text.orEmpty() }.ifBlank { value.evidence }
                 .ifBlank { "等待你输入第一个问题。" }
-            addView(activity.label(preview.take(180), 14f, true).apply {
+            addView(activity.label(ConversationPreview.text(preview, title), 14f, true).apply {
                 maxLines = 2; ellipsize = TextUtils.TruncateAt.END
                 setLineSpacing(activity.dp(2).toFloat(), 1f); setPadding(0, activity.dp(5), 0, 0)
             })
