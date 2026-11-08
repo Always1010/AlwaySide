@@ -132,8 +132,11 @@ internal class SubtitleOverlayController private constructor(private val context
                 readingBundle = SubtitleReading.project(currentSource, selected)
             }
             val current = requireNotNull(readingBundle)
-            shown.render(current, SubtitleReading.activeIndex(current.cues, player.position.toLong(), player.currentState.playing),
-                preferences.mode(), player.currentState.playing, player.position, player.duration)
+            val position = player.position
+            val playing = player.currentState.playing
+            val index = SubtitleOverlayState.displayIndex(current.cues, position.toLong(), playing)
+            shown.render(current, index,
+                preferences.mode(), playing, position, player.duration)
             if (created) player.refreshMediaControls()
         } catch (_: RuntimeException) { unavailable() }
     }
@@ -155,20 +158,27 @@ internal class SubtitleOverlayController private constructor(private val context
         playback.refreshMediaControls()
     }
 
-    private fun restoreWindow(): Boolean {
+    private fun displayAllowed(): Boolean {
         permission = Settings.canDrawOverlays(context)
         val error = when {
             !enabled -> "请先在设置中开启「后台播放显示字幕」"
             !permission -> "请先允许显示在其他应用上层"
-            !available(context) -> "当前没有可显示的音频字幕"
             else -> null
         }
         if (error != null) { Toast.makeText(context, error, Toast.LENGTH_SHORT).show(); return false }
+        return true
+    }
+
+    private fun restoreWindow(): Boolean {
+        if (!displayAllowed()) return false
+        if (!available(context)) {
+            Toast.makeText(context, "当前没有可显示的音频字幕", Toast.LENGTH_SHORT).show(); return false
+        }
         state.restore()
         panels.filterValues { it.second == playback.conversationId }.keys.toList()
             .filterIsInstance<SubtitlePanel>().forEach { it.dismissForOverlay() }
         sync()
-        return true
+        return window != null
     }
 
     companion object {
@@ -185,7 +195,11 @@ internal class SubtitleOverlayController private constructor(private val context
                 !player.currentState.preparing && player.currentState.remaining != null &&
                 !current.subtitles.record(id, SubtitleMethod.WHISPER).playable?.cues.isNullOrEmpty()
         }
-        fun showing(context: Context) = get(context).window != null
+        fun showing(context: Context, owner: String? = null): Boolean {
+            val current = get(context)
+            return current.window != null && (owner == null || current.playback.conversationId == owner)
+        }
+        fun canDisplay(context: Context) = get(context).displayAllowed()
         fun restore(context: Context): Boolean = get(context).restoreWindow()
         fun toggle(context: Context) {
             val current = get(context)

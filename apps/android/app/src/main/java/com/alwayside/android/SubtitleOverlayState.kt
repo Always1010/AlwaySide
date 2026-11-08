@@ -22,6 +22,11 @@ internal class SubtitleOverlayState {
             !dismissed && owner !in panels.values
 
     companion object {
+        /** A newly opened, paused recording previews its first cue without seeking the audio. */
+        fun displayIndex(cues: List<SubtitleCue>, positionMs: Long, playing: Boolean): Int =
+            if (!playing && positionMs == 0L && cues.isNotEmpty()) 0
+            else SubtitleReading.activeIndex(cues, positionMs, playing)
+
         /** The last selected language stays selected; closing is an explicit separate action. */
         fun toggleLanguage(current: SubtitleDisplay, language: SubtitleDisplay): SubtitleDisplay = when (current) {
             SubtitleDisplay.BILINGUAL -> if (language == SubtitleDisplay.CHINESE) SubtitleDisplay.ENGLISH else SubtitleDisplay.CHINESE

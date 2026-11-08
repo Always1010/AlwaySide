@@ -122,6 +122,18 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     }
 
     fun play(id: String, source: File) {
+        selectOriginal(id, source)
+        startOrResume()
+    }
+
+    /** Opening captions prepares the recording without starting sound or requesting audio focus. */
+    fun prepareForSubtitles(id: String, source: File) {
+        if (conversationId == id && readingKey.isEmpty()) return
+        selectOriginal(id, source)
+        prepare(startPlaying = false)
+    }
+
+    private fun selectOriginal(id: String, source: File) {
         PointReadingController.stopIfCreated()
         stop(releaseHosting = false)
         playbackSession++
@@ -130,7 +142,6 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         mediaTitle = HistoryStore(context).summary(id)?.title?.takeIf { it.isNotBlank() } ?: "原始音频"
         file = source
         publish(State(preparing = true, remaining = 1f))
-        startOrResume()
     }
 
     fun playReading(id: String, source: File, key: String, text: String) {
@@ -196,7 +207,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         if (player == null) prepare() else startPrepared()
     }
 
-    private fun prepare() {
+    private fun prepare(startPlaying: Boolean = true) {
         try {
             val next = MediaPlayer()
             player = next
@@ -207,7 +218,13 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
             next.setOnPreparedListener { current ->
                 if (player === current) {
                     duration = current.duration
-                    if (duration > 0) startPrepared() else failed()
+                    if (duration <= 0) failed()
+                    else if (startPlaying) startPrepared()
+                    else {
+                        pendingSeek?.let { current.seekTo(it.coerceIn(0, duration).toLong(), MediaPlayer.SEEK_CLOSEST); pendingSeek = null }
+                        updatePosition(current, playing = false)
+                        service?.pauseHosting()
+                    }
                 }
             }
             next.setOnCompletionListener { if (player === it) stop() }

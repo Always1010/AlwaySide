@@ -91,16 +91,32 @@ internal class ChatScreen(
     private var readingBar: ReadingBar? = null
     private var readingImageDialog: androidx.appcompat.app.AlertDialog? = null
     private var subtitleDialog: androidx.appcompat.app.AlertDialog? = null
+    private val subtitles = SubtitleController.get(this)
+    private var pendingSubtitleAction = false
+    private var pendingSubtitleOverlay = false
+    private val subtitleObserver: () -> Unit = {
+        if (ready && !closing) {
+            updateSubtitleAction()
+            if (pendingSubtitleAction && subtitles.record(session.conversationId, SubtitleMethod.WHISPER).loaded) {
+                pendingSubtitleAction = false
+                updateSubtitleAction()
+                activateSubtitles()
+            }
+        }
+    }
     private val subtitlePreferences = SubtitlePreferences(this)
     private val subtitleListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        if (ready && !closing) toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlesEnabled()
+        if (ready && !closing) updateSubtitleAction()
     }
     private val readingPreferences = InteractionPreferences(this)
     private val readingListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key in setOf("chatPointReading", "backgroundPlaybackSubtitles") && ready && !closing) render()
     }
     private val playbackObserver: () -> Unit = {
-        if (ready && !closing) updatePlayback(playback.stateFor(session.conversationId))
+        if (ready && !closing) {
+            updatePlayback(playback.stateFor(session.conversationId))
+            if (pendingSubtitleOverlay && !playback.currentState.preparing) view.post { finishSubtitleOverlay() }
+        }
     }
     internal data class RetainedConversation(
         val session: ChatSession, val image: Bitmap?, val handoff: HandedOffConversation?,
@@ -185,6 +201,8 @@ internal class ChatScreen(
                 override fun onViewAttachedToWindow(view: View) {
                     subtitlePreferences.addListener(subtitleListener)
                     readingPreferences.addListener(readingListener)
+                    subtitles.addObserver(subtitleObserver)
+                    if (ready && session.kind == "audio") subtitles.refresh(session.conversationId)
                     playback.addObserver(playbackObserver)
                     setPlaybackForeground(playbackForeground)
                     // Reload configuration when the existing chat view is reattached.
@@ -195,7 +213,9 @@ internal class ChatScreen(
                     if (ready) { refreshCollectionState(); render() } else renderWebSearch()
                 }
                 override fun onViewDetachedFromWindow(view: View) {
+                    pendingSubtitleAction = false; pendingSubtitleOverlay = false
                     subtitleDialog?.dismiss(); subtitleDialog = null
+                    subtitles.removeObserver(subtitleObserver)
                     subtitlePreferences.removeListener(subtitleListener)
                     readingPreferences.removeListener(readingListener)
                     playback.removeObserver(playbackObserver)
@@ -210,10 +230,8 @@ internal class ChatScreen(
             addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
                 icon = playbackIcon; isVisible = false
             }
-            addIconAction(8, R.drawable.ic_line_subtitles, "音频字幕") { showSubtitles() }.isVisible = false
-            addIconAction(9, R.drawable.ic_line_floating_subtitles, "显示后台字幕") {
-                SubtitleOverlayController.toggle(activity)
-            }.isVisible = false
+            addIconAction(8, R.drawable.ic_line_subtitles, "音频字幕") { activateSubtitles() }.isVisible = false
+            addOverflowIconAction(9, R.drawable.ic_line_subtitles, "完整字幕") { showSubtitles() }.isVisible = false
             addOverflowIconAction(5, R.drawable.ic_line_tag, "设置会话标签") {
                 if (ready && favorite) collectionTags.editTags(listOf(session.conversationId))
             }.apply {
@@ -308,7 +326,7 @@ internal class ChatScreen(
         conversationTitle = session.title
         toolbar.title = conversationTitle
         toolbar.menu.findItem(3)?.isVisible = availableAudio() != null
-        toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlesEnabled()
+        updateSubtitleAction()
         renderCollectionActions()
         val hasPending = session.question.isNotBlank()
         val providerLabel = if (session.busy || session.question.isNotBlank()) session.requestProviderLabel else ProviderCapabilities.label(activeConnection)
@@ -688,19 +706,66 @@ internal class ChatScreen(
 
     fun showSubtitles() {
         if (!ready || closing || session.kind != "audio" || !subtitlesEnabled()) return
+        pendingSubtitleAction = false; pendingSubtitleOverlay = false
+        updateSubtitleAction()
         subtitleDialog?.dismiss()
         subtitleDialog = SubtitlePanel(activity, { session.snapshot() }, ::availableAudio).show()
     }
 
-    private fun subtitlesEnabled() = subtitlePreferences.anyEnabled() || readingPreferences.load().backgroundPlaybackSubtitles
+    private fun subtitlesEnabled() = subtitlePreferences.anyEnabled() || readingPreferences.load().backgroundPlaybackSubtitles ||
+        !subtitles.record(session.conversationId, SubtitleMethod.WHISPER).playable?.cues.isNullOrEmpty()
+
+    private fun activateSubtitles() {
+        if (!ready || closing || session.kind != "audio" || !subtitlesEnabled()) return
+        if (pendingSubtitleAction || pendingSubtitleOverlay) return
+        val owner = session.conversationId
+        val record = subtitles.record(owner, SubtitleMethod.WHISPER)
+        if (!record.loaded) {
+            pendingSubtitleAction = true
+            updateSubtitleAction(); subtitles.refresh(owner)
+            return
+        }
+        if (record.playable?.cues.isNullOrEmpty()) { showSubtitles(); return }
+        if (SubtitleOverlayController.showing(activity, owner)) {
+            SubtitleOverlayController.toggle(activity); return
+        }
+        if (!SubtitleOverlayController.canDisplay(activity)) { showSubtitles(); return }
+        if (SubtitleOverlayController.available(activity, owner)) {
+            if (!SubtitleOverlayController.restore(activity)) showSubtitles()
+            return
+        }
+        val file = availableAudio()
+        if (file == null) { toast("原始音频不可用，可查看完整字幕"); showSubtitles(); return }
+        pendingSubtitleOverlay = true
+        updateSubtitleAction()
+        playback.prepareForSubtitles(owner, file)
+        finishSubtitleOverlay()
+    }
+
+    private fun finishSubtitleOverlay() {
+        if (!ready || closing || !view.isAttachedToWindow || !pendingSubtitleOverlay || playback.currentState.preparing) return
+        pendingSubtitleOverlay = false
+        if (!SubtitleOverlayController.available(activity, session.conversationId) || !SubtitleOverlayController.restore(activity)) showSubtitles()
+        updateSubtitleAction()
+    }
+
+    private fun updateSubtitleAction() {
+        val visible = session.kind == "audio" && subtitlesEnabled()
+        toolbar.menu.findItem(9)?.isVisible = visible
+        toolbar.menu.findItem(8)?.apply {
+            isVisible = visible
+            isEnabled = !pendingSubtitleAction && !pendingSubtitleOverlay
+            val showing = visible && SubtitleOverlayController.showing(activity, session.conversationId)
+            val hasCues = !subtitles.record(session.conversationId, SubtitleMethod.WHISPER).playable?.cues.isNullOrEmpty()
+            val label = if (showing) "隐藏字幕" else if (hasCues) "显示字幕" else "音频字幕"
+            title = label; contentDescription = label; tooltipText = label
+            iconTintList = android.content.res.ColorStateList.valueOf(if (showing) ACCENT else INK)
+        }
+    }
 
     private fun updatePlayback(state: ChatAudioPlayback.State) {
         playbackIcon.update(state)
-        toolbar.menu.findItem(9)?.apply {
-            isVisible = session.kind == "audio" && SubtitleOverlayController.available(activity, session.conversationId)
-            val label = if (SubtitleOverlayController.showing(activity)) "隐藏后台字幕" else "显示后台字幕"
-            title = label; contentDescription = label; tooltipText = label
-        }
+        updateSubtitleAction()
         toolbar.menu.findItem(3)?.apply {
             val enabled = !state.preparing
             if (isEnabled != enabled) isEnabled = enabled
@@ -766,6 +831,8 @@ internal class ChatScreen(
     }
 
     fun dispose(retaining: Boolean = false) {
+        pendingSubtitleAction = false; pendingSubtitleOverlay = false
+        subtitles.removeObserver(subtitleObserver)
         subtitleDialog?.dismiss(); subtitleDialog = null
         subtitlePreferences.removeListener(subtitleListener)
         readingImageDialog?.dismiss();readingImageDialog=null

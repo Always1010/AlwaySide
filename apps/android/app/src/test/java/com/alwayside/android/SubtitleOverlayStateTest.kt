@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SubtitleOverlayStateTest {
+    @Test fun openingPausedCaptionsPreviewsTheFirstCueWithoutChangingPlaybackTiming() {
+        val cues = listOf(SubtitleCue(1, 1500, 2500, "First"), SubtitleCue(2, 6000, 7000, "Next"))
+        assertEquals(0, SubtitleOverlayState.displayIndex(cues, 0, playing = false))
+        assertEquals(-1, SubtitleOverlayState.displayIndex(cues, 0, playing = true))
+        assertEquals(-1, SubtitleOverlayState.displayIndex(cues, 1000, playing = false))
+        assertEquals(0, SubtitleOverlayState.displayIndex(cues, 4000, playing = false))
+        assertEquals(-1, SubtitleOverlayState.displayIndex(cues, 4000, playing = true))
+        assertEquals(1, SubtitleOverlayState.displayIndex(cues, 6000, playing = true))
+        assertEquals(-1, SubtitleOverlayState.displayIndex(emptyList(), 0, playing = false))
+    }
+
     private fun SubtitleOverlayState.visible(owner: String? = "audio", enabled: Boolean = true,
         captions: Boolean = true, original: Boolean = true, screen: Boolean = true) =
         shouldShow(owner, enabled, captions, original, screen)
