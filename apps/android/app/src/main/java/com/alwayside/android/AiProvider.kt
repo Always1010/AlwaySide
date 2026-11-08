@@ -19,7 +19,8 @@ internal interface AiGateway {
 }
 
 /** Blocking transport: callers must use a worker thread and a fresh cancellation token. */
-internal class AiProvider : AiGateway {
+internal class AiProvider(private val maxTextChars: Int = 256 * 1024,
+    private val timeoutSeconds: Int = 240) : AiGateway {
     var lastSearchUsed: Boolean = false; private set
     private var lastSuggestions: String = ""
     override fun searchSuggestions(): String = lastSuggestions
@@ -36,7 +37,8 @@ internal class AiProvider : AiGateway {
         validateModel(config.model)
         ProviderProtocol.validateOptions(config)
         ProviderCapabilities.validate(config, imageDataUrl != null)
-        ChatPrompt.validateAssembled(question)
+        if (maxTextChars == 256 * 1024) ChatPrompt.validateAssembled(question)
+        else require(question.isNotBlank() && question.length <= maxTextChars) { "字幕内容过长，请开启分批翻译后继续" }
         if (config.instructions.length > 32_768)
             throw ProviderException("Instructions 过长，请缩短后重试")
         imageDataUrl?.let(::validateImage)
@@ -47,15 +49,20 @@ internal class AiProvider : AiGateway {
             ApiProtocol.CLAUDE -> ClaudeMessagesAdapter()
         }
         val wire = adapter.request(config, history, question, imageDataUrl)
-        val decoder = adapter.decoder(config)
+        val decoder = when (adapter) {
+            ResponsesAdapter -> ResponsesAdapter.decoder(config, maxTextChars)
+            ChatCompletionsAdapter -> ChatCompletionsAdapter.decoder(config, maxTextChars)
+            else -> adapter.decoder(config)
+        }
         val bytes = WireJson.encode(wire.body).toByteArray(Charsets.UTF_8)
         HttpTransport().request(config, wire.route, "application/json", bytes.size.toLong(), cancellation,
-            { it.write(bytes) }, streaming = true, query = wire.query) { connection, deadline ->
+            { it.write(bytes) }, streaming = true, query = wire.query, timeoutSeconds = timeoutSeconds) { connection, deadline ->
             if (!connection.contentType.orEmpty().substringBefore(';').trim().equals("text/event-stream", true))
                 throw ProviderException("服务未返回流式回答，请检查 API 协议、地址与模型")
             val emit: (String) -> Unit = { cancellation.throwIfCancelled(); onDelta(it) }
             connection.inputStream.use { input ->
-                val stream = EventStream(input, cancellation, deadline)
+                val stream = EventStream(input, cancellation, deadline,
+                    maxLine = maxOf(1024 * 1024, maxTextChars * 2), maxEvent = maxOf(2 * 1024 * 1024, maxTextChars * 2))
                 while (!decoder.complete) {
                     val event = stream.next() ?: break
                     if (event.data == "[DONE]") decoder.accept("__DONE__", emptyMap(), emit)

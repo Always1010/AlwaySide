@@ -95,11 +95,13 @@ internal object ChatCompletionsAdapter : ChatAdapter {
         }
     }
 
-    override fun decoder(config: AppConfig): AnswerDecoder = ChatCompletionsDecoder(config.providerKind != ProviderKind.QWEN)
+    override fun decoder(config: AppConfig): AnswerDecoder = decoder(config, 256 * 1024)
+
+    fun decoder(config: AppConfig, maxChars: Int): AnswerDecoder = ChatCompletionsDecoder(config.providerKind != ProviderKind.QWEN, maxChars)
 }
 
-private class ChatCompletionsDecoder(private val readAnnotations: Boolean) : AnswerDecoder {
-    private val answer = AnswerText()
+private class ChatCompletionsDecoder(private val readAnnotations: Boolean, maxChars: Int) : AnswerDecoder {
+    private val answer = AnswerText(maxChars)
     private var stopped = false
     private var failed = false
     private var done = false

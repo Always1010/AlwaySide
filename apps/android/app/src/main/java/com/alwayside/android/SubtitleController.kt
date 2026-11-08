@@ -26,7 +26,8 @@ internal class SubtitleController private constructor(private val context: Conte
     }
     private data class Job(val key: Key, val input: InputStream, val length: Long,
         val config: AppConfig, val recreate: Boolean, val revision: Long,
-        val cancellation: RequestCancellation = RequestCancellation())
+        val cancellation: RequestCancellation = RequestCancellation(),
+        val batchedTranslation: Boolean = false)
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
@@ -89,7 +90,7 @@ internal class SubtitleController private constructor(private val context: Conte
         if (history.summary(snapshot.id) == null) history.save(snapshot)
         val input = source.inputStream()
         val job = Job(key, input, source.length(), config, recreate,
-            synchronized(fileLock) { invalidate(key); revision(key) })
+            synchronized(fileLock) { invalidate(key); revision(key) }, batchedTranslation = preferences.batchedTranslation())
         jobs[key] = job
         records[key] = record(key.owner, method).copy(busy = true, status = "已排队", error = "", loaded = true)
         publish()
@@ -167,12 +168,15 @@ internal class SubtitleController private constructor(private val context: Conte
             while (!bundle.bilingualComplete) {
                 checkCurrent(job)
                 checkCredential(job)
-                val batch = SubtitleTranslation.nextBatch(bundle.cues, bundle.translations)
+                val batch = SubtitleTranslation.nextBatch(bundle.cues, bundle.translations, job.batchedTranslation)
                 require(batch.isNotEmpty()) { "字幕翻译检查点无效，请重新制作" }
                 update(job, "正在翻译 ${bundle.translations.size}/${bundle.cues.size}", bundle)
-                val response = AiProvider().respond(job.config.copy(instructions = SubtitleTranslation.INSTRUCTIONS,
-                    webSearch = false, continuationMessages = emptyList(), maxOutputTokens = 8192), emptyList(),
-                    WireJson.encode(SubtitleTranslation.request(bundle.cues, batch)), null, job.cancellation, {})
+                val response = AiProvider(maxTextChars = SubtitleTranslation.MAX_TEXT_CHARS,
+                    timeoutSeconds = SubtitleTranslation.TIMEOUT_SECONDS).respond(
+                    job.config.copy(instructions = SubtitleTranslation.INSTRUCTIONS,
+                    webSearch = false, continuationMessages = emptyList(),
+                    maxOutputTokens = if (job.batchedTranslation) 8192 else SubtitleTranslation.WHOLE_OUTPUT_TOKENS), emptyList(),
+                    WireJson.encode(SubtitleTranslation.request(bundle.cues, batch, job.batchedTranslation)), null, job.cancellation, {})
                 checkCredential(job)
                 val parsed = try { WireJson.decode(response.trim()) }
                     catch (_: Exception) { throw ProviderException("中文翻译格式不完整，英文已保存，请重试翻译") }

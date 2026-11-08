@@ -11,8 +11,10 @@ internal object ResponsesAdapter : ChatAdapter {
             .apply { putAll(ProviderProtocol.responseOptions(config)) })
     }
 
-    override fun decoder(config: AppConfig): AnswerDecoder = object : AnswerDecoder {
-        private val answer = AnswerText()
+    override fun decoder(config: AppConfig): AnswerDecoder = decoder(config, 256 * 1024)
+
+    fun decoder(config: AppConfig, maxChars: Int): AnswerDecoder = object : AnswerDecoder {
+        private val answer = AnswerText(maxChars)
         override var complete = false; private set
         override var searchUsed = false; private set
         override fun accept(eventName: String, data: Map<String, Any?>, onDelta: (String) -> Unit) {
@@ -37,7 +39,7 @@ internal object ResponsesAdapter : ChatAdapter {
                                     "output_text" -> { append(part.text("text")); part.items("annotations").forEach { citation(it.wireObject()) } }
                                     "refusal" -> append(part.text("refusal"))
                                 }
-                                if (length > 256 * 1024) throw ProviderException("回答过长，请缩小问题范围")
+                                if (length > maxChars) throw ProviderException("回答过长，请缩小问题范围")
                             }
                         }
                     }

@@ -12,18 +12,19 @@ internal class HttpTransport {
         cancellation: RequestCancellation, writeBody: (java.io.OutputStream) -> Unit,
         method: String = "POST", streaming: Boolean = false, query: Map<String, String> = emptyMap(),
         accept: String = if (streaming) "text/event-stream" else "application/json",
+        timeoutSeconds: Int = 240,
         readBody: (HttpURLConnection, Long) -> T): T {
         cancellation.throwIfCancelled()
-        val deadline = System.nanoTime() + 240_000_000_000L
+        val deadline = System.nanoTime() + timeoutSeconds * 1_000_000_000L
         val connection = ProviderProtocol.endpoint(config.baseUrl, route, query).openConnection() as HttpURLConnection
         val timedOut = AtomicBoolean(false)
-        val timeout = timeouts.schedule({ timedOut.set(true); connection.disconnect() }, 240, TimeUnit.SECONDS)
+        val timeout = timeouts.schedule({ timedOut.set(true); connection.disconnect() }, timeoutSeconds.toLong(), TimeUnit.SECONDS)
         try {
             ActiveServiceRequests.track(config, cancellation)
             connection.requestMethod = method
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 20_000
-            connection.readTimeout = 60_000
+            connection.readTimeout = if (timeoutSeconds > 240) 180_000 else 60_000
             connection.useCaches = false
             connection.doOutput = method == "POST"
             authHeaders(config).forEach { (key, value) -> connection.setRequestProperty(key, value) }

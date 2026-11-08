@@ -37,12 +37,12 @@ internal fun boundedHistory(history: List<ChatMessage>): List<ChatMessage> {
     return selected.asReversed()
 }
 
-internal class AnswerText {
+internal class AnswerText(private val maxChars: Int = 256 * 1024) {
     private val answer = StringBuilder()
     private val citations = linkedMapOf<String, String>()
     val value: String get() = answer.toString()
     fun append(text: String, emit: (String) -> Unit) {
-        if (answer.length + text.length > 256 * 1024) throw ProviderException("回答过长，请缩小问题范围")
+        if (answer.length + text.length > maxChars) throw ProviderException("回答过长，请缩小问题范围")
         answer.append(text); if (text.isNotEmpty()) emit(text)
     }
     fun citation(url: String, title: String) {

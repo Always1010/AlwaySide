@@ -56,12 +56,33 @@ internal class SubtitleSettingsUi(private val context: Context, private val pare
         group.addView(settingsListRow("翻译模型", preferences.translationModel().ifBlank { "未填写" }, inlineValue = true) {
             chooseModel()
         })
+        group.addView(toggle("分批翻译", preferences.batchedTranslation(),
+            "默认关闭，将整段英文字幕一次发送给翻译模型，结合全文生成中文字幕，输出上限为 128000 tokens。\n\n开启后每批最多翻译 16 条，适合长字幕或输出容量较小的模型。已完成的译文会保留，继续时只翻译缺失条目。\n\n整段翻译失败不会自动拆批或重试；可开启分批翻译后手动继续。模型自身的输出限制仍然适用。") {
+            preferences.saveBatchedTranslation(it)
+        })
         group.addView(settingsListRow("字幕显示", preferences.display().title, inlineValue = true) {
             showChoice(SettingsChoiceSheet(context, "字幕显示", SubtitleDisplay.entries.map { it.title },
                 SubtitleDisplay.entries.indexOf(preferences.display())) { index ->
                 save { preferences.saveDisplay(SubtitleDisplay.entries[index]) }
             })
         })
+    }
+
+    private fun toggle(title: String, checked: Boolean, description: String, update: (Boolean) -> Unit): LinearLayout = with(context) {
+        LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(4), dp(8), dp(4))
+            addView(label(title, 16f), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(iconButton(R.drawable.ic_line_info, "查看${title}说明") { help(title, description) })
+            addView(MaterialSwitch(this@with).apply {
+                isSaveEnabled = false; isChecked = checked; contentDescription = title
+                var restoring = false
+                setOnCheckedChangeListener { control, enabled ->
+                    if (!restoring && !save { update(enabled) }) {
+                        restoring = true; control.isChecked = !enabled; restoring = false
+                    }
+                }
+            }, LinearLayout.LayoutParams(-2, dp(48)))
+        }
     }
 
     private fun chooseCredential() {
