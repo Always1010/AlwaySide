@@ -67,7 +67,7 @@ internal class SubtitleDisplaySettings(
             if (floatingPreferences != null) addSlider("背景不透明度", 0f, 100f, { opacity.toFloat() }, { "${it.roundToInt()}%" }) {
                 opacity = it.roundToInt(); preview()
             }
-            val explanation = settingLabel("完整句会组合相邻片段，可能提前显示尚未读到的后半句。原始分段更贴近逐段播放。", 12f, true).apply {
+            val explanation = settingLabel("优先完整句按句末标点逐句显示，并接完整句；句内切换时间为估算，可能提前显示后半句。译文分句不同时保留完整译句。原始分段沿用转写片段。", 12f, true).apply {
                 visibility = View.GONE; setPadding(0, dp(6), 0, dp(6))
             }
             content.addView(LinearLayout(this).apply {
