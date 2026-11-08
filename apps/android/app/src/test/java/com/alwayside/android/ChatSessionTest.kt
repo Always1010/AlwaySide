@@ -621,14 +621,75 @@ class ChatSessionTest {
         }
     }
 
-    private class Harness(async: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null) {
+    @Test fun subtitleOriginalReplacesPaidTranscriptionAndAnswerRetryReusesIt() {
+        val subtitles = FakeSubtitles()
+        val h = Harness(subtitles = subtitles)
+        val config = h.config.copy(transcriptionConnectionId = null)
+        h.gateway.response = { if (h.gateway.calls.size == 1) throw ProviderException("answer failed") else "answer" }
+        h.session.submit(config, "解释原文", null, "audio", File("clip.wav"))
+        h.worker.runNext(); h.drainMain()
+        assertEquals("subtitle original", h.session.transcript)
+        assertTrue(h.session.canRetry)
+        subtitles.current = false // Finished original remains usable even if subtitle settings subsequently change.
+        h.session.retry()
+        h.worker.runNext(); h.drainMain()
+        assertEquals(ChatRequestPhase.COMPLETED, h.session.phase)
+        assertEquals(1, subtitles.calls)
+        assertEquals(0, h.gateway.transcribeCount)
+        assertTrue(h.gateway.calls.all { it.question.contains("subtitle original") })
+        h.session.submit(config, "继续提问", null, "text")
+        h.worker.runNext(); h.drainMain()
+        assertEquals(1, subtitles.calls)
+    }
+
+    @Test fun subtitleFailureDoesNotFallBackAndRevokedSettingsBlockUnfinishedRetry() {
+        val subtitles = FakeSubtitles().apply { error = ProviderException("subtitle failed") }
+        val h = Harness(subtitles = subtitles)
+        h.session.submit(h.config.copy(transcriptionConnectionId = null), "提问", null, "audio", File("clip.wav"))
+        h.worker.runNext(); h.drainMain()
+        assertEquals(ChatRequestPhase.FAILED, h.session.phase)
+        assertEquals(0, h.gateway.transcribeCount)
+        assertTrue(h.gateway.calls.isEmpty())
+        subtitles.current = false
+        h.session.retry()
+        assertFalse(h.session.canRetry)
+        assertEquals(1, subtitles.calls)
+    }
+
+    @Test fun transcriptOnlySubtitleRequestNeedsNoAnswerOrRegularTranscriptionKey() {
+        val subtitles = FakeSubtitles()
+        val h = Harness(subtitles = subtitles)
+        h.session.submit(h.config.copy(apiKey = "", transcriptionConnectionId = null, audioOutput = "transcript"),
+            "转写", null, "audio", File("clip.wav"))
+        h.worker.runNext(); h.drainMain()
+        assertEquals(ChatRequestPhase.COMPLETED, h.session.phase)
+        assertEquals("subtitle original", h.session.messages.last().text)
+        assertEquals(0, h.gateway.transcribeCount)
+        assertTrue(h.gateway.calls.isEmpty())
+    }
+
+    private class FakeSubtitles : AudioQuestionSubtitles {
+        override val cacheKey = "fixture-subtitles"
+        var calls = 0
+        var current = true
+        var error: Exception? = null
+        override fun isCurrent() = current
+        override fun transcribe(cancellation: RequestCancellation): String {
+            calls++; cancellation.throwIfCancelled(); error?.let { throw it }
+            return "subtitle original"
+        }
+    }
+
+    private class Harness(val subtitles: AudioQuestionSubtitles? = null,
+        async: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null) {
         val config = AppConfig(apiKey = "fixture-key")
         val gateway = FakeGateway()
         val worker = ManualExecutor()
         val posted = ArrayDeque<() -> Unit>()
         private val archive = linkedMapOf<String, StoredConversation>()
         val saved: List<StoredConversation> get() = archive.values.toList()
-        val session = ChatSession(gateway, { posted.addLast(it) }, worker, { archive[it.id] = it }, {}, saveHistoryAsync = async)
+        val session = ChatSession(gateway, { posted.addLast(it) }, worker, { archive[it.id] = it }, {},
+            saveHistoryAsync = async, subtitleRequest = { _, _ -> subtitles })
 
         fun drainMain() {
             var count = 0

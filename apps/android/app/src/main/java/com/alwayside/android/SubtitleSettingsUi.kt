@@ -47,6 +47,10 @@ internal class SubtitleSettingsUi(private val context: Context, private val pare
             })
         }
         if (!preferences.anyEnabled()) return@with
+        group.addView(toggle("音频提问同时生成字幕", preferences.questionSubtitles(),
+            "默认关闭。开启后，新发起的音频处理使用 Whisper 字幕方案识别原文和时间轴，直接复用原文提问，不再调用日常转写服务。\n\n原文完成即可回答，中文字幕独立继续；回答失败可复用原文，翻译失败可在回听面板手动继续。取消识别会中断字幕任务；原文就绪后取消回答不会取消字幕翻译。\n\n目前按英语识别；使用本页选择的 OpenAI Key 和翻译模型，不使用日常转写卡片的模型、提示词和语言。录音会随字幕长期保留；音频、原文分别发送至所选字幕与问答服务，可能收费。已有对话原文不会自动改写。") {
+            preferences.saveQuestionSubtitles(it)
+        })
         val catalog = runCatching { SettingsStore(context).load().serviceCatalog }.getOrNull()
         val key = catalog?.credentials?.firstOrNull { it.id == preferences.credentialId() }
         val valid = catalog != null && runCatching { SubtitleConfiguration.connection(catalog, preferences.credentialId()) }.isSuccess

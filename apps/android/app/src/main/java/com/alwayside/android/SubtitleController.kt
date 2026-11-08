@@ -10,8 +10,9 @@ import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.CompletableFuture
 
-/** Paid work starts only from enqueue(). File reads and requests outlive their observing screen. */
+/** Explicit subtitle actions and opted-in audio questions share one job per recording. */
 internal class SubtitleController private constructor(private val context: Context) {
     internal data class Key(val owner: String, val method: SubtitleMethod)
     internal data class Record(
@@ -27,10 +28,12 @@ internal class SubtitleController private constructor(private val context: Conte
     private data class Job(val key: Key, val input: InputStream, val length: Long,
         val config: AppConfig, val recreate: Boolean, val revision: Long,
         val cancellation: RequestCancellation = RequestCancellation(),
-        val batchedTranslation: Boolean = false)
+        val batchedTranslation: Boolean = false,
+        val original: CompletableFuture<SubtitleBundle> = CompletableFuture())
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    private val translator = Executors.newSingleThreadExecutor()
     private val reader = Executors.newSingleThreadExecutor()
     private val preferences = SubtitlePreferences(context)
     private val archive = archiveFor(context)
@@ -80,21 +83,74 @@ internal class SubtitleController private constructor(private val context: Conte
 
     /** Opening the input now also keeps temporary audio readable if its original owner closes. */
     fun enqueue(snapshot: StoredConversation, source: File, method: SubtitleMethod, recreate: Boolean = false) {
+        enqueueJob(snapshot, source, method, recreate, preferences.request())
+    }
+
+    private fun enqueueJob(snapshot: StoredConversation, source: File, method: SubtitleMethod,
+        recreate: Boolean, config: AppConfig, batchedTranslation: Boolean = preferences.batchedTranslation()): Job {
         check(preferences.enabled(method)) { "请先在实验室开启此字幕方案" }
         val key = Key(snapshot.id, method)
         check(!jobs.containsKey(key)) { "此字幕正在制作，请勿重复提交" }
         check(jobs.size < 8) { "已有较多字幕任务，请等待完成后再添加" }
-        val config = preferences.request()
         require(source.isFile && source.length() > 44) { "原始音频不可用，无法制作字幕" }
         val history = HistoryStore(context)
         if (history.summary(snapshot.id) == null) history.save(snapshot)
         val input = source.inputStream()
         val job = Job(key, input, source.length(), config, recreate,
-            synchronized(fileLock) { invalidate(key); revision(key) }, batchedTranslation = preferences.batchedTranslation())
+            synchronized(fileLock) { invalidate(key); revision(key) }, batchedTranslation = batchedTranslation)
         jobs[key] = job
         records[key] = record(key.owner, method).copy(busy = true, status = "已排队", error = "", loaded = true)
         publish()
         worker.execute { execute(job) }
+        return job
+    }
+
+    /** Capture settings at submit time; no upload starts until the chat worker asks for the original. */
+    fun questionRequest(snapshot: StoredConversation, source: File): AudioQuestionSubtitles? {
+        if (!preferences.questionSubtitles()) return null
+        check(preferences.enabled(SubtitleMethod.WHISPER)) { "请先在实验室开启 Whisper，或关闭音频提问同时生成字幕" }
+        val config = preferences.request()
+        val batched = preferences.batchedTranslation()
+        return object : AudioQuestionSubtitles {
+            override val cacheKey = digest(listOf(config.credentialId, config.credentialRevision.toString(),
+                config.endpointId, SubtitleEngine.VERSION).joinToString("\u0000"))
+            override fun isCurrent() = preferences.questionSubtitles() && preferences.enabled(SubtitleMethod.WHISPER) &&
+                runCatching { val current = preferences.request()
+                    current.credentialId == config.credentialId && current.credentialRevision == config.credentialRevision &&
+                        current.endpointId == config.endpointId && current.apiKey == config.apiKey &&
+                        current.model == config.model && current.apiProtocol == config.apiProtocol
+                }.getOrDefault(false)
+
+            override fun transcribe(cancellation: RequestCancellation): String {
+                val selected = CompletableFuture<Job>()
+                main.post {
+                    try {
+                        cancellation.throwIfCancelled()
+                        check(isCurrent()) { "字幕设置已改变，请重新发送问题" }
+                        val key = Key(snapshot.id, SubtitleMethod.WHISPER)
+                        val existing = jobs[key]
+                        val job = if (existing != null) {
+                            check(!existing.cancellation.isCancelled && existing.config == config) { "此录音的字幕任务正在结束或配置不同，请稍后重试" }
+                            existing
+                        } else enqueueJob(snapshot, source, SubtitleMethod.WHISPER, false, config,
+                            batchedTranslation = batched)
+                        selected.complete(job)
+                    } catch (error: Exception) { selected.completeExceptionally(error) }
+                }
+                val enabled = { preferences.questionSubtitles() && preferences.enabled(SubtitleMethod.WHISPER) }
+                val job = try { awaitSubtitleOriginal(selected, cancellation, enabled) }
+                catch (error: Exception) {
+                    selected.thenAccept { if (cancellation.isCancelled || Thread.currentThread().isInterrupted || !isCurrent()) it.cancellation.cancel() }
+                    throw error
+                }
+                return try { SubtitleQuestionTranscript.text(
+                    awaitSubtitleOriginal(job.original, cancellation) { enabled() && !job.cancellation.isCancelled }) }
+                catch (error: Exception) {
+                    if (cancellation.isCancelled || Thread.currentThread().isInterrupted || !isCurrent()) job.cancellation.cancel()
+                    throw error
+                }
+            }
+        }
     }
 
     fun cancel(owner: String, method: SubtitleMethod) {
@@ -165,6 +221,20 @@ internal class SubtitleController private constructor(private val context: Conte
                 checkpoint(job, bundle)
                 lastSaved = bundle
             }
+            checkCurrent(job)
+            checkCredential(job)
+            job.original.complete(bundle)
+            val original = bundle
+            translator.execute { translate(job, original) }
+        } catch (error: Exception) {
+            fail(job, lastSaved, error)
+        } finally { runCatching { job.input.close() } }
+    }
+
+    private fun translate(job: Job, original: SubtitleBundle) {
+        var bundle = original
+        var lastSaved = original
+        try {
             while (!bundle.bilingualComplete) {
                 checkCurrent(job)
                 checkCredential(job)
@@ -188,9 +258,16 @@ internal class SubtitleController private constructor(private val context: Conte
             checkCredential(job)
             synchronized(fileLock) { checkCurrent(job); archive.publish(job.key.owner, bundle) }
             finish(job, Record(published = bundle, status = "双语字幕已保存", loaded = true))
-        } catch (_: CancellationException) {
-            finish(job, recordForFailure(lastSaved, "制作已中断，可手动继续"))
         } catch (error: Exception) {
+            fail(job, lastSaved, error)
+        }
+    }
+
+    private fun fail(job: Job, lastSaved: SubtitleBundle?, error: Exception) {
+        job.original.completeExceptionally(error)
+        if (error is CancellationException) {
+            finish(job, recordForFailure(lastSaved, "制作已中断，可手动继续"))
+        } else {
             val message = when (error) {
                 is ProviderException -> error.message.orEmpty().take(180)
                 is IllegalArgumentException, is IllegalStateException -> error.message.orEmpty().take(180)
@@ -198,7 +275,7 @@ internal class SubtitleController private constructor(private val context: Conte
                 else -> "字幕制作失败，已保留成功步骤，请手动继续"
             }
             finish(job, recordForFailure(lastSaved, message))
-        } finally { runCatching { job.input.close() } }
+        }
     }
 
     private fun recordForFailure(bundle: SubtitleBundle?, error: String): Record = Record(

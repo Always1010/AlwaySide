@@ -20,6 +20,8 @@ internal class SubtitlePreferences(private val context: Context) {
     fun setEnabled(method: SubtitleMethod, enabled: Boolean) = save(enabledKey(method), enabled)
     fun batchedTranslation() = prefs.getBoolean(KEY_BATCHED_TRANSLATION, false)
     fun saveBatchedTranslation(enabled: Boolean) = save(KEY_BATCHED_TRANSLATION, enabled)
+    fun questionSubtitles() = prefs.getBoolean(KEY_QUESTION_SUBTITLES, false)
+    fun saveQuestionSubtitles(enabled: Boolean) = save(KEY_QUESTION_SUBTITLES, enabled)
     fun credentialId() = prefs.getString(KEY_CREDENTIAL, "").orEmpty()
     fun translationModel() = prefs.getString(KEY_MODEL, null) ?: recommendations().defaultModelId
     fun recommendations() = presets.recommendations(ProviderKind.OPENAI, ModelPurpose.ANSWER,
@@ -66,6 +68,7 @@ internal class SubtitlePreferences(private val context: Context) {
         const val KEY_MODEL = "translationModel"
         const val KEY_DISPLAY = "display"
         const val KEY_BATCHED_TRANSLATION = "batchedTranslation"
+        const val KEY_QUESTION_SUBTITLES = "questionSubtitles"
         fun enabledKey(method: SubtitleMethod) = "enabled.${method.id}"
     }
 }

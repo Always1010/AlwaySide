@@ -20,11 +20,13 @@ internal class ChatSession(
     private val changed: () -> Unit,
     private val credentialsCurrent: (AppConfig, Boolean, Boolean) -> Boolean = { _, _, _ -> true },
     private val saveHistoryAsync: ((StoredConversation, (Exception) -> Unit) -> Unit)? = null,
+    private val subtitleRequest: ((StoredConversation, File) -> AudioQuestionSubtitles?)? = null,
 ) {
     constructor(context: Context, changed: () -> Unit) : this(
         AiProvider(), androidDispatcher(), Executors.newSingleThreadExecutor(),
         HistoryStore(context)::save, changed,
         credentialValidator(context), HistoryStore(context)::saveAsync,
+        { snapshot, source -> SubtitleController.get(context).questionRequest(snapshot, source) },
     )
     private var observer: (() -> Unit)? = null
     private var closed = false
@@ -64,7 +66,8 @@ internal class ChatSession(
     }
     val canRetry get() = !busy && retry != null
     private data class Request(val config: AppConfig, val history: List<ChatMessage>, val question: String,
-        val image: Bitmap?, val evidence: String, val audio: File?, val transcript: String, val sourceText: String, val continuationCount: Int = 0, val continuationPrefix: String = "")
+        val image: Bitmap?, val evidence: String, val audio: File?, val transcript: String, val sourceText: String,
+        val subtitles: AudioQuestionSubtitles? = null, val continuationCount: Int = 0, val continuationPrefix: String = "")
 
     fun submit(config: AppConfig, text: String, image: Bitmap?, label: String, audio: File? = null,
                useDefaultAudioOutput: Boolean = true) {
@@ -72,27 +75,27 @@ internal class ChatSession(
         // A question entered by the user must also reach the response model for transcript/translation presets.
         val requestConfig = if (audio != null && !useDefaultAudioOutput) config.copy(audioOutput = "interpret") else config
         val effectiveQuestion = if (audio != null && requestConfig.audioOutput == "translate") AUDIO_TRANSLATION_QUESTION else text
+        val subtitles: AudioQuestionSubtitles?
         try {
             ChatPrompt.validateQuestion(effectiveQuestion)
+            subtitles = audio?.let { subtitleRequest?.invoke(snapshot().copy(kind = "audio"), it) }
             if (audio == null || requestConfig.audioOutput != "transcript") require(config.apiKey.isNotBlank()) { "请先为问答连接填写 API Key" }
-            if (audio != null) require(ProviderConnections.transcription(requestConfig).apiKey.isNotBlank()) { "请先为转写连接填写 API Key" }
+            if (audio != null && subtitles == null) require(ProviderConnections.transcription(requestConfig).apiKey.isNotBlank()) { "请先为转写连接填写 API Key" }
         } catch (error: Exception) {
             requestProviderLabel = ProviderCapabilities.label(requestConfig)
             reportSubmissionFailure(error)
             throw error
         }
-        val audioKey = audio?.let { audioKey(it, requestConfig) }
+        val audioKey = audio?.let { audioKey(it, requestConfig, subtitles) }
         val known = if (audioKey != null) {
             if (cachedAudio?.first == audioKey) cachedAudio!!.second else ""
         } else transcript
         if (audio != null) kind = "audio" else if (image != null) kind = "photo"
-        start(Request(requestConfig.copy(), messages.takeLast(24).toList(), effectiveQuestion, image, label, audio, known, sourceText))
+        start(Request(requestConfig.copy(), messages.takeLast(24).toList(), effectiveQuestion, image, label, audio, known, sourceText, subtitles))
     }
     val retryLabel: String get() = if (retry?.config?.continuationMessages?.isNotEmpty() == true) "继续生成" else "重试上次请求"
     fun retry() { if (!busy) retry?.let { request ->
-        val needsAnswer = request.audio == null || request.config.audioOutput != "transcript"
-        val needsAudio = request.audio != null && request.transcript.isEmpty()
-        if (!credentialsCurrent(request.config, needsAnswer, needsAudio)) {
+        if (!requestCredentialsCurrent(request)) {
             retry = null; phase = ChatRequestPhase.FAILED
             status = "连接或密钥已更新，请重新发送问题"
             notice = RequestNotice("连接或密钥已更新", status)
@@ -115,12 +118,12 @@ internal class ChatSession(
             try {
                 var words = request.transcript
                 if (request.audio != null && words.isEmpty()) {
-                    words = provider.transcribe(request.config, request.audio, cancel)
+                    words = request.subtitles?.transcribe(cancel) ?: provider.transcribe(request.config, request.audio, cancel)
                     cancel.throwIfCancelled()
                     val fixedWords = words
                     post {
                         if (epoch == token && busy) {
-                            cachedAudio = audioKey(request.audio, request.config) to fixedWords
+                            cachedAudio = audioKey(request.audio, request.config, request.subtitles) to fixedWords
                             transcript = fixedWords
                             retry = request.copy(transcript = fixedWords)
                             status = if (request.config.audioOutput == "transcript") "转写完成" else "转写完成，正在回答…"
@@ -178,8 +181,7 @@ internal class ChatSession(
                     cancellation = null
                     partial = accumulated.toString()
                     val pending = retry ?: request
-                    val valid = !cancelled(e) || credentialsCurrent(pending.config,
-                        pending.audio == null || pending.config.audioOutput != "transcript", pending.audio != null && pending.transcript.isEmpty())
+                    val valid = !cancelled(e) || requestCredentialsCurrent(pending)
                     if (!valid) retry = null
                     phase = if (valid && cancelled(e)) ChatRequestPhase.CANCELLED else ChatRequestPhase.FAILED
                     notice = if (!valid) RequestNotice("服务密钥已撤销或替换", "服务密钥已撤销或替换，请重新发送问题")
@@ -249,7 +251,14 @@ internal class ChatSession(
         }
     }
     fun close() { if (busy) cancel(); closed = true; epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
-    private fun audioKey(file: File, config: AppConfig): String {
+    private fun requestCredentialsCurrent(request: Request): Boolean {
+        val needsAudio = request.audio != null && request.transcript.isEmpty()
+        return credentialsCurrent(request.config, request.audio == null || request.config.audioOutput != "transcript",
+            needsAudio && request.subtitles == null) && (!needsAudio || request.subtitles?.isCurrent() != false)
+    }
+
+    private fun audioKey(file: File, config: AppConfig, subtitles: AudioQuestionSubtitles? = null): String {
+        if (subtitles != null) return "${file.absolutePath}:${file.length()}:${file.lastModified()}:subtitles:${subtitles.cacheKey}"
         val target = ProviderConnections.transcription(config)
         return "${file.absolutePath}:${file.length()}:${file.lastModified()}:${target.connectionId}:${target.endpointId}:${target.credentialId}:${target.baseUrl}:${target.apiProtocol}:${target.transcriptionModel}:${target.credentialRevision}:${target.transcriptionPrompt}:${target.transcriptionLanguage}"
     }
