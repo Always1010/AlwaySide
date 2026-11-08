@@ -112,26 +112,28 @@ internal object SubtitleWire {
         val segments = response["segments"] as? List<*> ?: invalid()
         if (segments.size > 10_000 || (segments.isEmpty() && text.isNotBlank())) invalid()
         val result = mutableListOf<SubtitleCue>()
-        var previousEnd = part.startMs
-        val durationSeconds = (part.endMs - part.startMs) / 1000.0
+        var previousStart = part.startMs
         for (raw in segments) {
             val segment = raw as? Map<*, *> ?: invalid()
             val words = segment["text"] as? String ?: invalid()
-            val start = (segment["start"] as? Number)?.toDouble() ?: invalid()
-            val end = (segment["end"] as? Number)?.toDouble() ?: invalid()
-            if (!start.isFinite() || !end.isFinite() || end <= start || words.length > ChatPrompt.MAX_TRANSCRIPT_CHARS) invalid()
-            if (start < -TIMESTAMP_TOLERANCE_SECONDS || end > durationSeconds + TIMESTAMP_TOLERANCE_SECONDS) invalid()
+            if (words.length > ChatPrompt.MAX_TRANSCRIPT_CHARS) invalid()
             val content = clean(words)
             if (content.length > MAX_CUE_CHARS) invalid()
+            // Empty decoder segments carry no subtitle, and can have zero or absent timestamps.
             if (content.isEmpty()) continue
-            // Clamp provider rounding at the edges and overlapping segment starts to the uploaded part.
-            val startMs = maxOf(previousEnd, part.startMs + (start * 1000).coerceIn(0.0,
-                (part.endMs - part.startMs).toDouble()).roundToLong())
+            val start = (segment["start"] as? Number)?.toDouble() ?: invalid()
+            val end = (segment["end"] as? Number)?.toDouble() ?: invalid()
+            if (!start.isFinite() || !end.isFinite() || end <= start) invalid()
+            if (start < -TIMESTAMP_TOLERANCE_SECONDS) invalid()
+            // Intersect provider times with actual uploaded PCM bounds. Do not shift overlapping
+            // speech to the previous cue's end: nested segments would collapse to zero duration.
+            val startMs = part.startMs + (start * 1000).coerceIn(0.0,
+                (part.endMs - part.startMs).toDouble()).roundToLong()
             val endMs = part.startMs + (end * 1000).coerceIn(0.0,
                 (part.endMs - part.startMs).toDouble()).roundToLong()
-            if (endMs <= startMs) invalid()
+            if (endMs <= startMs || startMs < previousStart) invalid()
             result += SubtitleCue(result.size + 1, startMs, endMs, content)
-            previousEnd = endMs
+            previousStart = startMs
         }
         if (result.isEmpty() && text.isNotBlank()) invalid()
         return result
