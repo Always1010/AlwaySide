@@ -229,7 +229,7 @@ internal class AssistantWindowViews(context: Context, title: String, image: Bool
         listOf(cancel,retry).forEach { requestState.addView(it,LinearLayout.LayoutParams(dp(36),dp(36))) }
         copy=compact(R.drawable.ic_copy,"复制最近回答",actions.copy)
         favorite=compact(R.drawable.ic_line_star,"收藏会话",actions.favorite).apply { setToggleCheckedStateOnClick(false) }
-        listOf(copy,favorite).forEach { contentActions.addView(it,LinearLayout.LayoutParams(dp(32),dp(36))) }
+        listOf(favorite,copy).forEach { contentActions.addView(it,LinearLayout.LayoutParams(dp(32),dp(36))) }
         sections.addView(controls,LinearLayout.LayoutParams(-1,dp(42)))
         composerSection.addView(View(this).apply { setBackgroundColor(BORDER) },LinearLayout.LayoutParams(-1,dp(1)))
         val composer=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(10),dp(8),dp(10),dp(9)) }
