@@ -24,6 +24,10 @@
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/AppTheme">
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.subtitles" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/subtitle_export_paths" />
+        </provider>
         <activity android:name=".CapturePermissionActivity" android:exported="false"
             android:taskAffinity="" android:excludeFromRecents="true" />
         <activity android:name=".ProcessTextActivity" android:exported="true" android:label="询问 AlwaySide">

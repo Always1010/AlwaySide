@@ -66,6 +66,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     var readingKey: String = ""; private set
     var mediaTitle: String = "原始音频"; private set
     var speed: Float = 1f; private set
+    var originalSpeed: Float = 1f; private set
     var playbackSession: Long = 0; private set
     private var readingSpeed = 1f
     val currentFile: File? get() = file
@@ -124,8 +125,9 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         PointReadingController.stopIfCreated()
         stop(releaseHosting = false)
         playbackSession++
-        speed = 1f
+        speed = originalSpeed
         conversationId = id
+        mediaTitle = HistoryStore(context).summary(id)?.title?.takeIf { it.isNotBlank() } ?: "原始音频"
         file = source
         publish(State(preparing = true, remaining = 1f))
         startOrResume()
@@ -149,6 +151,21 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         }
         publish(state)
         service?.updatePlayback()
+    }
+
+    fun setOriginalSpeed(value: Float) {
+        if (value !in listOf(.75f, 1f, 1.25f, 1.5f, 2f)) return
+        originalSpeed = value
+        if (readingKey.isNotEmpty()) return
+        val previous = speed
+        speed = value
+        runCatching {
+            if (player != null && !state.preparing) {
+                player?.playbackParams = android.media.PlaybackParams().setSpeed(speed).setPitch(1f)
+                if (!state.playing) player?.pause()
+            }
+        }.onFailure { speed = previous; originalSpeed = previous; toast("当前音频无法调整播放速度") }
+        refreshMediaControls()
     }
 
     fun toggle() {
@@ -207,7 +224,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
                 hasFocus = audioManager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
                 if (!hasFocus) { stop(); toast("暂时无法播放，请在其他音频结束后重试"); return }
             }
-            if (readingKey.isNotEmpty()) current.playbackParams = android.media.PlaybackParams().setSpeed(speed).setPitch(1f)
+            if (readingKey.isNotEmpty() || speed != 1f) current.playbackParams = android.media.PlaybackParams().setSpeed(speed).setPitch(1f)
             pendingSeek?.let { current.seekTo(it.coerceIn(0, duration).toLong(), MediaPlayer.SEEK_CLOSEST); pendingSeek = null }
             current.start()
             updatePosition(current, playing = true)
