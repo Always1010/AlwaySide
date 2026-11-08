@@ -8,7 +8,10 @@ import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.FrameLayout
 import com.google.android.material.checkbox.MaterialCheckBox
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 internal fun AssistantMenuAction.iconResource(recording: Boolean = false): Int = when (this) {
     AssistantMenuAction.SCREEN -> R.drawable.ic_line_scan
@@ -20,7 +23,34 @@ internal fun AssistantMenuAction.iconResource(recording: Boolean = false): Int =
     AssistantMenuAction.SETTINGS -> R.drawable.ic_line_settings
     AssistantMenuAction.STOP -> R.drawable.ic_line_power
     AssistantMenuAction.CANCEL_AUDIO -> R.drawable.ic_line_close
+    AssistantMenuAction.APPEARANCE -> R.drawable.ic_line_sliders
 }
+
+/** Layout and native hit testing share the same transform, including inside a ScrollView. */
+internal class AssistantMenuScaleLayout(context: Context, scale: Float) : FrameLayout(context) {
+    var contentScale = scale
+        set(value) { field = value; requestLayout() }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val child = getChildAt(0)
+        val width = View.MeasureSpec.getSize(widthMeasureSpec)
+        val baseWidth = (width / contentScale).roundToInt().coerceAtLeast(1)
+        child.measure(View.MeasureSpec.makeMeasureSpec(baseWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        setMeasuredDimension(resolveSize(width, widthMeasureSpec),
+            resolveSize(ceil(child.measuredHeight * contentScale).toInt(), heightMeasureSpec))
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        getChildAt(0).apply {
+            pivotX = 0f; pivotY = 0f; scaleX = contentScale; scaleY = contentScale
+            layout(0, 0, measuredWidth, measuredHeight)
+        }
+    }
+}
+
+internal fun MenuAppearance.panelColor(): Int =
+    ((backgroundColor ?: SURFACE) and 0x00FFFFFF) or (panelAlpha shl 24)
 
 /** Entire cell is the touch target; children form one accessible button. */
 internal class AssistantMenuTileView(context: Context, resource: Int, title: String,
@@ -87,17 +117,29 @@ internal class AssistantMenuOptionsViews(context: Context, webSearch: Boolean, u
 /** Same presentation for real overlays and local tutorials; callbacks supply every side effect. */
 internal class AssistantMenuViews(context: Context, recording: Boolean = false, hasClip: Boolean = false,
     webSearch: Boolean = false, useDefaultQuestion: Boolean = true, webSearchAvailable: Boolean = true,
-    items: List<AssistantMenuAction> = AssistantMenuAction.defaults, onCustomize: () -> Unit = {},
+    items: List<AssistantMenuAction> = AssistantMenuAction.defaults,
+    private var appearance: MenuAppearance = MenuAppearance(), private val displayScale: Float = 1f, onCustomize: () -> Unit = {},
     onWebSearchChanged: (Boolean) -> Unit = {}, onDefaultQuestionChanged: (Boolean) -> Unit = {},
     onAction: (AssistantMenuAction) -> Unit) {
-    val view = LinearLayout(context).apply {
+    private val content = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL; setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
-        background = card(SURFACE, context.dp(24).toFloat()); elevation = 0f; clipToOutline = true
+        background = card(appearance.panelColor(), context.dp(appearance.cornerRadiusDp).toFloat())
+        elevation = 0f; clipToOutline = true
         // Consume empty grid space instead of closing the overlay underneath it.
         isClickable = true
     }
+    val view = AssistantMenuScaleLayout(context, appearance.scale * displayScale).apply {
+        addView(content, FrameLayout.LayoutParams(-1, -2))
+    }
     val buttons = linkedMapOf<AssistantMenuAction, View>()
-    val preferredWidthDp = (252 * context.resources.configuration.fontScale.coerceAtLeast(1f)).toInt()
+    val preferredWidthDp: Int get() =
+        (252 * content.resources.configuration.fontScale.coerceAtLeast(1f) * appearance.scale * displayScale).roundToInt()
+
+    fun applyAppearance(next: MenuAppearance) {
+        appearance = next
+        content.background = card(next.panelColor(), content.context.dp(next.cornerRadiusDp).toFloat())
+        view.contentScale = next.scale * displayScale
+    }
     init { with(context) {
         val cells = items.distinct().map { action ->
             val title = if (action == AssistantMenuAction.AUDIO && recording) "结束录音" else action.title
@@ -119,13 +161,13 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
                 onAction(action)
             }.also { buttons[action] = it }
         }
-        view.addView(assistantMenuGrid(cells.ifEmpty {
+        content.addView(assistantMenuGrid(cells.ifEmpty {
             listOf(AssistantMenuTileView(this, R.drawable.ic_line_plus, "添加工具", onClick = onCustomize))
         }), LinearLayout.LayoutParams(-1, -2))
-        view.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)).apply {
+        content.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)).apply {
             setMargins(dp(8), dp(8), dp(8), dp(6))
         })
-        view.addView(AssistantMenuOptionsViews(this, webSearch, useDefaultQuestion, webSearchAvailable,
+        content.addView(AssistantMenuOptionsViews(this, webSearch, useDefaultQuestion, webSearchAvailable,
             onWebSearchChanged, onDefaultQuestionChanged).view, LinearLayout.LayoutParams(-1, -2))
     } }
 }

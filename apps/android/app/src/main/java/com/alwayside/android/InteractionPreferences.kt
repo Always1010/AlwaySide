@@ -39,6 +39,7 @@ internal data class InteractionConfig(
     val useDefaultQuestion: Boolean = true,
     val menuWebSearch: Boolean? = null,
     val menuItems: List<AssistantMenuAction> = AssistantMenuAction.defaults,
+    val menuAppearance: MenuAppearance = MenuAppearance(),
     val longPressSlide: Boolean = false,
     val longPressMillis: Int = 600,
     val slideDistanceDp: Int = 24,
@@ -95,6 +96,14 @@ internal class InteractionPreferences(private val context: Context) {
             useDefaultQuestion = prefs.getBoolean("useDefaultQuestion", d.useDefaultQuestion),
             menuWebSearch = if (prefs.contains("menuWebSearch")) prefs.getBoolean("menuWebSearch", false) else null,
             menuItems = AssistantMenuAction.decode(prefs.getString("menuItems", null)),
+            menuAppearance = MenuAppearance(
+                backgroundColor = if (prefs.contains("menuBackgroundColor")) prefs.getInt("menuBackgroundColor", 0) else null,
+                transparency = prefs.getInt("menuTransparency", 0).coerceIn(0, 100),
+                sizePercent = prefs.getInt("menuSizePercent", 100).coerceIn(30, 150),
+                blurStrength = prefs.getInt("menuBlurStrength", 25).coerceIn(0, 100),
+                dimPercent = if (prefs.contains("menuDimPercent")) prefs.getInt("menuDimPercent", 18).coerceIn(0, 100) else null,
+                cornerRadiusDp = prefs.getInt("menuCornerRadiusDp", 24).coerceIn(0, 100),
+            ),
             longPressSlide = prefs.getBoolean("longPressSlide", false),
             longPressMillis = prefs.getInt("longPressMillis", 600).coerceIn(400, 1500),
             slideDistanceDp = prefs.getInt("slideDistanceDp", d.slideDistanceDp).coerceIn(16, 40).let { it / 4 * 4 },
@@ -128,6 +137,16 @@ internal class InteractionPreferences(private val context: Context) {
             .putBoolean("imagePointReading", value.imagePointReading)
             .putBoolean("useDefaultQuestion", value.useDefaultQuestion)
             .putString("menuItems", AssistantMenuAction.encode(value.menuItems))
+            .putInt("menuTransparency", value.menuAppearance.transparency)
+            .putInt("menuSizePercent", value.menuAppearance.sizePercent)
+            .putInt("menuBlurStrength", value.menuAppearance.blurStrength)
+            .putInt("menuCornerRadiusDp", value.menuAppearance.cornerRadiusDp)
+        value.menuAppearance.backgroundColor.let { color ->
+            if (color == null) edit.remove("menuBackgroundColor") else edit.putInt("menuBackgroundColor", color)
+        }
+        value.menuAppearance.dimPercent.let { dim ->
+            if (dim == null) edit.remove("menuDimPercent") else edit.putInt("menuDimPercent", dim)
+        }
         for (recording in listOf(false, true)) for (gesture in BubbleGesture.entries) {
             val key = "binding_${recording}_${gesture.name}"
             val binding = value.resolvedBindings().firstOrNull { it.gesture == gesture && it.recording == recording }

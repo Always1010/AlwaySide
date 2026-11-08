@@ -47,6 +47,7 @@ internal class SettingsScreen(
         APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
         BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
         MENU("自定义菜单", "添加、移除与排列悬浮工具", R.drawable.ic_line_menu),
+        MENU_APPEARANCE("菜单外观", "背景、大小与背景效果", R.drawable.ic_line_sliders),
         GESTURES("快捷动作", "功能与手势绑定", android.R.drawable.ic_menu_directions),
         WINDOW("结果窗口", "窗口行为与自动提问", android.R.drawable.ic_menu_crop),
         MEDIA("历史与媒体", "历史上限、录音与媒体保留", android.R.drawable.ic_menu_recent_history),
@@ -83,6 +84,7 @@ internal class SettingsScreen(
     private var disposed = false
     private var serviceUi: ServiceSettingsUi? = null
     private var menuSettingsUi: MenuSettingsUi? = null
+    private var menuAppearanceUi: MenuAppearanceSettingsUi? = null
     private var serviceToolbar: MaterialToolbar? = null
     private val serviceEntry = initialPage?.takeIf { it in setOf("API", "ANSWER", "TRANSCRIPTION") } ?: "AI"
     private var renderedConnectionId: String? = null
@@ -168,6 +170,14 @@ internal class SettingsScreen(
                         .setPositiveButton("知道了", null).showTracked()
                 }
             }
+            if (next == Page.MENU_APPEARANCE) {
+                addIconAction(4204, R.drawable.ic_line_retry, "恢复默认外观") { menuAppearanceUi?.reset() }
+                addIconAction(4205, R.drawable.ic_line_info, "菜单外观说明") {
+                    MaterialAlertDialogBuilder(this@SettingsScreen).setTitle("菜单外观")
+                        .setMessage("拖动滑块实时预览，松手保存。点击数值可直接输入。\n\n面板透明度只改变底色；0% 为实心，100% 为全透明。菜单大小以当前默认效果为 100%。\n\n背景模糊强度为 0 时关闭模糊；实际效果取决于系统支持。自动压暗会根据模糊是否可用调整，也可单独手动设置。\n\n可在自定义菜单中添加“外观设置”工具。恢复默认外观不会改变工具排列或提问选项。")
+                        .setPositiveButton("知道了", null).showTracked()
+                }
+            }
             if (next == Page.PROMPTS) {
                 addIconAction(4201, android.R.drawable.ic_menu_agenda, "模板") { finishEditing { showTemplateActions() } }
                     .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
@@ -213,6 +223,12 @@ internal class SettingsScreen(
             Page.APPEARANCE -> appearancePage()
             Page.BALL -> ballPage(interaction)
             Page.MENU -> menuPage(config, interaction)
+            Page.MENU_APPEARANCE -> {
+                menuAppearanceUi = MenuAppearanceSettingsUi(this,
+                    interaction.copy(menuWebSearch = interaction.menuWebSearch ?: config.webSearch),
+                    save = { value -> persistInteraction { it.copy(menuAppearance = value) } },
+                    showDialog = { it.showTracked() }, onCustomize = { showPage(Page.MENU) })
+            }
             Page.GESTURES -> gesturePage(interaction)
             Page.WINDOW -> windowPage(config, interaction)
             Page.MEDIA -> mediaPage(interaction)
@@ -223,9 +239,10 @@ internal class SettingsScreen(
                 action("准备实际使用") { finishEditing(onPreparation) }.apply { applyOnboardingPrimaryStyle() }
             }
         }
-        root.addView(ScrollView(this).apply {
+        val content = if (next == Page.MENU_APPEARANCE) menuAppearanceUi!!.view else ScrollView(this).apply {
             isFillViewport = true; isSaveEnabled = false; clipToPadding = false; addView(body)
-        }, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         currentRoot = root
         onContent(root)
     }
@@ -855,6 +872,7 @@ internal class SettingsScreen(
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
     private fun clearDraft() {
+        menuAppearanceUi?.dispose(); menuAppearanceUi = null
         menuSettingsUi?.dispose(); menuSettingsUi = null
         closeEditor?.invoke(); activeEdit = null; closeEditor = null
         fieldOpeners.clear()

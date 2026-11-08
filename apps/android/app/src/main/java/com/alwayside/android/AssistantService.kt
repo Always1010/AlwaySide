@@ -595,7 +595,7 @@ class AssistantService : Service() {
         val presentation = AssistantMenuViews(uiContext,recorder != null,nodes["audio"]?.clip != null,
             webSearch=config.menuWebSearch ?: defaultSearch,useDefaultQuestion=config.useDefaultQuestion,
             webSearchAvailable=menuApi?.let(ProviderCapabilities::search) ?: false,
-            items=config.menuItems,
+            items=config.menuItems,appearance=config.menuAppearance,
             onCustomize={
                 removeMenu();hideUnpinned()
                 startActivity(AppEntry.intent(this,AppPage.SETTINGS,settingsPage="MENU").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -612,6 +612,10 @@ class AssistantService : Service() {
                 AssistantMenuAction.PLAY -> playClip()
                 AssistantMenuAction.HISTORY -> openApplication(AppPage.HISTORY)
                 AssistantMenuAction.SETTINGS -> openApplication(AppPage.SETTINGS)
+                AssistantMenuAction.APPEARANCE -> {
+                    hideUnpinned()
+                    startActivity(AppEntry.intent(this,AppPage.SETTINGS,settingsPage="MENU_APPEARANCE").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
                 AssistantMenuAction.STOP -> AssistantControl.stop(this)
             }
         }
@@ -625,17 +629,21 @@ class AssistantService : Service() {
         val menuY=((ball?.y ?: dp(120))-dp(50)).coerceIn(dp(8),(size.second-h-dp(60)).coerceAtLeast(dp(8)))
         body.addView(ScrollView(uiContext).apply {
             isVerticalScrollBarEnabled=false;isFillViewport=true;addView(items)
-            background=card(SURFACE,dp(24).toFloat());clipToOutline=true;elevation=0f
+            background=card(android.graphics.Color.TRANSPARENT,dp(config.menuAppearance.cornerRadiusDp)*config.menuAppearance.scale)
+            clipToOutline=true;elevation=0f
         },FrameLayout.LayoutParams(w,h,Gravity.TOP or Gravity.START).apply { leftMargin=menuX;topMargin=menuY })
         val layout=params(-1,-1,true).apply {
             flags=flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
             softInputMode=WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         }
         fun updateBackdrop(blur:Boolean) {
-            layout.dimAmount=if(blur).18f else .32f
+            val appearance=config.menuAppearance
+            val effectiveBlur=blur && appearance.blurStrength>0
+            layout.dimAmount=appearance.effectiveDimPercent(blur)/100f
             if(Build.VERSION.SDK_INT>=31) {
-                layout.flags=layout.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
-                layout.setBlurBehindRadius(if(blur)dp(16) else 0)
+                layout.flags=if(effectiveBlur)layout.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+                    else layout.flags and WindowManager.LayoutParams.FLAG_BLUR_BEHIND.inv()
+                layout.setBlurBehindRadius(if(effectiveBlur)(appearance.blurRadiusDp*resources.displayMetrics.density).toInt().coerceAtLeast(1) else 0)
             }
             if(menu===body)runCatching { windows.updateViewLayout(body,layout) }
         }
