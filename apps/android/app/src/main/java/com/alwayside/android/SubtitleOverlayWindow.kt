@@ -117,8 +117,8 @@ internal class SubtitleOverlayWindow(
             body.text = text; previousText = text
             scroll.scrollTo(0, 0)
         }
-        // Silence clears the previous cue; do not display stale text across gaps.
-        root.visibility = if (text.isEmpty()) View.INVISIBLE else View.VISIBLE
+        // Keep controls available through pauses and silence; only the caption text changes.
+        root.visibility = View.VISIBLE
         chinese.isChecked = mode != SubtitleDisplay.ENGLISH
         english.isChecked = mode != SubtitleDisplay.CHINESE
         chinese.setTextColor(if (chinese.isChecked) ACCENT else MUTED)

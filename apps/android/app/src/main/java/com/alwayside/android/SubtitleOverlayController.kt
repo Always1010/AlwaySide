@@ -19,6 +19,10 @@ internal class SubtitleOverlayController private constructor(private val context
     private val playback get() = ChatAudioPlayback.get(context)
     private val interaction = InteractionPreferences(context)
     private val preferences by lazy { SubtitleOverlayPreferences(context) }
+    private val reading = SubtitleReadingPreferences(context)
+    private var sourceBundle: SubtitleBundle? = null
+    private var readingBundle: SubtitleBundle? = null
+    private var segmentation: SubtitleSegmentation? = null
     private val subtitles = SubtitleController.get(context)
     private val state = SubtitleOverlayState()
     private var enabled = interaction.load().backgroundPlaybackSubtitles
@@ -29,6 +33,7 @@ internal class SubtitleOverlayController private constructor(private val context
     private var window: SubtitleOverlayWindow? = null
     private val panels = mutableMapOf<Any, Pair<Activity, String>>()
     private val observer: () -> Unit = { sync() }
+    private val readingListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> sync() }
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "backgroundPlaybackSubtitles") {
             enabled = interaction.load().backgroundPlaybackSubtitles
@@ -52,6 +57,7 @@ internal class SubtitleOverlayController private constructor(private val context
     }
 
     init {
+        reading.addListener(readingListener)
         interaction.addListener(settingsListener)
         AppAppearance.addListener(context, appearanceListener)
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF).apply {
@@ -110,8 +116,14 @@ internal class SubtitleOverlayController private constructor(private val context
                 onClose = { state.dismiss(); hide() },
                 onOpen = { openPanel() }, onPlayback = { player.toggle() },
                 onChanged = { sync() }, onUnavailable = { unavailable() }).also { window = it; it.show() }
-            val current = requireNotNull(bundle)
-            shown.render(SubtitleOverlayState.text(current, SubtitleTimeline.activeIndex(current.cues, player.position.toLong()),
+            val currentSource = requireNotNull(bundle)
+            val selected = reading.segmentation()
+            if (sourceBundle !== currentSource || segmentation != selected) {
+                sourceBundle = currentSource; segmentation = selected
+                readingBundle = SubtitleReading.project(currentSource, selected)
+            }
+            val current = requireNotNull(readingBundle)
+            shown.render(SubtitleOverlayState.text(current, SubtitleReading.activeIndex(current.cues, player.position.toLong(), player.currentState.playing),
                 preferences.mode()), preferences.mode(), player.currentState.playing, player.position, player.duration)
         } catch (_: RuntimeException) { unavailable() }
     }
