@@ -36,6 +36,7 @@ internal class AudioPlaybackService : Service() {
                 override fun onStop() { playback.stop() }
                 override fun onCustomAction(action: String, extras: Bundle?) {
                     if (action == STOP) playback.stop()
+                    if (action == SUBTITLES) SubtitleOverlayController.toggle(this@AudioPlaybackService)
                 }
             })
             setSessionActivity(openConversation())
@@ -52,6 +53,7 @@ internal class AudioPlaybackService : Service() {
             PAUSE -> playback.pause()
             PLAY -> playback.resume()
             STOP -> playback.stop()
+            SUBTITLES -> SubtitleOverlayController.toggle(this)
         }
         if (playback.conversationId != null) updatePlayback()
         if (!playback.currentState.playing && !playback.currentState.preparing) pauseHosting()
@@ -73,6 +75,10 @@ internal class AudioPlaybackService : Service() {
             PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
                 PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP)
             .addCustomAction(STOP, "停止", R.drawable.ic_line_stop)
+            .apply {
+                if (SubtitleOverlayController.available(this@AudioPlaybackService))
+                    addCustomAction(SUBTITLES, subtitleActionTitle(), R.drawable.ic_line_subtitles)
+            }
             .setState(status, playback.position.toLong(), if (state.playing) playback.speed else 0f).build())
         if (playback.conversationId != null)
             getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
@@ -119,9 +125,17 @@ internal class AudioPlaybackService : Service() {
             .addAction(Notification.Action.Builder(
                 if (pause) R.drawable.ic_line_pause else R.drawable.ic_line_play,
                 if (pause) "暂停" else "播放", command(if (pause) PAUSE else PLAY)).build())
+            .apply {
+                if (SubtitleOverlayController.available(this@AudioPlaybackService))
+                    addAction(Notification.Action.Builder(R.drawable.ic_line_subtitles,
+                        subtitleActionTitle(), command(SUBTITLES)).build())
+            }
             .addAction(Notification.Action.Builder(R.drawable.ic_line_stop, "停止", command(STOP)).build())
             .setDeleteIntent(command(STOP))
-            .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(0, 1))
+            .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).apply {
+                if (SubtitleOverlayController.available(this@AudioPlaybackService)) setShowActionsInCompactView(0, 1, 2)
+                else setShowActionsInCompactView(0, 1)
+            })
             .apply { if (Build.VERSION.SDK_INT >= 31) setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE) }
             .build()
     }
@@ -129,6 +143,8 @@ internal class AudioPlaybackService : Service() {
     private fun command(action: String): PendingIntent = PendingIntent.getForegroundService(this, 0,
         Intent(this, AudioPlaybackService::class.java).setAction(action),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    private fun subtitleActionTitle() = if (SubtitleOverlayController.showing(this)) "隐藏字幕" else "显示字幕"
 
     private fun openConversation(): PendingIntent = PendingIntent.getActivity(this, 0,
         Intent(this, MainActivity::class.java).setAction(OPEN)
@@ -141,6 +157,7 @@ internal class AudioPlaybackService : Service() {
         private const val PLAY = "com.alwayside.android.audio.PLAY"
         private const val PAUSE = "com.alwayside.android.audio.PAUSE"
         private const val STOP = "com.alwayside.android.audio.STOP"
+        private const val SUBTITLES = "com.alwayside.android.audio.SUBTITLES"
         private const val OPEN = "com.alwayside.android.audio.OPEN"
 
         fun takeEntry(intent: Intent, context: android.content.Context): AppEntry.Request? {

@@ -132,6 +132,8 @@ internal class SubtitlePanel(
         dialog = null
     }
 
+    fun dismissForOverlay() { dialog?.dismiss() }
+
     private fun render() {
         if (!attached) return
         val record = controller.record(owner, method)

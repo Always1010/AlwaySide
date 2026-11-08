@@ -211,6 +211,9 @@ internal class ChatScreen(
                 icon = playbackIcon; isVisible = false
             }
             addIconAction(8, R.drawable.ic_line_subtitles, "音频字幕") { showSubtitles() }.isVisible = false
+            addIconAction(9, R.drawable.ic_line_floating_subtitles, "显示后台字幕") {
+                SubtitleOverlayController.toggle(activity)
+            }.isVisible = false
             addOverflowIconAction(5, R.drawable.ic_line_tag, "设置会话标签") {
                 if (ready && favorite) collectionTags.editTags(listOf(session.conversationId))
             }.apply {
@@ -690,6 +693,11 @@ internal class ChatScreen(
 
     private fun updatePlayback(state: ChatAudioPlayback.State) {
         playbackIcon.update(state)
+        toolbar.menu.findItem(9)?.apply {
+            isVisible = session.kind == "audio" && SubtitleOverlayController.available(activity, session.conversationId)
+            val label = if (SubtitleOverlayController.showing(activity)) "隐藏后台字幕" else "显示后台字幕"
+            title = label; contentDescription = label; tooltipText = label
+        }
         toolbar.menu.findItem(3)?.apply {
             val enabled = !state.preparing
             if (isEnabled != enabled) isEnabled = enabled

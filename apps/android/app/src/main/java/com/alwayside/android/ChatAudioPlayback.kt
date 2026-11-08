@@ -84,6 +84,11 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     val position: Int get() = runCatching { player?.currentPosition ?: 0 }.getOrDefault(0)
     val currentState: State get() = state
 
+    fun refreshMediaControls() {
+        observers.toList().forEach { it() }
+        service?.updatePlayback()
+    }
+
     init {
         preferences.addListener(preferenceListener)
         val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY).apply { addAction(Intent.ACTION_SCREEN_OFF) }
