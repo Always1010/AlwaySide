@@ -122,8 +122,10 @@ class MainActivity : ThemedActivity() {
         syncPreview()
         if(container.childCount != 1 || container.getChildAt(0) !== view) {
             hideKeyboard()
-            (view.parent as? ViewGroup)?.removeView(view)
-            container.removeAllViews(); container.addView(view,FrameLayout.LayoutParams(-1,-1))
+            ChatAudioPlayback.handoffVisibility {
+                (view.parent as? ViewGroup)?.removeView(view)
+                container.removeAllViews(); container.addView(view,FrameLayout.LayoutParams(-1,-1))
+            }
         }
         updateBackCallback()
     }
@@ -165,9 +167,11 @@ class MainActivity : ThemedActivity() {
         when(navigation.back(settingsAtRoot=settingsScreen?.isHome ?: true)) {
             AppBack.SETTINGS_CATEGORY -> settingsScreen?.back()
             AppBack.PAGE -> {
-                if("SETTINGS" !in navigation.snapshot()) { settingsScreen?.dispose();settingsScreen=null;pendingSettings=null }
-                if(!navigation.hasChat) { chatScreen?.dispose();chatScreen=null;discardPendingChat() }
-                showCurrent()
+                ChatAudioPlayback.handoffVisibility {
+                    if("SETTINGS" !in navigation.snapshot()) { settingsScreen?.dispose();settingsScreen=null;pendingSettings=null }
+                    if(!navigation.hasChat) { chatScreen?.dispose();chatScreen=null;discardPendingChat() }
+                    showCurrent()
+                }
             }
             AppBack.EXIT -> finish()
         }
@@ -195,10 +199,12 @@ class MainActivity : ThemedActivity() {
     }
 
     private fun openHistory(): Unit = leaveSettings {
-        historyScreen?.prepareToLeave()
-        hideKeyboard();chatScreen?.dispose();chatScreen=null
-        discardPendingChat()
-        navigation.openHistory();showCurrent()
+        ChatAudioPlayback.handoffVisibility {
+            historyScreen?.prepareToLeave()
+            hideKeyboard();chatScreen?.dispose();chatScreen=null
+            discardPendingChat()
+            navigation.openHistory();showCurrent()
+        }
     }
 
     private fun openSettings(page: String? = null) {
@@ -451,6 +457,7 @@ class MainActivity : ThemedActivity() {
     override fun onStart() {
         super.onStart()
         chatScreen?.setPlaybackForeground(true)
+        historyScreen?.setPlaybackForeground(true)
         previewForeground = true
         syncPreview(); showSlidePreview()
         ProbeState.addServiceListener(assistantStateListener)
@@ -459,6 +466,7 @@ class MainActivity : ThemedActivity() {
 
     override fun onStop() {
         if (!isChangingConfigurations) chatScreen?.setPlaybackForeground(false)
+        if (!isChangingConfigurations) historyScreen?.setPlaybackForeground(false)
         previewForeground = false
         dismissSlidePreview(clearLesson = false)
         previewEntryDialog?.dismiss(); previewEntryDialog = null

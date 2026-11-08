@@ -54,6 +54,11 @@ internal class HistoryListScreen(
 ) {
     private val store = HistoryStore(activity)
     private val media = ConversationMediaStore(activity)
+    private val playback = ChatAudioPlayback.get(activity)
+    private data class AudioControls(val title: String, val button: MaterialButton, val icon: AudioPlaybackIcon)
+    private val playbackButtons = mutableMapOf<String, AudioControls>()
+    private var playbackForeground = true
+    private val playbackObserver: () -> Unit = { updatePlaybackButtons() }
     private val selection = HistorySelection(initialSelection, initialSelecting)
     private var values = emptyList<StoredConversation>()
     private var visibleValues = emptyList<StoredConversation>()
@@ -195,6 +200,14 @@ internal class HistoryListScreen(
     fun dispose() {
         disposed = true
         cancelRead()
+        playback.removeObserver(playbackObserver)
+        playbackButtons.clear()
+        playback.setLibraryVisible(this, false, retaining = activity.isChangingConfigurations)
+    }
+
+    fun setPlaybackForeground(foreground: Boolean) {
+        playbackForeground = foreground
+        playback.setLibraryVisible(this, foreground && scrollView.isAttachedToWindow && !disposed)
     }
 
     private fun cancelRead() {
@@ -202,6 +215,16 @@ internal class HistoryListScreen(
     }
 
     init {
+        scrollView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                setPlaybackForeground(playbackForeground)
+                playback.addObserver(playbackObserver)
+            }
+            override fun onViewDetachedFromWindow(view: View) {
+                playback.removeObserver(playbackObserver)
+                playback.setLibraryVisible(this@HistoryListScreen, false, retaining = activity.isChangingConfigurations)
+            }
+        })
         scrollView.setOnScrollChangeListener { _: View, _: Int, y: Int, _: Int, oldY: Int ->
             if (y != oldY) closeSwipe()
         }
@@ -379,6 +402,7 @@ internal class HistoryListScreen(
 
     private fun render() {
         closeSwipe()
+        playbackButtons.clear()
         val targetY = pendingScrollY ?: scrollView.scrollY
         if (!loading) pendingScrollY = null
         val visible = visibleValues
@@ -540,7 +564,22 @@ internal class HistoryListScreen(
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             setPadding(0, 0, 0, 0); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
         }, LinearLayout.LayoutParams(activity.dp(28), activity.dp(28)).apply { marginEnd = activity.dp(8) })
-        else entry.addView(ImageView(activity).apply {
+        else if (value.kind == "audio" && (playback.fileFor(value.id) ?: media.loadAudio(value.id)) != null) {
+            val drawable = AudioPlaybackIcon(activity)
+            val button = activity.iconButton(R.drawable.ic_line_play, "播放录音：$title") {
+                if (!closeSwipe() && !dismissedSwipeOnTouch) toggleAudio(value.id)
+            }.apply {
+                icon = drawable; iconSize = activity.dp(32)
+                iconTint = ColorStateList.valueOf(ACCENT)
+                isCheckable = false
+            }
+            val controls = AudioControls(title, button, drawable)
+            playbackButtons[value.id] = controls
+            updatePlaybackButton(value.id, controls)
+            entry.addView(button, LinearLayout.LayoutParams(activity.dp(48), activity.dp(48)).apply {
+                marginStart = -activity.dp(12); marginEnd = activity.dp(4)
+            })
+        } else entry.addView(ImageView(activity).apply {
             setImageDrawable(activity.prototypeIcon(when (kind) {
                 "音频" -> android.R.drawable.ic_btn_speak_now
                 "截图" -> android.R.drawable.ic_menu_camera
@@ -605,6 +644,38 @@ internal class HistoryListScreen(
             ViewCompat.addAccessibilityAction(card, "删除会话") { _, _ -> confirmDeletion(listOf(value.id)); true }
         }
         rows.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = activity.dp(8) })
+    }
+
+    private fun toggleAudio(id: String) {
+        if (playback.isActive(id) && playback.readingKey.isEmpty()) {
+            playback.toggle()
+            return
+        }
+        val source = media.loadAudio(id)
+        if (source == null) {
+            Toast.makeText(activity, "原始录音已不可用", Toast.LENGTH_SHORT).show()
+            refresh()
+            return
+        }
+        playback.play(id, source)
+    }
+
+    private fun updatePlaybackButtons() {
+        playbackButtons.forEach { (id, controls) -> updatePlaybackButton(id, controls) }
+    }
+
+    private fun updatePlaybackButton(id: String, controls: AudioControls) {
+        val state = playback.stateFor(id)
+        val button = controls.button
+        controls.icon.update(state)
+        button.isEnabled = !state.preparing
+        val title = controls.title
+        val description = when {
+            state.preparing -> "正在准备录音：$title"
+            state.playing -> "暂停录音：$title"
+            else -> "播放录音：$title"
+        }
+        if (button.contentDescription != description) button.accessible(description)
     }
 
     private fun navigate(favorites: Boolean, tag: String? = null, untagged: Boolean = false) {

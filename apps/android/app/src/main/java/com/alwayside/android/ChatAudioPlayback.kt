@@ -111,12 +111,18 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     fun stateFor(id: String): State = if (conversationId == id && readingKey.isEmpty()) state else State()
     fun isActive(id: String): Boolean = conversationId == id
     fun fileFor(id: String): File? = file?.takeIf { conversationId == id && readingKey.isEmpty() && it.isFile }
-    fun mayPlay(id: String): Boolean = !visibility.shouldStop(id)
+    fun mayPlay(id: String): Boolean = !visibility.shouldStop(id, allowLibrary = false)
     fun addObserver(observer: () -> Unit) { observers.add(observer); observer() }
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
 
     fun setVisible(owner: Any, id: String?, visible: Boolean, retaining: Boolean = false) {
         visibility.update(owner, id, visible)
+        if (!retaining && visibility.shouldStop(conversationId)) stop()
+        if (!retaining) PointReadingController.hiddenIfCreated()
+    }
+
+    fun setLibraryVisible(owner: Any, visible: Boolean, retaining: Boolean = false) {
+        visibility.updateLibrary(owner, visible)
         if (!retaining && visibility.shouldStop(conversationId)) stop()
         if (!retaining) PointReadingController.hiddenIfCreated()
     }
@@ -335,6 +341,15 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     companion object {
         @Volatile private var instance: ChatAudioPlayback? = null
         fun get(context: Context): ChatAudioPlayback = instance ?: ChatAudioPlayback(context.applicationContext).also { instance = it }
+
+        fun handoffVisibility(action: () -> Unit) {
+            val current = instance
+            if (current == null) { action(); return }
+            try { current.visibility.handoff(action) } finally {
+                if (current.visibility.shouldStop(current.conversationId)) current.stop()
+                PointReadingController.hiddenIfCreated()
+            }
+        }
 
         fun isUsingFile(file: File): Boolean = instance?.file?.absolutePath == file.absolutePath
 
