@@ -324,7 +324,7 @@ internal class HistoryListScreen(
     private fun favoriteConversation(value: StoredConversation) {
         closeSwipe()
         runCatching { store.setFavorite(value.id, !value.isFavorite) }.onSuccess {
-            Toast.makeText(activity, if (value.isFavorite) "已取消收藏，重新加入普通历史保留队列" else "已收藏", Toast.LENGTH_SHORT).show()
+            Toast.makeText(activity, if (value.isFavorite) "已取消收藏" else "已收藏", Toast.LENGTH_SHORT).show()
             refresh()
         }.onFailure { failed() }
     }
@@ -439,7 +439,7 @@ internal class HistoryListScreen(
                 if (failures.isEmpty()) selection.cancel()
                 refresh(); onSelectionChanged()
                 if (failures.isNotEmpty()) failed() else if (allFavorites) Toast.makeText(activity,
-                    "已取消收藏，重新加入普通历史保留队列", Toast.LENGTH_SHORT).show()
+                    "已取消收藏", Toast.LENGTH_SHORT).show()
             }
             action(R.drawable.ic_line_tag, if (allFavorites) "设置会话标签" else "收藏并设置标签") {
                 tagDialogs.editTags(selection.snapshot(), collectMissing = !allFavorites) {

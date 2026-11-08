@@ -80,7 +80,7 @@ internal class LaboratorySettingsUi(
         readingToggle("聊天点读", config.chatPointReading,
             "长按选中文字，在选择菜单中点「点读」。成功保存后，原文留下淡色虚线标记，单击标记可重播，长按仍可选择和复制。消息旁的扬声器可查看点读片段。\n\n相同文字与朗读配置可跨对话复用音频。首次生成会将所选文字发送到语音服务，可能收费；语音由 AI 合成。旧标记保留原音色，音频清理后需主动重新生成。关闭点读会停止朗读，保留音频与标记。") { value, enabled -> value.copy(chatPointReading = enabled) }
         readingToggle("图片点读", config.imagePointReading,
-            "默认关闭。开启后，可从截图预览进入图片点读，框选文字并主动识别，确认文字后朗读。普通看图手势不变。\n\n识别会把所选图片区域发送给当前图文问答服务，可能收费；不会修改翻译提示词或聊天记录。识别可能有误，请先核对。关闭会退出图片点读，保留已存音频。") { value, enabled -> value.copy(imagePointReading = enabled) }
+            "开启后，从截图预览进入图片点读，框选并识别文字，核对后朗读。\n\n识别会将所选图片区域发送到当前图文问答服务，朗读会将确认的文字发送到语音服务，可能收费；语音由 AI 合成。识别结果可能有误，请先核对。关闭图片点读会退出，保留已存音频。") { value, enabled -> value.copy(imagePointReading = enabled) }
         content.addView(settingsListGroup(readingRows), LinearLayout.LayoutParams(-1, -2))
         if (config.chatPointReading || config.imagePointReading)
             ReadingSettingsUi(context, content, showDialog, showChoiceSheet).render()
@@ -94,7 +94,7 @@ internal class LaboratorySettingsUi(
 
     private fun showHelp() {
         val dialog = showDialog(MaterialAlertDialogBuilder(context).setTitle("长按滑动（实验功能）")
-            .setMessage("此功能仍在试用，交互可能调整。可随时关闭，恢复普通长按。\n\n开启后，按住悬浮球等待动作圆展开，向上、向下或向屏幕内侧滑动预选，松手执行。未滑出时原地松手执行长按；滑出后回到中心松手取消。持续按住不会自动执行。普通拖动仍用于移动悬浮球。\n\n滑动距离决定预选门槛，不必拖到动作圆中心。动作圆大小独立于悬浮球大小。系统无障碍长按时间更长时，以系统设置为准。\n\n方向默认未分配，松手不执行；开启后到「设置 → 快捷动作」绑定方向手势。关闭后保留已有绑定。")
+            .setMessage("开启后，到「设置 → 快捷动作」绑定方向手势。\n\n按住悬浮球，等待动作圆展开，向上、向下或向屏幕内侧滑动选择动作，松手执行。原地松手执行长按动作；滑出后回到中心松手取消。未绑定的方向不执行动作。\n\n可在本页调整长按等待、滑动距离与动作圆大小，关闭后恢复普通长按。")
             .setNegativeButton("关闭", null).setPositiveButton("体验", null))
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { dialog.dismiss(); onTutorial() }
     }

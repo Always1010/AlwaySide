@@ -20,7 +20,7 @@ internal class SubtitleSettingsUi(private val context: Context, private val pare
         val group = rows ?: LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             this@SubtitleSettingsUi.parent.addView(settingsSectionHeader("音频字幕", help = "音频字幕说明", onHelp = {
-                help("音频字幕（实验功能）", "Whisper 默认关闭。开启后，在录音回听面板主动制作字幕；不会自动处理已有或新录音。\n\nWhisper 转写音频并返回片段时间戳，再由所选文本模型翻译。原文和译文分别保存为 SRT，可在回听中切换双语、中文、英文或关闭。\n\n仅复用 API 管理中已有的 OpenAI 官方 Key，地址须为 https://api.openai.com/v1。生成时会将所选录音及转写文字发送给 OpenAI，可能收费。翻译模型独立于日常问答配置；保存设置和播放已生成字幕不联网。\n\n关闭 Whisper 会取消生成任务，保留已生成字幕。whisper-1 已公告于 2027-02-26 停用，届时可能无法继续制作新字幕。")
+                help("音频字幕（实验功能）", "开启后，在录音回听面板点击制作字幕，生成原文和中文字幕。可切换双语、中文、英文或关闭显示。\n\n需选择 API 管理中使用官方地址的 OpenAI Key。制作时会将录音及转写文字发送到 OpenAI，可能收费；播放已有字幕不联网。\n\n关闭功能会取消制作，保留已有字幕。")
             }), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); bottomMargin = dp(8) })
             this@SubtitleSettingsUi.parent.addView(settingsListGroup(this), LinearLayout.LayoutParams(-1, -2))
             rows = this
@@ -31,7 +31,7 @@ internal class SubtitleSettingsUi(private val context: Context, private val pare
                 gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(4), dp(8), dp(4))
                 addView(label(method.title, 16f), LinearLayout.LayoutParams(0, -2, 1f))
                 addView(iconButton(R.drawable.ic_line_info, "查看${method.title}说明") {
-                    help(method.title, "使用 whisper-1 返回的片段时间戳，再由所选文本模型翻译。不提供逐词高亮。whisper-1 已公告于 2027-02-26 停用。\n\n默认关闭。开启后需在录音回听中主动生成。录音和文字将发送至 OpenAI，可能收费。关闭会取消生成任务并保留已生成结果。")
+                    help(method.title, "为录音生成原文和中文字幕，按段显示，不提供逐词高亮。开启后需在录音回听中点击制作，不会自动上传录音。\n\n录音和转写文字会发送到 OpenAI，可能收费。关闭会取消制作，保留已有字幕。\n\nwhisper-1 已公告于 2027-02-26 停用，届时可能无法制作新字幕。")
                 })
                 addView(MaterialSwitch(this@with).apply {
                     isSaveEnabled = false; isChecked = preferences.enabled(method); contentDescription = method.title

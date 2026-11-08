@@ -224,8 +224,8 @@ internal class ChatSession(
         evidence = "未附媒体"
         status = when {
             saved == null -> "新会话"
-            transcript.isNotBlank() -> "已恢复对话与原始转写；追问复用转写文字"
-            sourceText.isNotBlank() -> "已恢复对话与选中文字；追问复用原文资料"
+            transcript.isNotBlank() -> "已恢复对话，后续提问使用转写文字"
+            sourceText.isNotBlank() -> "已恢复对话，后续提问使用所选原文"
             else -> "已恢复文字记录；追问时请选择图片上下文方式"
         }
         notifyChanged()

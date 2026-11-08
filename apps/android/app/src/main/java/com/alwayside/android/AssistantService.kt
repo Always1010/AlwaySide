@@ -857,7 +857,7 @@ class AssistantService : Service() {
             node.isFavorite=favorite
         }.onSuccess {
             updateFavorite(node)
-            toast(if(node.isFavorite)"已收藏" else "已取消收藏，重新加入普通历史保留队列")
+            toast(if(node.isFavorite)"已收藏" else "已取消收藏")
         }.onFailure { toast(it.message?.take(120) ?: "无法保存收藏，请重试") }
     }
     private fun openConversationInApp(node:FloatingConversation,subtitles:Boolean=false){

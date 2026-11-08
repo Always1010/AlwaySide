@@ -496,7 +496,7 @@ internal class ChatScreen(
             favorite = stored?.isFavorite != true
         }.onSuccess {
             renderCollectionActions()
-            toast(if (favorite) "已收藏" else "已取消收藏，重新加入普通历史保留队列")
+            toast(if (favorite) "已收藏" else "已取消收藏")
         }.onFailure { toast(it.message?.take(120) ?: "无法保存收藏，请重试") }
     }
 
@@ -576,8 +576,8 @@ internal class ChatScreen(
             image != null && reuse.isChecked -> "追问附带${if (image === originalImage) "会话原图" else "当前图片"}与本段文字上下文"
             image != null -> "仅文字追问 · 图片仍可切换使用"
             session.kind in setOf("photo", "screen", "image") -> "原图未保留，当前仅使用文字；如需新画面，请从悬浮球重新截图。"
-            session.transcript.isNotBlank() -> "追问复用原始转写文字，不重新上传音频"
-            session.sourceText.isNotBlank() -> "追问复用本段选中文字"
+            session.transcript.isNotBlank() -> "后续提问使用转写文字"
+            session.sourceText.isNotBlank() -> "后续提问使用本段选中文字"
             handoff?.audio != null -> if (session.busy) "正在处理已采集音频" else "本段音频尚未转写，发送问题后开始处理"
             availableAudio() != null -> "原始音频已保存，可点击上方播放图标回听；发送问题后开始转写"
             session.kind == "audio" -> "原始音频未保留；当前只能使用已保存的文字消息"

@@ -20,7 +20,7 @@ internal class HelpScreen(activity: Activity, onBack: () -> Unit, onTutorial: ()
             entry("新手引导",!practised,R.drawable.ic_line_hand,onTutorial)
             addView(activity.label("跟随提示了解截图、录音与追问；全程模拟。",14f,true).apply { setPadding(0,activity.dp(8),0,0) })
             entry("准备实际使用",practised,R.drawable.ic_line_settings,onPreparation)
-            addView(activity.label("添加 API Key，再添加图文问答服务，首项自动选中，之后点击服务行切换；转写可独立选配，再按需授权和测试。",14f,true).apply { setPadding(0,activity.dp(8),0,0) })
+            addView(activity.label("配置 AI 服务，完成授权和连接测试。",14f,true).apply { setPadding(0,activity.dp(8),0,0) })
         }
         addView(ScrollView(activity).apply { addView(body);isFillViewport=true },LinearLayout.LayoutParams(-1,0,1f))
     }

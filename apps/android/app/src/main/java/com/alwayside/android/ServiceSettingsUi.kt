@@ -251,7 +251,7 @@ internal class ServiceSettingsUi(
 
     private fun renderPurpose(c: ServiceCatalog) {
         val cards = c.profiles.filter { it.purpose == purpose }
-        section("服务配置", "添加${purpose.configurationTitle}", help = "点击服务名称即可选用，左侧圆框表示唯一选中项。首个服务保存后自动选中，后续新增不改变当前选择。行尾可编辑或删除；密钥在 API 管理中维护。") { addCard(c) }
+        section("服务配置", "添加${purpose.configurationTitle}", help = "点击服务名称即可选用，左侧圆框表示当前选择。首个服务保存后自动选中，后续可点击切换。行尾可编辑或删除；密钥在 API 管理中维护。") { addCard(c) }
         cards.forEach { profile ->
             val name = providerName(c, c.providerIdOf(profile))
             val selected = activeId(c, purpose) == profile.id
@@ -323,7 +323,7 @@ internal class ServiceSettingsUi(
                 p = modelPresets.initializeNewProfile(p, provider.kind, endpoint).also { card = it }
             }
         }
-        section("服务配置", help = "本页只引用这家服务商已有的密钥。首项保存后自动选中，后续新增不切换；在用途列表点击服务行可选用，不修改另一种用途。\n\n新建配置首次选定可用密钥时填入内置默认模型；编辑、换密钥或升级不覆盖已有选择。点击模型可离线选择推荐项、手动填写，或主动从服务获取。暂无推荐不代表服务不支持；转写仅 OpenAI 提供内置推荐。推荐和服务声明不等于账号可用或实际验证，Qwen 的地址、密钥和模型地域须匹配。")
+        section("服务配置", help = "选择这家服务商已有的 API 密钥，再选择或填写模型。也可通过「从服务获取」联网读取模型列表。保存后可在服务列表中选用。\n\n模型是否可用需实际测试；Qwen 的地址、密钥和模型地域须匹配。")
         row("API 密钥", c.credentials.find { it.id == p.credentialId }?.name ?: "请选择") {
             if (usable.isEmpty()) apiHelpDialog(if (keys.isEmpty()) "此服务商还没有 Key。" else "此服务商没有可用于${purpose.title}的 Key，请在 API 服务中检查转写支持或替换不可用 Key。")
             else choose("选择 API 密钥", usable.map { it.name }, checkedIndex = usable.indexOfFirst { it.id == p.credentialId }) { index ->

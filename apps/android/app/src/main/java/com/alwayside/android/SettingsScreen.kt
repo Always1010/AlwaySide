@@ -164,7 +164,7 @@ internal class SettingsScreen(
                 addIconAction(4202, R.drawable.ic_line_retry, "恢复默认排列") { menuSettingsUi?.reset() }
                 addIconAction(4203, R.drawable.ic_line_info, "自定义菜单说明") {
                     MaterialAlertDialogBuilder(this@SettingsScreen).setTitle("自定义菜单")
-                        .setMessage("点击减号移除工具，点击加号添加。长按工具拖动到目标位置可调整顺序，也可点击工具选择前移或后移。修改后立即保存。\n\n设置和关闭悬浮球都可移除；仍可从应用内打开设置或关闭悬浮球。工具全部移除后，悬浮菜单会保留添加工具入口。\n\n联网搜索和使用默认提问方式是独立勾选项，不参与工具排序。恢复默认只恢复工具排列，不改变这两个选项。")
+                        .setMessage("点击加号添加工具，点击减号移除工具。长按拖动调整顺序，也可点击工具选择前移或后移。修改自动保存。")
                         .setPositiveButton("知道了", null).showTracked()
                 }
             }
@@ -377,7 +377,7 @@ internal class SettingsScreen(
                 RecordingLimitAction.PROMPT.value to "停止并等待确认；停止助手或应用退出后丢失。",
                 RecordingLimitAction.PROCESS.value to "停止后按音频默认输出处理，可能产生费用。",
             ))
-        section("历史记录", "普通历史默认保留 500 条，超出上限时删除最早的普通历史及其媒体。收藏不计入上限，不会因上限被删除。调低上限时会先显示将删除的条数，确认后生效。\n\n问题、回答与转写随会话保存。追问保存在原会话内，复用转写文字，不重复上传音频。未发送、取消或失败的会话也可从主页找到。")
+        section("历史记录", "普通历史默认保留 500 条，超出上限时删除最早的普通历史及其媒体。收藏不计入上限；取消收藏后按普通历史规则清理。调低上限时会先显示将删除的条数，确认后生效。\n\n问题、回答、转写和后续提问随会话保存。未发送、取消或失败的会话也可从主页找到。")
         check("saveHistoryImages", "长期保留截图", config.saveHistoryImages,
             help = "保存首张原图和当前追问图片，可从历史查看并继续使用。\n\n仅影响之后保存的截图，不补存旧图。图片存于本机，删除会话时一并删除。")
         check("saveHistoryAudio", "长期保留音频", config.saveHistoryAudio,
