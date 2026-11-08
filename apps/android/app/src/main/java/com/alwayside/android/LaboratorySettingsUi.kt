@@ -84,6 +84,7 @@ internal class LaboratorySettingsUi(
         content.addView(settingsListGroup(readingRows), LinearLayout.LayoutParams(-1, -2))
         if (config.chatPointReading || config.imagePointReading)
             ReadingSettingsUi(context, content, showDialog, showChoiceSheet).render()
+        SubtitleSettingsUi(context, content, showDialog, showChoiceSheet).render()
     }
 
     private fun refresh() {

@@ -78,6 +78,10 @@ class AssistantService : Service() {
     private val capturePermissionGate = CapturePermissionGate()
     private val requestingConsent: Boolean get() = capturePermissionGate.isPending
     private val playback by lazy { ChatAudioPlayback.get(this) }
+    private val subtitlePreferences by lazy { SubtitlePreferences(this) }
+    private val subtitleListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        main.post { if(alive)nodes.values.toList().forEach { refresh(it) } }
+    }
     private var lastKind = "photo"
     private val taps = TapSequence()
     private var burstRecording = false
@@ -204,6 +208,7 @@ class AssistantService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "悬浮助手与采集", NotificationManager.IMPORTANCE_LOW))
         preferences.addListener(preferencesListener)
+        subtitlePreferences.addListener(subtitleListener)
         apiPreferences.registerOnSharedPreferenceChangeListener(apiPreferencesListener)
         ActiveConversationBridge.detachHandler = ::detachToApplication
         AssistantPreview.finishRecording = {
@@ -737,6 +742,12 @@ class AssistantService : Service() {
             else if(node.kind=="text") {node.originalExpanded=!node.originalExpanded;node.transcript?.apply{maxLines=if(node.originalExpanded)Int.MAX_VALUE else 4;ellipsize=if(node.originalExpanded)null else android.text.TextUtils.TruncateAt.END}}
             else node.transcript?.let{it.visibility=if(it.visibility==View.VISIBLE)View.GONE else View.VISIBLE;updateTranscriptCopy(node)}
         }}.also{sourceContent.addView(it)}
+        if(node.kind=="audio")sourceContent.addView(uiContext.iconButton(R.drawable.ic_line_subtitles,"在应用中打开音频字幕") {
+            if(subtitlePreferences.anyEnabled())openConversationInApp(node,subtitles=true)
+        }.apply {
+            tag="audio_subtitles"
+            visibility=if(subtitlePreferences.anyEnabled())View.VISIBLE else View.GONE
+        },LinearLayout.LayoutParams(dp(40),dp(40)).apply { gravity=Gravity.END })
         node.sourceImage=ImageView(uiContext).apply { scaleType=ImageView.ScaleType.FIT_CENTER;visibility=View.GONE;accessible("本次截图预览");node.frame?.let{setImageBitmap(it.bitmap)} }.also{sourceContent.addView(it,LinearLayout.LayoutParams(-1,dp(110)))}
         node.transcript=uiContext.label("",12f,true).apply { visibility=View.GONE;enableTextActions();setLineSpacing(0f,1.3f);setPadding(0,dp(8),0,dp(8)) }.also{sourceContent.addView(it)}
         if(node.kind=="audio")node.transcriptCopy=icon(R.drawable.ic_copy,"复制转写原文") {
@@ -850,13 +861,13 @@ class AssistantService : Service() {
             toast(if(node.isFavorite)"已收藏" else "已取消收藏，重新加入普通历史保留队列")
         }.onFailure { toast(it.message?.take(120) ?: "无法保存收藏，请重试") }
     }
-    private fun openConversationInApp(node:FloatingConversation){
+    private fun openConversationInApp(node:FloatingConversation,subtitles:Boolean=false){
         if(!alive||gathering||node.detached||node.openingInApp||node.discarding)return
         if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
         node.openingInApp=true
         // Keep the visible overlay until startActivity so the user-initiated launch is allowed.
         try {
-            startActivity(AppEntry.intent(this,AppPage.CHAT,node.chat.conversationId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            startActivity(AppEntry.intent(this,AppPage.CHAT,node.chat.conversationId,openSubtitles=subtitles).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             main.postDelayed({if(!node.detached)node.openingInApp=false},1500)
         } catch(_:RuntimeException){node.openingInApp=false;toast("无法打开应用聊天，请稍后重试")}
     }
@@ -885,6 +896,8 @@ class AssistantService : Service() {
     }
     private fun refresh(node:FloatingConversation){
         if(!alive||node.detached)return
+        node.readingPresentation?.sourceContent?.findViewWithTag<View>("audio_subtitles")?.visibility=
+            if(subtitlePreferences.anyEnabled()&&!node.awaitingAudioApproval)View.VISIBLE else View.GONE
         val imageReadingEnabled=preferences.load().imagePointReading
         if(node.sourceImage!=null && node.imageReadingBound!=imageReadingEnabled)node.sourceImage?.apply {
             node.imageReadingBound=imageReadingEnabled
@@ -1300,6 +1313,7 @@ class AssistantService : Service() {
         AppAppearance.removeListener(this, appearanceListener)
         preferences.removeListener(preferencesListener);cancelRecording(false)
         apiPreferences.unregisterOnSharedPreferenceChangeListener(apiPreferencesListener)
+        subtitlePreferences.removeListener(subtitleListener)
         nodes.values.forEach{hideWindow(it);it.chat.close();it.clip?.file?.let { file -> ChatAudioPlayback.deleteTemporaryAudio(file) }};nodes.clear()
         clearCapture();removeMenu();removeBubble();removeSelector();mediaWorker.shutdown()
         ProbeState.serviceRunning=false;ProbeState.recording=false;ProbeState.requesting=false;ProbeState.lastEvent="助手与采集已停止"

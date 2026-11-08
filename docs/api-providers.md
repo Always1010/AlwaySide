@@ -330,6 +330,17 @@ HTTP 3xx 明确提示填写最终地址；401／403 检查密钥、地域和权�
 
 ## 8. 维护入口
 
+### 实验室回听字幕
+
+回听字幕使用独立的 OpenAI Key 引用和翻译模型配置，不修改日常转写或问答卡片。仅接受绑定至 OpenAI 官方 HTTPS `/v1` 接口的 Key；设置、浏览字幕与切换显示语言不发起请求。
+
+- Whisper 固定 `model=whisper-1`、`response_format=verbose_json`、`language=en`、`timestamp_granularities[]=segment`。录音超过上传大小限制时优先按静音分片，合并结果使用原始 PCM 位置换算绝对毫秒，保留静音间隔；不会从纯文本猜测时间戳。
+- 中文翻译复用现有 Responses 或 Chat 流式请求，独立提示词要求按字幕编号返回 JSON；程序校验数量、编号及非空文本，时间轴不交给翻译模型修改。字幕成功片段与翻译批次保存检查点；手动继续只处理未完成部分，不自动重试或切换模型。
+
+字幕通过原子版本指针同时发布英文 SRT、中文 SRT 和元数据，新的双语结果成功前保留旧发布版本。元数据只保存内容摘要、模型与生成参数标识，不含 Key、原始配置或本机路径。删除录音或会话同时失效任务并清理字幕，避免迟到响应重新写回。Whisper 的弃用范围与期限见 [OpenAI 官方转写指南](https://developers.openai.com/api/docs/guides/speech-to-text)。
+
+### 核心实现
+
 核心代码位于 `apps/android/app/src/main/java/com/alwayside/android/`：`ServiceCatalog` 管理服务、密钥、用途配置及请求快照，`ProviderCapabilities` 执行已知能力限制，`ProviderProtocol` 校验通用选项与地址，`HttpTransport` 负责鉴权和网络边界，四种 Adapter 负责各自格式，`AiProvider.listModels` 负责模型列表，`SettingsStore`／`ServiceCatalogCodec` 负责新配置存储，旧格式读取代码若保留，仅供兼容数据识别，不作为本版自动迁移服务配置的入口。
 
 新增参数或扩展模型时，先检查官方协议及模型支持，再同步适配器、能力校验、设置界面与针对该分支的离线测试。测试应使用伪造 Map／SSE／HTTP 数据验证字段、完整性及失败分支。真实服务验证需独立记录日期、地域、具体模型和功能，不能从接口形状、模型名称或模型列表推断“已联调成功”。

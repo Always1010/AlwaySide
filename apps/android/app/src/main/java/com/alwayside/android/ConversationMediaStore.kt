@@ -9,13 +9,14 @@ import java.io.File
 import java.security.MessageDigest
 
 /** Optional media archive, isolated from credentials, JSON and Android backup. */
-internal class ConversationMediaStore(context: Context) {
+internal class ConversationMediaStore(private val context: Context) {
     private val directory = File(context.noBackupFilesDir, "conversation_images")
     private val audio = ConversationAudioArchive(File(context.noBackupFilesDir, "conversation_audio"))
 
     fun saveAudio(id: String, input: java.io.InputStream, length: Long) = audio.save(id, input, length)
     fun loadAudio(id: String): File? = audio.load(id)
     fun deleteAudio(id: String) {
+        SubtitleController.deleteConversation(context, id)
         ChatAudioPlayback.stopConversation(id)
         audio.delete(id)
     }
@@ -76,6 +77,7 @@ internal class ConversationMediaStore(context: Context) {
     }
 
     fun clear() = synchronized(lock) {
+        SubtitleController.clear(context)
         ChatAudioPlayback.stopConversation()
         directory.listFiles()?.forEach { check(it.delete()) { "图片删除失败" } }
         audio.clear()

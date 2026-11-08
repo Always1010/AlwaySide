@@ -62,6 +62,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         }
     }
     private var player: MediaPlayer? = null
+    private var pendingSeek: Int? = null
     var readingKey: String = ""; private set
     var mediaTitle: String = "原始音频"; private set
     var speed: Float = 1f; private set
@@ -149,6 +150,17 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
 
     fun resume() { if (!state.playing && !state.preparing && conversationId != null) startOrResume() }
 
+    /** Subtitles and the slider seek the original recording; reading audio has separate ownership. */
+    fun seekTo(id: String, source: File, positionMs: Long) {
+        if (conversationId != id || readingKey.isNotEmpty()) play(id, source)
+        val target = positionMs.coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
+        if (state.preparing || player == null) { pendingSeek = target; return }
+        val current = player ?: return
+        runCatching {
+            current.seekTo(target.coerceIn(0, duration).toLong(), MediaPlayer.SEEK_CLOSEST)
+        }.onFailure { failed() }
+    }
+
     private fun startOrResume() {
         if ((visibility.backgroundPlayback || readingKey.isNotEmpty()) && service?.hosting != true) {
             waitingForService = true
@@ -174,6 +186,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
                 }
             }
             next.setOnCompletionListener { if (player === it) stop() }
+            next.setOnSeekCompleteListener { if (player === it) updatePosition(it, state.playing) }
             next.setOnErrorListener { current, _, _ -> if (player === current) failed(); true }
             next.prepareAsync()
         } catch (_: Exception) { failed() }
@@ -187,6 +200,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
                 if (!hasFocus) { stop(); toast("暂时无法播放，请在其他音频结束后重试"); return }
             }
             if (readingKey.isNotEmpty()) current.playbackParams = android.media.PlaybackParams().setSpeed(speed).setPitch(1f)
+            pendingSeek?.let { current.seekTo(it.coerceIn(0, duration).toLong(), MediaPlayer.SEEK_CLOSEST); pendingSeek = null }
             current.start()
             updatePosition(current, playing = true)
             handler.removeCallbacks(ticker)
@@ -215,6 +229,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         handler.removeCallbacks(ticker)
         val previous = player
         player = null // Ignore callbacks from the released player.
+        pendingSeek = null
         waitingForService = false
         resumeOnFocus = false
         abandonFocus()

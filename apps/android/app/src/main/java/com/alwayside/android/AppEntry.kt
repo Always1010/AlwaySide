@@ -7,13 +7,13 @@ import java.util.UUID
 /** One-use in-process routes. Arbitrary launcher extras cannot trigger automatic queries. */
 internal object AppEntry {
     data class Request(val page: AppPage, val conversationId: String? = null, val autoAskText: Boolean = false,
-        val settingsPage: String? = null)
+        val settingsPage: String? = null, val openSubtitles: Boolean = false)
     private val pending = linkedMapOf<String, Request>()
     private const val TOKEN = "com.alwayside.android.INTERNAL_ROUTE"
     fun intent(context: Context, page: AppPage, id: String? = null, autoAskText: Boolean = false,
-        settingsPage: String? = null): Intent {
+        settingsPage: String? = null, openSubtitles: Boolean = false): Intent {
         val token = UUID.randomUUID().toString()
-        pending[token] = Request(page, id, autoAskText, settingsPage)
+        pending[token] = Request(page, id, autoAskText, settingsPage, openSubtitles)
         while(pending.size > 16) pending.remove(pending.keys.first())
         return Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra(TOKEN, token)

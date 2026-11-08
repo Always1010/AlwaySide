@@ -324,7 +324,7 @@ class MainActivity : ThemedActivity() {
         retained: ChatScreen.RetainedConversation? = null,autoAskText: Boolean = false): ChatScreen =
         ChatScreen(this,::navigateBack,id,savedState,retained,autoAskText)
 
-    private fun openChat(id: String?,autoAskText: Boolean = false): Unit = leaveSettings {
+    private fun openChat(id: String?,autoAskText: Boolean = false,openSubtitles: Boolean = false): Unit = leaveSettings {
         historyScreen?.prepareToLeave()
         hideKeyboard()
         if(chatScreen?.matches(id) != true) {
@@ -332,13 +332,14 @@ class MainActivity : ThemedActivity() {
             chatScreen?.dispose();chatScreen=createChat(id=id,autoAskText=autoAskText)
         }
         navigation.openChat();showCurrent()
+        if(openSubtitles)chatScreen?.view?.post { chatScreen?.takeIf { it.matches(id) }?.showSubtitles() }
     }
 
     private fun route(entry: AppEntry.Request) {
         when(entry.page) {
             AppPage.HISTORY -> openHistory()
             AppPage.SETTINGS -> openSettings(entry.settingsPage)
-            AppPage.CHAT -> openChat(entry.conversationId,entry.autoAskText)
+            AppPage.CHAT -> openChat(entry.conversationId,entry.autoAskText,entry.openSubtitles)
             AppPage.TUTORIAL -> openTutorial()
             AppPage.PREPARATION -> openPreparation()
             AppPage.HELP -> openHelp()

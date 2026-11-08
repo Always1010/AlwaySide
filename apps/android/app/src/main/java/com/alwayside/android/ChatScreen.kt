@@ -90,6 +90,11 @@ internal class ChatScreen(
     private var readingEnabled = false
     private var readingBar: ReadingBar? = null
     private var readingImageDialog: androidx.appcompat.app.AlertDialog? = null
+    private var subtitleDialog: androidx.appcompat.app.AlertDialog? = null
+    private val subtitlePreferences = SubtitlePreferences(this)
+    private val subtitleListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        if (ready && !closing) toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlePreferences.anyEnabled()
+    }
     private val readingPreferences = InteractionPreferences(this)
     private val readingListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "chatPointReading" && ready && !closing) render()
@@ -178,6 +183,7 @@ internal class ChatScreen(
             setBackgroundColor(BACKGROUND); fitsSystemWindows = true
             addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
+                    subtitlePreferences.addListener(subtitleListener)
                     readingPreferences.addListener(readingListener)
                     playback.addObserver(playbackObserver)
                     setPlaybackForeground(playbackForeground)
@@ -189,6 +195,8 @@ internal class ChatScreen(
                     if (ready) { refreshCollectionState(); render() } else renderWebSearch()
                 }
                 override fun onViewDetachedFromWindow(view: View) {
+                    subtitleDialog?.dismiss(); subtitleDialog = null
+                    subtitlePreferences.removeListener(subtitleListener)
                     readingPreferences.removeListener(readingListener)
                     playback.removeObserver(playbackObserver)
                     playback.setVisible(this@ChatScreen, null, false, retaining = activity.isChangingConfigurations)
@@ -202,6 +210,7 @@ internal class ChatScreen(
             addIconAction(3, R.drawable.ic_line_play, "回听原始音频") { playAudio() }.apply {
                 icon = playbackIcon; isVisible = false
             }
+            addIconAction(8, R.drawable.ic_line_subtitles, "音频字幕") { showSubtitles() }.isVisible = false
             addOverflowIconAction(5, R.drawable.ic_line_tag, "设置会话标签") {
                 if (ready && favorite) collectionTags.editTags(listOf(session.conversationId))
             }.apply {
@@ -296,6 +305,7 @@ internal class ChatScreen(
         conversationTitle = session.title
         toolbar.title = conversationTitle
         toolbar.menu.findItem(3)?.isVisible = availableAudio() != null
+        toolbar.menu.findItem(8)?.isVisible = session.kind == "audio" && subtitlePreferences.anyEnabled()
         renderCollectionActions()
         val hasPending = session.question.isNotBlank()
         val providerLabel = if (session.busy || session.question.isNotBlank()) session.requestProviderLabel else ProviderCapabilities.label(activeConnection)
@@ -670,6 +680,12 @@ internal class ChatScreen(
         playback.play(session.conversationId, file)
     }
 
+    fun showSubtitles() {
+        if (!ready || closing || session.kind != "audio" || !subtitlePreferences.anyEnabled()) return
+        subtitleDialog?.dismiss()
+        subtitleDialog = SubtitlePanel(activity, { session.snapshot() }, ::availableAudio).show()
+    }
+
     private fun updatePlayback(state: ChatAudioPlayback.State) {
         playbackIcon.update(state)
         toolbar.menu.findItem(3)?.apply {
@@ -737,6 +753,8 @@ internal class ChatScreen(
     }
 
     fun dispose(retaining: Boolean = false) {
+        subtitleDialog?.dismiss(); subtitleDialog = null
+        subtitlePreferences.removeListener(subtitleListener)
         readingImageDialog?.dismiss();readingImageDialog=null
         disposeMessageRows()
         evidencePreviews.clear()
