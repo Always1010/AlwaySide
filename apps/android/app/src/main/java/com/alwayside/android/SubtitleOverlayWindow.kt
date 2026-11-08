@@ -32,9 +32,11 @@ internal class SubtitleOverlayWindow(
         orientation = LinearLayout.VERTICAL; elevation = context.dp(8).toFloat(); clipToOutline = true
     }
     private val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(context.dp(5), 0, context.dp(5), 0) }
-    private val chineseText = context.label("", 17f).apply { setLineSpacing(0f, 1.15f) }
+    private val chineseText = context.label("", 17f).apply {
+        typeface = android.graphics.Typeface.DEFAULT; setLineSpacing(0f, 1.3f)
+    }
     private val englishText = context.label("", 14f, true).apply {
-        setLineSpacing(0f, 1.15f); setPadding(0, context.dp(7), 0, 0)
+        typeface = android.graphics.Typeface.DEFAULT; setLineSpacing(0f, 1.3f); setPadding(0, context.dp(7), 0, 0)
     }
     private val scroll = ScrollView(context).apply {
         addView(LinearLayout(context).apply {
@@ -42,14 +44,16 @@ internal class SubtitleOverlayWindow(
             addView(chineseText); addView(englishText)
         })
     }
-    private val clock = context.label("", 11f, true)
-    private val status = context.label("", 11f, true)
+    private val clock = context.label("", 11f, true).apply { textSize = 11f }
+    private val status = context.label("", 11f, true).apply { textSize = 10f }
     private val chinese: MaterialButton
     private val english: MaterialButton
     private val play: MaterialButton
     private val icons = mutableListOf<MaterialButton>()
     private var attached = false
     private var settings: SubtitleDisplaySettings? = null
+    private var unregisterSettingsBack: (() -> Unit)? = null
+    private var outsideDismissedAt = 0L
     private var normalGeometry: IntArray? = null
     private var preview: Style? = null
     private var previousText = ""
@@ -151,6 +155,7 @@ internal class SubtitleOverlayWindow(
     }
 
     private fun showSettings() {
+        if (android.os.SystemClock.uptimeMillis() - outsideDismissedAt < 200) return
         if (settings != null) { closeSettings(); return }
         normalGeometry = intArrayOf(layout.x, layout.y, layout.width, layout.height)
         val sheet = SubtitleDisplaySettings(context, reading, preferences,
@@ -160,13 +165,27 @@ internal class SubtitleOverlayWindow(
             })
         val size = screenSize()
         val sheetLayout = params().apply {
+            flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
             width = (size.first - context.dp(20)).coerceAtLeast(1)
             height = minOf(context.dp(410), size.second * 52 / 100)
             x = context.dp(10); y = size.second - height - context.dp(64)
             setTitle("AlwaySide 字幕显示设置")
         }
+        sheet.view.isFocusableInTouchMode = true
+        sheet.view.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                outsideDismissedAt = android.os.SystemClock.uptimeMillis(); closeSettings(); true
+            } else false
+        }
         runCatching { windows.addView(sheet.view, sheetLayout) }.onSuccess {
             settings = sheet
+            sheet.view.requestFocus()
+            if (Build.VERSION.SDK_INT >= 33) {
+                val dispatcher = sheet.view.findOnBackInvokedDispatcher()
+                val callback = android.window.OnBackInvokedCallback { closeSettings() }
+                dispatcher?.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
+                unregisterSettingsBack = { dispatcher?.unregisterOnBackInvokedCallback(callback) }
+            }
             layout.height = minOf(layout.height, (sheetLayout.y - context.dp(44)).coerceAtLeast(context.dp(158)))
             layout.y = minOf(layout.y, sheetLayout.y - layout.height - context.dp(12))
             clamp(); update()
@@ -175,7 +194,8 @@ internal class SubtitleOverlayWindow(
 
     private fun closeSettings(restore: Boolean = true) {
         val sheet = settings ?: return
-        settings = null; sheet.finish(); runCatching { windows.removeViewImmediate(sheet.view) }
+        settings = null; sheet.finish(); unregisterSettingsBack?.invoke(); unregisterSettingsBack = null
+        runCatching { windows.removeViewImmediate(sheet.view) }
         preview = null; previousStyle = null
         normalGeometry?.let { if (restore) { layout.x = it[0]; layout.y = it[1]; layout.width = it[2]; layout.height = it[3] } }
         normalGeometry = null
@@ -249,8 +269,9 @@ internal class SubtitleOverlayWindow(
     private fun restoreGeometry() = with(context) {
         val saved = preferences.window(); val size = screenSize()
         layout.width = dp(saved?.widthDp ?: 340); layout.height = dp(saved?.heightDp ?: 244)
-        layout.x = ((size.first - layout.width) * (saved?.xFraction ?: .5f)).toInt()
-        layout.y = ((size.second - layout.height) * (saved?.yFraction ?: .72f)).toInt(); clamp()
+        layout.x = saved?.let { ((size.first - layout.width) * it.xFraction).toInt() } ?: dp(24)
+        layout.y = saved?.let { ((size.second - layout.height) * it.yFraction).toInt() } ?: dp(305)
+        clamp()
     }
     private fun clamp() = with(context) {
         val size = screenSize(); val maxWidth = (size.first - dp(16)).coerceAtLeast(1)

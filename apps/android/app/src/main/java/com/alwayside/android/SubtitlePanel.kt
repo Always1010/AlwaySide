@@ -37,7 +37,10 @@ internal class SubtitlePanel(
     private val method = SubtitleMethod.WHISPER
     private var displayMode = preferences.display().takeUnless { it == SubtitleDisplay.OFF } ?: SubtitleDisplay.BILINGUAL
     private val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-    private val status = label("正在读取字幕…", 11f, true)
+    private val status = label("正在读取字幕…", 11f, true).apply {
+        maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+        maxWidth = (activity.resources.displayMetrics.widthPixels - activity.dp(196)).coerceAtLeast(activity.dp(80))
+    }
     private val details = label("", 12f, true)
     private val progress = SeekBar(activity)
     private val clock = label("0:00", 11f, true)
@@ -81,7 +84,7 @@ internal class SubtitlePanel(
         with(activity) {
             root.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL; setPadding(dp(20), dp(4), dp(10), 0)
-                addView(label("音频字幕", 18f), LinearLayout.LayoutParams(0, dp(52), 1f))
+                addView(label("音频字幕", 18f).apply { gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(52), 1f))
                 addView(icon(R.drawable.ic_line_sliders, "音频字幕显示设置", ::showSettings))
                 addView(icon(R.drawable.ic_line_more, "字幕操作", {}).apply { setOnClickListener { anchor -> menu(anchor) } })
                 addView(icon(R.drawable.ic_line_close, "关闭音频字幕", { dialog?.dismiss() }))
@@ -95,11 +98,12 @@ internal class SubtitlePanel(
                 addView(LinearLayout(this@with).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     addView(label("•", 13f).apply { setTextColor(ACCENT); setPadding(0, 0, dp(6), 0) })
-                    addView(status, LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(status)
                     addView(label(" · ${method.title}", 11f, true))
                     addView(icon(R.drawable.ic_line_info, "音频字幕说明", ::help, 30))
                     cancel = icon(R.drawable.ic_line_close, "取消字幕制作", { controller.cancel(owner, method) }, 30)
                     addView(cancel)
+                    addView(View(this@with), LinearLayout.LayoutParams(0, 1, 1f))
                 })
                 addView(details.apply { visibility = View.GONE })
             })
@@ -184,13 +188,18 @@ internal class SubtitlePanel(
     }
 
     fun show(): AlertDialog {
-        root.layoutParams = ViewGroup.LayoutParams(-1, (activity.resources.displayMetrics.heightPixels * .76f).toInt() - activity.dp(52))
+        root.layoutParams = ViewGroup.LayoutParams(-1, -1)
+        val height = (activity.resources.displayMetrics.heightPixels * .80f).toInt()
         return MaterialAlertDialogBuilder(activity).setView(root).setNegativeButton("返回对话", null).create().also { shown ->
             dialog = shown; shown.setOnDismissListener { detach() }; shown.show()
             shown.window?.apply {
                 setBackgroundDrawable(card(BACKGROUND, activity.dp(23).toFloat()))
-                setLayout(activity.resources.displayMetrics.widthPixels - activity.dp(36), -2)
+                setLayout(activity.resources.displayMetrics.widthPixels - activity.dp(36), height)
                 attributes = attributes.apply { dimAmount = .22f }
+                androidx.core.view.WindowInsetsControllerCompat(this, decorView).apply {
+                    isAppearanceLightStatusBars = !AppAppearance.isNight
+                    isAppearanceLightNavigationBars = !AppAppearance.isNight
+                }
             }
             attached = true
             SubtitleOverlayController.panelVisible(activity, this, owner, true)
@@ -284,8 +293,8 @@ internal class SubtitlePanel(
     private data class CueViews(val root: LinearLayout, val time: TextView, val chinese: TextView, val english: TextView)
     private fun createCue(): CueViews {
         val stamp = label("", 11f, true)
-        val chinese = label("", 17f).apply { typeface = android.graphics.Typeface.DEFAULT }
-        val english = label("", 14f, true).apply { typeface = android.graphics.Typeface.DEFAULT }
+        val chinese = label("", 17f).apply { typeface = android.graphics.Typeface.DEFAULT; setLineSpacing(0f, 1.3f) }
+        val english = label("", 14f, true).apply { typeface = android.graphics.Typeface.DEFAULT; setLineSpacing(0f, 1.3f) }
         val row = LinearLayout(activity).apply {
             gravity = Gravity.TOP; setPadding(activity.dp(12), activity.dp(14), activity.dp(12), activity.dp(14))
             addView(stamp, LinearLayout.LayoutParams(activity.dp(42), -2).apply { topMargin = activity.dp(3) })
@@ -389,6 +398,6 @@ internal class SubtitlePanel(
     }
     private fun icon(resource: Int, description: String, action: () -> Unit, size: Int = 36) = activity.iconButton(resource, description, action).apply {
         minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0; iconSize = activity.dp(18)
-        layoutParams = LinearLayout.LayoutParams(activity.dp(size), activity.dp(if (size == 46) 46 else 40))
+        layoutParams = LinearLayout.LayoutParams(activity.dp(size), activity.dp(if (size == 36) 40 else size))
     }
 }

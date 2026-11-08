@@ -16,19 +16,27 @@ import kotlin.math.roundToInt
 internal class SubtitleDisplaySettings(
     private val context: Context,
     private val reading: SubtitleReadingPreferences,
-    private val overlay: SubtitleOverlayPreferences? = null,
+    private val floatingPreferences: SubtitleOverlayPreferences? = null,
     private val onPreview: (Int, Int, SubtitleOverlayTheme, Int) -> Unit,
     private val onClose: () -> Unit,
     private val onResetWindow: (() -> Unit)? = null,
 ) {
-    private var font = overlay?.fontSize() ?: reading.fontSize()
-    private var opacity = overlay?.opacity() ?: 90
-    private var selectedTheme = overlay?.theme() ?: SubtitleOverlayTheme.SYSTEM
-    private var custom = overlay?.customColor() ?: SubtitleAppearance.DEFAULT_CUSTOM
+    private var font = floatingPreferences?.fontSize() ?: reading.fontSize()
+    private var opacity = floatingPreferences?.opacity() ?: 90
+    private var selectedTheme = floatingPreferences?.theme() ?: SubtitleOverlayTheme.SYSTEM
+    private var custom = floatingPreferences?.customColor() ?: SubtitleAppearance.DEFAULT_CUSTOM
     private val content = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL; setPadding(context.dp(22), context.dp(10), context.dp(22), context.dp(16))
     }
-    val view = ScrollView(context).apply {
+    val view = object : ScrollView(context) {
+        override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK || event.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                if (event.action == android.view.KeyEvent.ACTION_UP) onClose()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
+    }.apply {
         isFillViewport = false; addView(content)
         background = context.outlinedCard(BACKGROUND, 22); clipToOutline = true
         elevation = context.dp(12).toFloat()
@@ -49,20 +57,22 @@ internal class SubtitleDisplaySettings(
                 LinearLayout.LayoutParams(dp(30), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL })
             content.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(label(if (overlay == null) "音频字幕显示设置" else "浮窗显示设置", 17f), LinearLayout.LayoutParams(0, dp(48), 1f))
+                addView(settingLabel(if (floatingPreferences == null) "音频字幕显示设置" else "浮窗显示设置", 17f).apply {
+                    gravity = Gravity.CENTER_VERTICAL; typeface = android.graphics.Typeface.create("sans-serif-medium", 0)
+                }, LinearLayout.LayoutParams(0, dp(48), 1f))
                 addView(iconButton(R.drawable.ic_line_close, "收起设置") { finish(); onClose() }.compact(36))
             })
-            if (overlay != null) addThemes()
+            if (floatingPreferences != null) addThemes()
             addSlider("字幕字号", 12f, 32f, { font.toFloat() }, { it.roundToInt().toString() }) { font = it.roundToInt(); preview() }
-            if (overlay != null) addSlider("背景不透明度", 0f, 100f, { opacity.toFloat() }, { "${it.roundToInt()}%" }) {
+            if (floatingPreferences != null) addSlider("背景不透明度", 0f, 100f, { opacity.toFloat() }, { "${it.roundToInt()}%" }) {
                 opacity = it.roundToInt(); preview()
             }
-            val explanation = label("完整句会组合相邻片段，可能提前显示尚未读到的后半句。原始分段更贴近逐段播放。", 12f, true).apply {
+            val explanation = settingLabel("完整句会组合相邻片段，可能提前显示尚未读到的后半句。原始分段更贴近逐段播放。", 12f, true).apply {
                 visibility = View.GONE; setPadding(0, dp(6), 0, dp(6))
             }
             content.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(label("分句方式", 13f), LinearLayout.LayoutParams(0, dp(36), 1f))
+                addView(settingLabel("分句方式", 13f), LinearLayout.LayoutParams(0, dp(36), 1f))
                 addView(iconButton(R.drawable.ic_line_info, "分句方式说明") {
                     explanation.visibility = if (explanation.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                 }.compact(32))
@@ -89,13 +99,13 @@ internal class SubtitleDisplaySettings(
                     setOnClickListener { onResetWindow.invoke() }
                 }, LinearLayout.LayoutParams(0, dp(44), 1f))
             })
-            content.addView(label("✓ 设置自动保存", 11f, true))
+            content.addView(settingLabel("✓ 设置自动保存", 11f, true))
         }
         refreshChoices()
     }
 
     private fun addThemes() = with(context) {
-        themeValue = label(selectedTheme.title, 12f).apply { setTextColor(ACCENT) }
+        themeValue = settingLabel(selectedTheme.title, 12f).apply { setTextColor(ACCENT) }
         content.addView(row("颜色主题", requireNotNull(themeValue)))
         content.addView(LinearLayout(this).apply {
             SubtitleOverlayTheme.entries.forEach { value ->
@@ -107,17 +117,17 @@ internal class SubtitleDisplaySettings(
                     orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; isClickable = true; isFocusable = true
                     accessible(value.title); setPadding(dp(1), dp(5), dp(1), dp(5))
                     addView(swatch, LinearLayout.LayoutParams(dp(26), dp(26)).apply { bottomMargin = dp(5) })
-                    addView(label(value.title, 11f).apply { textSize = 10f; gravity = Gravity.CENTER })
+                    addView(settingLabel(value.title, 10f).apply { gravity = Gravity.CENTER })
                     setOnClickListener { selectedTheme = value; persist(); refreshChoices(); preview() }
                 }
                 themeButtons[value] = button
                 addView(button, LinearLayout.LayoutParams(0, dp(62), 1f))
             }
         })
-        colorValue = label("", 12f, true)
+        colorValue = settingLabel("", 12f, true)
         customRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            addView(label("背景颜色", 13f), LinearLayout.LayoutParams(0, dp(38), 1f))
+            addView(settingLabel("背景颜色", 13f), LinearLayout.LayoutParams(0, dp(38), 1f))
             addView(colorValue)
             addView(iconButton(R.drawable.ic_line_edit, "选择自定义背景颜色") {
                 colorControls?.visibility = if (colorControls?.visibility == View.VISIBLE) View.GONE else View.VISIBLE
@@ -136,10 +146,17 @@ internal class SubtitleDisplaySettings(
 
     private fun addSlider(title: String, min: Float, max: Float, value: () -> Float,
         format: (Float) -> String, parent: LinearLayout = content, changed: (Float) -> Unit) {
-        val output = context.label(format(value()), 12f).apply { setTextColor(ACCENT) }
+        val output = settingLabel(format(value()), 12f).apply { setTextColor(ACCENT) }
         parent.addView(row(title, output))
         val slider = Slider(context).apply {
             valueFrom = min; valueTo = max; stepSize = 1f; this.value = value()
+            trackHeight = context.dp(4); trackCornerSize = context.dp(2); trackInsideCornerSize = context.dp(2)
+            thumbWidth = context.dp(16); thumbHeight = context.dp(16); thumbTrackGapSize = 0; trackStopIndicatorSize = 0
+            isTickVisible = false; labelBehavior = com.google.android.material.slider.LabelFormatter.LABEL_GONE
+            trackActiveTintList = ColorStateList.valueOf(ACCENT); trackInactiveTintList = ColorStateList.valueOf(BORDER)
+            setCustomThumbDrawable(GradientDrawable().apply {
+                shape = GradientDrawable.OVAL; setColor(ACCENT); setSize(context.dp(16), context.dp(16))
+            })
             contentDescription = title; setLabelFormatter { format(it) }
             addOnChangeListener { _, selected, fromUser ->
                 output.text = format(selected)
@@ -156,7 +173,7 @@ internal class SubtitleDisplaySettings(
 
     private fun row(title: String, value: View) = LinearLayout(context).apply {
         gravity = Gravity.CENTER_VERTICAL; setPadding(0, context.dp(6), 0, 0)
-        addView(context.label(title, 13f), LinearLayout.LayoutParams(0, context.dp(28), 1f)); addView(value)
+        addView(settingLabel(title, 13f), LinearLayout.LayoutParams(0, context.dp(28), 1f)); addView(value)
     }
 
     private fun textButton(title: String) = MaterialButton(context, null, androidx.appcompat.R.attr.borderlessButtonStyle).apply {
@@ -201,14 +218,17 @@ internal class SubtitleDisplaySettings(
         refreshing = false
     }
     private fun preview() = onPreview(font, opacity, selectedTheme, custom)
+    private fun settingLabel(value: String, size: Float, muted: Boolean = false) = context.label(value, size, muted).apply {
+        textSize = size; typeface = android.graphics.Typeface.DEFAULT
+    }
     private fun persist() = save {
-        if (overlay == null) {
+        if (floatingPreferences == null) {
             if (reading.fontSize() != font) reading.saveFontSize(font)
         } else {
-            if (overlay.fontSize() != font) overlay.saveFontSize(font)
-            if (overlay.opacity() != opacity) overlay.saveOpacity(opacity)
-            if (overlay.theme() != selectedTheme) overlay.saveTheme(selectedTheme)
-            if (overlay.customColor() != custom) overlay.saveCustomColor(custom)
+            if (floatingPreferences.fontSize() != font) floatingPreferences.saveFontSize(font)
+            if (floatingPreferences.opacity() != opacity) floatingPreferences.saveOpacity(opacity)
+            if (floatingPreferences.theme() != selectedTheme) floatingPreferences.saveTheme(selectedTheme)
+            if (floatingPreferences.customColor() != custom) floatingPreferences.saveCustomColor(custom)
         }
     }
     fun finish() { persist() }
