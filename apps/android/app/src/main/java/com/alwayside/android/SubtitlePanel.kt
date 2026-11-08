@@ -53,7 +53,7 @@ internal class SubtitlePanel(
     private val emptyMessage = label("为这段录音制作字幕", 15f)
     private val adapter = CueAdapter()
     private val transcript = ListView(activity).apply {
-        divider = null; dividerHeight = 0; setSelector(Color.TRANSPARENT)
+        divider = null; dividerHeight = 0; selector = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
         setPadding(activity.dp(14), activity.dp(10), activity.dp(14), activity.dp(10)); clipToPadding = false
         this.adapter = this@SubtitlePanel.adapter
     }
