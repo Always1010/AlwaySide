@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -52,8 +53,9 @@ internal fun Context.assistantMenuGrid(cells: List<View>): LinearLayout = Linear
     orientation = LinearLayout.VERTICAL
     cells.chunked(3).forEach { rowCells ->
         addView(LinearLayout(context).apply {
-            rowCells.forEach { addView(it, LinearLayout.LayoutParams(0, -1, 1f)) }
-            repeat(3 - rowCells.size) { addView(View(context), LinearLayout.LayoutParams(0, 1, 1f)) }
+            // Real cells must supply the row's height, including when spacers complete a row.
+            rowCells.forEach { addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)) }
+            repeat(3 - rowCells.size) { addView(View(context), LinearLayout.LayoutParams(0, 0, 1f)) }
         }, LinearLayout.LayoutParams(-1, -2))
     }
 }
