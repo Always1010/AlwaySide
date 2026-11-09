@@ -9,10 +9,11 @@ import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.HandlerThread
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class CapturedFrame(val bitmap: Bitmap, val capturedAt: Long)
 
-/** A single VirtualDisplay per consent token. No screenshots are written to disk. */
+/** One display per consent, with no output surface or image queue between snapshots. */
 internal class FrameSource(
     private val projection: MediaProjection,
     width: Int,
@@ -22,56 +23,68 @@ internal class FrameSource(
 ) {
     private val thread = HandlerThread("screen-frames").apply { start() }
     private val worker = Handler(thread.looper)
-    private var reader: ImageReader? = null
     private var display: VirtualDisplay? = null
-    private var pending: ((Result<CapturedFrame>) -> Unit)? = null
-    private var cutoff = 0L
-    private var closed = false
-    private val timeout = Runnable { finish(Result.failure(IllegalStateException("没有取得新画面，请返回目标页面后重试"))) }
+    private var captureWidth = width
+    private var captureHeight = height
+    private val closing = AtomicBoolean(false)
+    private val session = FrameCaptureSession<CapturedFrame> { it.bitmap.recycle() }
 
     init {
         try {
-            reader = makeReader(width, height)
-            display = projection.createVirtualDisplay("AlwaySide", width, height, density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, worker)
+            display = checkNotNull(projection.createVirtualDisplay("AlwaySide", width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, null, null, worker)) { "无法建立屏幕共享" }
         } catch (e: Exception) {
-            reader?.close(); thread.quitSafely(); throw e
+            thread.quitSafely(); throw e
         }
     }
-
-    private fun makeReader(width: Int, height: Int): ImageReader =
-        ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3).apply {
-            // Keep the producer moving even when no screenshot is requested.
-            setOnImageAvailableListener({ source -> consume(source) }, worker)
-        }
 
     fun snapshot(afterNanos: Long, callback: (Result<CapturedFrame>) -> Unit) {
-        worker.post {
-            if (closed) { main.post { callback(Result.failure(IllegalStateException("共享已停止"))) }; return@post }
-            finish(Result.failure(IllegalStateException("取图已取消")))
-            cutoff = afterNanos; pending = callback
-            try {
-                // A new target cannot contain queued overlay pixels. Changing surface identity
-                // also requests composition for a static screen without creating another display.
-                val previous = checkNotNull(reader) { "共享已停止" }
-                val currentDisplay = checkNotNull(display) { "共享已停止" }
-                val replacement = makeReader(previous.width, previous.height)
-                try { currentDisplay.surface = replacement.surface }
-                catch (e: Exception) { replacement.close(); throw e }
-                reader = replacement
-                previous.close()
-                worker.postDelayed(timeout, 3000)
-            } catch (e: Exception) { finish(Result.failure(e)) }
+        val deliver: (Result<CapturedFrame>) -> Unit = { result -> main.post { callback(result) } }
+        if (closing.get()) {
+            deliver(Result.failure(IllegalStateException("共享已停止")))
+            return
         }
+        if (!worker.post {
+            if (closing.get()) deliver(Result.failure(IllegalStateException("共享已停止")))
+            else session.start(deliver) { id -> openOutput(id, afterNanos) }
+        }) deliver(Result.failure(IllegalStateException("共享已停止")))
     }
 
-    private fun consume(source: ImageReader) {
-        // Resize can leave an availability callback queued for the released reader.
-        if (closed || source !== reader) return
+    private fun openOutput(id: Long, cutoff: Long): AutoCloseable {
+        val currentDisplay = checkNotNull(display) { "共享已停止" }
+        currentDisplay.resize(captureWidth, captureHeight, density)
+        val reader = ImageReader.newInstance(captureWidth, captureHeight, PixelFormat.RGBA_8888, 3)
+        val timeout = Runnable {
+            session.complete(id, Result.failure(IllegalStateException("没有取得新画面，请返回目标页面后重试")))
+        }
+        val output = AutoCloseable {
+            worker.removeCallbacks(timeout)
+            // Always close the queue, even if the system has already revoked projection.
+            try { currentDisplay.surface = null }
+            finally {
+                try { reader.setOnImageAvailableListener(null, null) }
+                finally { reader.close() }
+            }
+        }
+        try {
+            reader.setOnImageAvailableListener({ source -> consume(id, cutoff, source) }, worker)
+            // A fresh surface requests composition even for a static screen and has no old pixels.
+            currentDisplay.surface = reader.surface
+            check(worker.postDelayed(timeout, 3000)) { "共享已停止" }
+        } catch (e: Exception) {
+            runCatching { output.close() }.exceptionOrNull()?.let(e::addSuppressed)
+            throw e
+        }
+        return output
+    }
+
+    private fun consume(id: Long, cutoff: Long, source: ImageReader) {
+        // Released readers and cancelled requests can still have callbacks in the queue.
+        if (closing.get() || !session.isCurrent(id)) return
         try {
             val image = source.acquireLatestImage() ?: return
-            image.use {
-                if (pending == null || image.timestamp <= cutoff) return
+            val frame = image.use {
+                if (image.timestamp <= cutoff) return
                 val plane = image.planes[0]
                 val paddedWidth = plane.rowStride / plane.pixelStride
                 val padded = Bitmap.createBitmap(paddedWidth, image.height, Bitmap.Config.ARGB_8888)
@@ -87,42 +100,37 @@ internal class FrameSource(
                     }
                     val bitmap = Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
                     if (bitmap !== padded) padded.recycle()
-                    finish(Result.success(CapturedFrame(bitmap, System.currentTimeMillis())))
+                    CapturedFrame(bitmap, System.currentTimeMillis())
                 } catch (e: Exception) { padded.recycle(); throw e }
             }
-        } catch (e: Exception) { finish(Result.failure(e)) }
+            // Image.use must finish before completion closes its owning ImageReader.
+            session.complete(id, Result.success(frame))
+        } catch (e: Exception) { session.complete(id, Result.failure(e)) }
     }
 
     fun resize(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
         worker.post {
-            if (closed) return@post
-            try {
-                finish(Result.failure(IllegalStateException("画面尺寸已变化，请重新取图")))
-                val old = reader
-                val replacement = makeReader(width, height)
-                display?.resize(width, height, density)
-                display?.surface = replacement.surface
-                reader = replacement
-                old?.close()
-            } catch (e: Exception) { finish(Result.failure(e)) }
+            if (closing.get() || (width == captureWidth && height == captureHeight)) return@post
+            captureWidth = width; captureHeight = height
+            session.cancel("画面尺寸已变化，请重新取图")
+            // Apply the new geometry on the next snapshot, without opening an idle image queue.
         }
     }
 
-    private fun finish(result: Result<CapturedFrame>) {
-        worker.removeCallbacks(timeout)
-        val callback = pending
-        pending = null
-        if (callback != null) main.post { callback(result) }
+    fun cancelSnapshot() {
+        if (!closing.get()) worker.post { session.cancel() }
     }
 
     fun close() {
+        if (!closing.compareAndSet(false, true)) return
         worker.post {
-            closed = true
-            finish(Result.failure(IllegalStateException("共享已停止")))
-            display?.release(); display = null
-            reader?.close(); reader = null
-            thread.quitSafely()
+            try { session.close() }
+            finally {
+                try { display?.release() }
+                catch (e: RuntimeException) { android.util.Log.w("FrameSource", "Virtual display release failed", e) }
+                finally { display = null; thread.quitSafely() }
+            }
         }
     }
 }

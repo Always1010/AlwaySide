@@ -454,6 +454,7 @@ class AssistantService : Service() {
         overlaysSuspended = true
         // Invalidate pending real capture/consent and touch callbacks before displaying a simulation.
         capturePermissionGate.cancel(); captureEpoch++
+        frames?.cancelSnapshot()
         cancelPendingRecordingStart()
         gathering = false; captureOwner = null; restoreCaptureWindows = null
         removeMenu(); removeBubble()
@@ -1163,6 +1164,7 @@ class AssistantService : Service() {
         }}
     }
     private fun restoreAfterCapture(){
+        frames?.cancelSnapshot()
         val restore=restoreCaptureWindows;restoreCaptureWindows=null
         gathering=false;captureOwner=null
         restore?.invoke()
@@ -1262,6 +1264,7 @@ class AssistantService : Service() {
     private fun discardConversation(node:FloatingConversation){
         if(!alive||node.detached||node.openingInApp||node.discarding||nodes[node.kind]!==node)return
         node.discarding=true
+        if(captureOwner===node){captureEpoch++;removeSelector();restoreAfterCapture()}
         // Cancel invalidates streaming/completion callbacks before any archive is removed.
         // The cancellation snapshot is queued first; HistoryStore.delete invalidates queued writes.
         node.chat.cancel()
