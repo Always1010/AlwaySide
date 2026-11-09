@@ -52,6 +52,7 @@ internal class SettingsScreen(
         GESTURES("快捷动作", "功能与手势绑定", R.drawable.ic_settings_gestures),
         WINDOW("结果窗口", "窗口行为与自动提问", R.drawable.ic_settings_window),
         MEDIA("历史与媒体", "历史上限、录音与媒体保留", R.drawable.ic_settings_media),
+        STORAGE("存储管理", "查看本机占用与清理文件", R.drawable.ic_line_sliders),
         LABORATORY("实验室", "试用中的功能", R.drawable.ic_settings_lab),
         HELP("帮助与引导", "新手引导与使用准备", R.drawable.ic_settings_help),
     }
@@ -84,6 +85,7 @@ internal class SettingsScreen(
     private val choiceSheets = mutableSetOf<SettingsChoiceSheet>()
     private var disposed = false
     private var serviceUi: ServiceSettingsUi? = null
+    private var storageUi: StorageSettingsUi? = null
     private var menuSettingsUi: MenuSettingsUi? = null
     private var menuAppearanceUi: MenuAppearanceSettingsUi? = null
     private var serviceToolbar: MaterialToolbar? = null
@@ -153,6 +155,7 @@ internal class SettingsScreen(
 
     private fun showPage(next: Page) {
         if (disposed) return
+        storageUi?.dispose(); storageUi = null
         if (next != Page.AI) { serviceUi?.dispose(); serviceUi = null }
         dismissDialogs()
         clearDraft()
@@ -163,6 +166,7 @@ internal class SettingsScreen(
         }
         // The host handles both toolbar and system Back, including direct entries from preparation.
         val header = materialToolbar(next.title, onBack).apply {
+            if (next == Page.STORAGE) addIconAction(4206, R.drawable.ic_line_retry, "重新统计") { storageUi?.refresh() }
             if (next == Page.MENU) {
                 addIconAction(4202, R.drawable.ic_line_retry, "恢复默认排列") { menuSettingsUi?.reset() }
                 addIconAction(4203, R.drawable.ic_line_info, "自定义菜单说明") {
@@ -198,7 +202,7 @@ internal class SettingsScreen(
             })
         }
         body.addView(status, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-        val config = if(next == Page.HELP) AppConfig().also { readable = true }
+        val config = if(next == Page.HELP || next == Page.STORAGE) AppConfig().also { readable = true }
             else try { store.load().also { readable = true } } catch (_: Exception) { readable = false; AppConfig() }
         val interaction = interactionStore.load()
         renderedConnectionId = config.connectionId
@@ -233,6 +237,7 @@ internal class SettingsScreen(
             Page.GESTURES -> gesturePage(interaction)
             Page.WINDOW -> windowPage(config, interaction)
             Page.MEDIA -> mediaPage(interaction)
+            Page.STORAGE -> { storageUi = StorageSettingsUi(this, body) { it.showTracked() } }
             Page.LABORATORY -> laboratoryPage(interaction)
             Page.HELP -> {
                 note("通过内置示例了解悬浮球、截图问答和追问。全程模拟，不联网，不调用 API，也不需要系统权限。")
@@ -402,7 +407,7 @@ internal class SettingsScreen(
                 RecordingLimitAction.PROMPT.value to "停止并等待确认；停止助手或应用退出后丢失。",
                 RecordingLimitAction.PROCESS.value to "停止后按音频默认输出处理，可能产生费用。",
             ))
-        section("历史记录", "普通历史默认保留 500 条，超出上限时删除最早的普通历史及其媒体。收藏不计入上限；取消收藏后按普通历史规则清理。调低上限时会先显示将删除的条数，确认后生效。\n\n问题、回答、转写和后续提问随会话保存。未发送、取消或失败的会话也可从主页找到。")
+        section("历史记录", "普通历史默认保留 500 条，超出上限时删除最早的普通历史及其媒体。收藏不计入上限；取消收藏后按普通历史规则清理。正在使用的会话暂时保留，结束后按上限清理。调低上限时会先显示本次将删除的条数，确认后生效。\n\n问题、回答、转写和后续提问随会话保存。未发送、取消或失败的会话也可从主页找到。")
         check("saveHistoryImages", "长期保留截图", config.saveHistoryImages,
             help = "保存首张原图和当前追问图片，可从历史查看并继续使用。\n\n仅影响之后保存的截图，不补存旧图。图片存于本机，删除会话时一并删除。")
         check("saveHistoryAudio", "长期保留音频", config.saveHistoryAudio,
@@ -543,9 +548,10 @@ internal class SettingsScreen(
             }
             try {
                 if (limit < history.historyLimit()) {
-                    val removed = (history.list().count { !it.isFavorite } - limit).coerceAtLeast(0)
+                    val state = history.index()
+                    val removed = state.conversations.size - HistoryCollection.retain(state.copy(historyLimit = limit), protectedIds = ConversationUsage.ids()).conversations.size
                     MaterialAlertDialogBuilder(this).setTitle("调低普通历史上限？")
-                        .setMessage("将删除 $removed 条最早的普通历史，收藏不受影响。")
+                        .setMessage("本次将删除 $removed 条最早的普通历史，收藏不受影响。使用中的会话暂时保留，结束后按新上限清理。")
                         .setNegativeButton("继续编辑", null)
                         .setPositiveButton(if (removed > 0) "删除并保存" else "保存") { _, _ -> save() }.showTracked()
                 } else save()
@@ -931,6 +937,7 @@ internal class SettingsScreen(
     }
 
     fun dispose() {
+        storageUi?.dispose(); storageUi = null
         if (disposed) return
         disposed = true
         serviceUi?.dispose(); serviceUi = null

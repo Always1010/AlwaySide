@@ -10,6 +10,7 @@ internal interface ReadingCacheIndex {
     fun used(file: File, owner: String) {}
     fun marked(file: File, owner: String, mark: String) {}
     fun removed(owner: String, mark: String) {}
+    fun unreferenced(owner: String, key: String) {}
     fun removeOwner(owner: String) {}
     fun forgotten(file: File) {}
 }
@@ -41,7 +42,10 @@ internal class PointReadingCache(private val directory: File, private val index:
         if (marks.list(owner).none { it.key == mark.key }) releaseReference(mark.key, owner)
     }
 
-    private fun releaseReference(key: String, owner: String) { writeOwners(key, owners(key) - readingDigest(owner)) }
+    private fun releaseReference(key: String, owner: String) {
+        writeOwners(key, owners(key) - readingDigest(owner))
+        index.unreferenced(owner, key)
+    }
 
     @Synchronized fun get(key: String, owner: String, ticket: Ticket): File? {
         if (!current(owner, ticket)) return null
@@ -69,9 +73,9 @@ internal class PointReadingCache(private val directory: File, private val index:
         } finally { temporary.delete() }
     }
 
-    @Synchronized fun removeOwner(owner: String) {
+    @Synchronized fun removeOwner(owner: String, keepMarks: Boolean = false) {
         revisions[owner] = (revisions[owner] ?: 0) + 1
-        marks.removeOwner(owner)
+        if (!keepMarks) marks.removeOwner(owner)
         index.removeOwner(owner)
         val id = readingDigest(owner)
         audioFiles().forEach { file ->
@@ -79,7 +83,8 @@ internal class PointReadingCache(private val directory: File, private val index:
             val previous = owners(key)
             if (id in previous) {
                 val next = previous - id
-                if (next.isEmpty()) { deleteFile(file); deleteFile(refs(key)); index.forgotten(file) } else writeOwners(key, next)
+                writeOwners(key, next)
+                if (next.isEmpty()) { deleteFile(file); deleteFile(refs(key)); index.forgotten(file) }
             }
         }
     }

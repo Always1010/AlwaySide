@@ -88,7 +88,9 @@ internal class SubtitleController private constructor(private val context: Conte
 
     private fun enqueueJob(snapshot: StoredConversation, source: File, method: SubtitleMethod,
         recreate: Boolean, config: AppConfig, batchedTranslation: Boolean = preferences.batchedTranslation()): Job {
-        synchronized(ConversationUsage.lock) {
+        val reservation = Any()
+        ConversationUsage.update(reservation, snapshot.id)
+        try {
         check(!StorageRuntime.get(context).catalog.isDeleted(snapshot.id)) { "这段会话已删除" }
         check(preferences.enabled(method)) { "请先在实验室开启此字幕方案" }
         val key = Key(snapshot.id, method)
@@ -106,7 +108,7 @@ internal class SubtitleController private constructor(private val context: Conte
         publish()
         worker.execute { execute(job) }
         return job
-        }
+        } finally { ConversationUsage.update(reservation, null) }
     }
 
     /** Capture settings at submit time; no upload starts until the chat worker asks for the original. */
@@ -320,7 +322,7 @@ internal class SubtitleController private constructor(private val context: Conte
 
     private fun registerFiles(owner: String) {
         val folder = File(context.noBackupFilesDir, "conversation_subtitles/${digest(owner)}")
-        folder.walkTopDown().filter(File::isFile).forEach { StorageRuntime.get(context).register(it, "subtitles", owner) }
+        folder.walkTopDown().filter(File::isFile).forEach { StorageRuntime.get(context).published(it, "subtitles", owner) }
     }
 
     private fun finish(job: Job, result: Record) {

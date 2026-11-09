@@ -26,7 +26,7 @@ internal class HandedOffConversation(val session: ChatSession, val image: Bitmap
 internal object ActiveConversationBridge {
     var detachHandler: ((String) -> Bitmap?)? = null
     private val pending = linkedMapOf<String, HandedOffConversation>()
-    private val retainedAudio = mutableSetOf<String>()
+    private val retainedAudio = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     fun detach(id: String): Bitmap? {
         check(Looper.myLooper() == Looper.getMainLooper())
         return detachHandler?.invoke(id)

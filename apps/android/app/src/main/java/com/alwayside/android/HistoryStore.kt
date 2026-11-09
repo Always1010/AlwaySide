@@ -18,7 +18,7 @@ internal class HistoryStore(private val context: Context) {
             runtime.schedule()
             Repository(HistoryFiles(CatalogHistoryFiles(disk, runtime.catalog),
                 { WireJson.encode(it).toByteArray(Charsets.UTF_8) },
-                { WireJson.decode(it.toString(Charsets.UTF_8)) }), HistoryPendingWrites(lock, writer))
+                { WireJson.decode(it.toString(Charsets.UTF_8)) }), HistoryPendingWrites(lock, writer, ConversationUsage::pending))
         }
     }
 
@@ -53,28 +53,34 @@ internal class HistoryStore(private val context: Context) {
     fun createTag(name: String) = change { HistoryCollection.createTag(it, name.trim()) }
     fun renameTag(old: String, new: String) = change { HistoryCollection.renameTag(it, old, new.trim()) }
     fun deleteTag(name: String) = change { HistoryCollection.deleteTag(it, name) }
-    fun delete(id: String) = synchronized(ConversationUsage.lock) { synchronized(lock) {
+    fun delete(id: String) = synchronized(lock) {
         check(!ConversationUsage.active(id)) { "会话正在使用，请先结束播放或处理后重试" }
         change { it.copy(conversations = it.conversations.filterNot { value -> value.id == id }) }
         repository.pending.invalidate(id)
-    } }
-    fun clear() = synchronized(ConversationUsage.lock) { synchronized(lock) {
+    }
+    fun clear() = synchronized(lock) {
         check(ConversationUsage.ids().isEmpty()) { "有会话正在使用，请先结束播放或处理" }
         files.clear { repository.pending.invalidateAll(); runtime.schedule() }
-    } }
+    }
     fun trim() = change { HistoryCollection.retain(it, protectedIds = ConversationUsage.ids()) }
 
-    private fun change(bodyId: String? = null, transform: (HistoryState) -> HistoryState) = synchronized(ConversationUsage.lock) { synchronized(lock) {
-        val (old, next) = files.change(bodyId, transform)
+    private fun change(bodyId: String? = null, transform: (HistoryState) -> HistoryState) = synchronized(lock) {
+        var attempts = 0
+        var committed: Pair<HistoryState, HistoryState>? = null
+        while (committed == null) {
+            try { committed = files.change(bodyId, transform) }
+            catch (error: ConversationUsage.Changed) { if (++attempts >= 3) throw error }
+        }
+        val (old, next) = committed
         val remaining = next.conversations.map { it.id }.toSet()
         old.conversations.filterNot { it.id in remaining }.forEach {
             repository.pending.invalidate(it.id)
         }
         runtime.schedule()
-    } }
+    }
 
     private companion object {
-        val lock = ConversationUsage.lock
+        val lock = Any()
         val writer = Executors.newSingleThreadExecutor()
         data class Repository(val files: HistoryFiles, val pending: HistoryPendingWrites)
         val repositories = ConcurrentHashMap<String, Repository>()

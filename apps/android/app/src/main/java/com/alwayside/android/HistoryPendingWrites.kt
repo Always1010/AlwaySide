@@ -3,7 +3,8 @@ package com.alwayside.android
 import java.util.concurrent.Executor
 
 /** Invalidate queued snapshots when their conversation or entire collection is explicitly removed. */
-internal class HistoryPendingWrites(private val lock: Any, private val worker: Executor) {
+internal class HistoryPendingWrites(private val lock: Any, private val worker: Executor,
+    private val usage: (Any, String?) -> Unit = { _, _ -> }) {
     private val queueLock = Any()
     private val tokens = mutableMapOf<String, Any>()
     private class Pending(val token: Any, var updatedAt: Long, var save: () -> Unit, var failed: (Exception) -> Unit)
@@ -19,7 +20,7 @@ internal class HistoryPendingWrites(private val lock: Any, private val worker: E
                 }
                 return
             }
-            Pending(token, updatedAt, save, failed).also { pending[id] = it }
+            Pending(token, updatedAt, save, failed).also { pending[id] = it; usage(it, id) }
         }
         worker.execute {
             try {
@@ -34,10 +35,17 @@ internal class HistoryPendingWrites(private val lock: Any, private val worker: E
                     current?.save?.invoke()
                 }
             } catch (error: Exception) { entry.failed(error) }
+            finally { usage(entry, null) }
         }
     }
 
     /** The repository owner holds its write lock before invalidating pending snapshots. */
-    fun invalidate(id: String) = synchronized(queueLock) { tokens.remove(id); pending.remove(id); Unit }
-    fun invalidateAll() = synchronized(queueLock) { tokens.clear(); pending.clear() }
+    fun invalidate(id: String) {
+        val entry = synchronized(queueLock) { tokens.remove(id); pending.remove(id) }
+        entry?.let { usage(it, null) }
+    }
+    fun invalidateAll() {
+        val entries = synchronized(queueLock) { tokens.clear(); pending.values.toList().also { pending.clear() } }
+        entries.forEach { usage(it, null) }
+    }
 }

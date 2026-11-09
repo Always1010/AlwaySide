@@ -111,7 +111,7 @@ internal class HistoryFiles(
         persist(next, changed)
     }
 
-    private fun persist(next: HistoryState, bodies: Map<String, StoredConversation>) {
+    private fun persist(next: HistoryState, bodies: Map<String, StoredConversation>, clearAll: Boolean = false) {
         require(next.historyLimit > 0) { "历史数量须大于 0" }
         next.tags.forEach(HistoryCollection::validateTag)
         check(next.tags.distinct().size == next.tags.size) { "标签重复" }
@@ -133,7 +133,7 @@ internal class HistoryFiles(
             nextReferences[value.id] = name
         }
         val state = snapshot(next.copy(conversations = summaries))
-        val manifest = encode(linkedMapOf("version" to 3, "historyLimit" to state.historyLimit,
+        val manifest = encode(linkedMapOf("version" to 3, "historyLimit" to state.historyLimit, "clearAll" to clearAll,
             "tags" to state.tags, "records" to state.conversations.map { summary ->
                 mapOf("id" to summary.id, "file" to nextReferences.getValue(summary.id),
                     "summary" to HistoryArchive.record(summary))
@@ -163,7 +163,7 @@ internal class HistoryFiles(
             }.getOrDefault(emptyList())
             HistoryState(tags = tags, historyLimit = limit)
         } ?: HistoryState()
-        persist(current.copy(conversations = emptyList()), emptyMap())
+        persist(current.copy(conversations = emptyList()), emptyMap(), clearAll = true)
         try {
             files.delete(LEGACY)
             files.records().filter { RECORD_NAME.matches(it) }.forEach(files::delete)

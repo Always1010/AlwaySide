@@ -18,7 +18,7 @@ class HistoryPendingWritesTest {
     @Test(timeout = 10000) fun enqueueRemainsResponsiveWhileAnotherConversationIsBeingSaved() {
         val writer = Executors.newSingleThreadExecutor()
         val caller = Executors.newSingleThreadExecutor()
-        val queue = HistoryPendingWrites(Any(), writer)
+        val queue = HistoryPendingWrites(Any(), writer, ConversationUsage::pending)
         val writing = CountDownLatch(1)
         val finishWrite = CountDownLatch(1)
         val secondSaved = CountDownLatch(1)

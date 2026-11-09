@@ -363,9 +363,13 @@ internal class SubtitlePanel(
             val directory = File(activity.cacheDir, "subtitle-exports").apply { mkdirs() }
             val file = File(directory, "audio-subtitles-${System.currentTimeMillis()}.srt")
             file.writeText(SubtitleFormat.srt(bundle.cues, bundle.cues.associate { it.id to "${bundle.translations[it.id]}\n${it.text}" }), Charsets.UTF_8)
+            StorageRuntime.get(activity).register(file, "exports", owner)
             val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.subtitles", file)
-            activity.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/x-subrip")
-                .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "导出双语字幕"))
+            val release = StorageShare.protect(activity, file)
+            try {
+                activity.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/x-subrip")
+                    .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "导出双语字幕"))
+            } catch (error: Exception) { release(); throw error }
         }
     }
     private fun confirmGeneration(recreate: Boolean) {

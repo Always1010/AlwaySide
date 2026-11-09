@@ -121,7 +121,7 @@ internal class ChatSession(
         status = if (request.audio != null && transcript.isEmpty()) "正在转写音频…" else "正在连接…"
         archive()
         notifyChanged()
-        worker.execute {
+        ConversationUsage.execute(worker, id) {
             val accumulated = StringBuilder(request.continuationPrefix)
             try {
                 var words = request.transcript
@@ -261,7 +261,11 @@ internal class ChatSession(
             }
         }
     }
-    fun close() { if (busy) cancel(); closed = true; ConversationUsage.update(usageToken, null); epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
+    fun close() {
+        if (busy) cancel()
+        closed = true; ConversationUsage.update(usageToken, null); epoch++; cancellation?.cancel(); observer = null
+        ConversationUsage.cancelQueued(worker.shutdownNow())
+    }
     private fun requestCredentialsCurrent(request: Request): Boolean {
         val needsAudio = request.audio != null && request.transcript.isEmpty()
         return credentialsCurrent(request.config, request.audio == null || request.config.audioOutput != "transcript",

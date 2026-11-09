@@ -689,7 +689,7 @@ class AssistantService : Service() {
         nodes.remove(kind)?.let { old ->
             hideWindow(old)
             if (old.chat.busy) { old.chat.cancel(); toast("已停止上一条同类请求，开始新会话") }
-            old.chat.close(); old.clip?.file?.let { ChatAudioPlayback.deleteTemporaryAudio(it) }
+            old.chat.close(); old.clip?.file?.let { ActiveConversationBridge.releaseAudio(it); ChatAudioPlayback.deleteTemporaryAudio(it) }
         }
         return FloatingConversation(kind).also { nodes[kind]=it;lastKind=kind }
     }
@@ -1037,6 +1037,7 @@ class AssistantService : Service() {
     }
     private fun imageDescription(node:FloatingConversation):String{val f=node.frame?:return "无可用截图";return "${if(node.bounds!=null)"选区" else "截图"} ${SimpleDateFormat("HH:mm:ss",Locale.getDefault()).format(Date(f.capturedAt))}"}
     private fun archivePrepared(node:FloatingConversation){
+        node.clip?.file?.let { StorageRuntime.get(this).register(it, "temporary", node.chat.conversationId) }
         runCatching{HistoryStore(this).save(node.chat.snapshot().copy(title=when(node.kind){"photo"->"截图待提问";"audio"->"音频待提问";else->node.chat.sourceText.take(60)},evidence=when(node.kind){"photo"->imageDescription(node);"audio"->"内部录音，等待提问";else->"选中文字"},status="等待提问"))}.onFailure{toast("本机历史保存失败，请检查存储空间")}
         persistImage(node)
         persistAudio(node)
@@ -1249,7 +1250,7 @@ class AssistantService : Service() {
                 ProbeState.lastEvent=if(deleted)"已达录音上限，本段录音已丢弃，未发起转写" else "已达录音上限，未发起转写；录音文件清理失败"
                 toast(ProbeState.lastEvent);showBubble();return@start
             }
-            val node=fresh("audio");node.clip=result;node.imageMode=2
+            val node=fresh("audio");node.clip=result;ActiveConversationBridge.retainAudio(result.file);node.imageMode=2
             node.awaitingAudioApproval=disposition==RecordingDisposition.PROMPT
             if(!node.awaitingAudioApproval)archivePrepared(node)
             showWindow(node,focusQuestion=disposition==RecordingDisposition.READY)
@@ -1294,6 +1295,7 @@ class AssistantService : Service() {
                     if(deferredPreviewWindows[node.kind]?.first===node)deferredPreviewWindows.remove(node.kind)
                     previewWindows=previewWindows.filterNot { it.first===node }
                     node.draft="";node.frame=null;node.originalFrame=null;node.clip=null
+                    temporaryAudio?.let(ActiveConversationBridge::releaseAudio)
                     if(lastKind==node.kind&&nodes[lastKind]==null)lastKind=nodes.keys.lastOrNull() ?: "photo"
                     ProbeState.requesting=nodes.values.any { it.chat.busy }
                     bubbleVisual?.working=ProbeState.requesting
@@ -1354,7 +1356,6 @@ class AssistantService : Service() {
                     node.draft=state.draft;node.webSearchOverride=state.webSearchOverride
                     node.imageMode=if(!state.reuseImage)2 else if(node.imageMode==2)0 else node.imageMode
                     node.detached=false;node.openingInApp=false
-                    node.clip?.file?.let{ActiveConversationBridge.releaseAudio(it)}
                     nodes[node.kind]=node
                     refresh(node)
                     true
@@ -1390,7 +1391,7 @@ class AssistantService : Service() {
         preferences.removeListener(preferencesListener);cancelRecording(false)
         apiPreferences.unregisterOnSharedPreferenceChangeListener(apiPreferencesListener)
         subtitlePreferences.removeListener(subtitleListener)
-        nodes.values.forEach{hideWindow(it);it.chat.close();it.clip?.file?.let { file -> ChatAudioPlayback.deleteTemporaryAudio(file) }};nodes.clear()
+        nodes.values.forEach{hideWindow(it);it.chat.close();it.clip?.file?.let { file -> ActiveConversationBridge.releaseAudio(file);ChatAudioPlayback.deleteTemporaryAudio(file) }};nodes.clear()
         clearCapture();removeMenu();removeBubble();removeSelector();mediaWorker.shutdown()
         ProbeState.serviceRunning=false;ProbeState.recording=false;ProbeState.requesting=false;ProbeState.lastEvent="助手与采集已停止"
         stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy()

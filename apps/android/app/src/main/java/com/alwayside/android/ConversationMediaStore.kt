@@ -15,7 +15,7 @@ internal class ConversationMediaStore(private val context: Context) {
 
     fun saveAudio(id: String, input: java.io.InputStream, length: Long) {
         audio.save(id, input, length)
-        audio.load(id)?.let { StorageRuntime.get(context).register(it, "audio", id) }
+        audio.load(id)?.let { StorageRuntime.get(context).published(it, "audio", id) }
     }
     fun loadAudio(id: String): File? = audio.load(id)
     fun deleteAudio(id: String) {
@@ -34,7 +34,7 @@ internal class ConversationMediaStore(private val context: Context) {
         val latest = imageFile(id)
         if (current !== original) writeImage(latest, current)
         else AtomicFile(latest).delete()
-        listOf(first, latest).filter(File::isFile).forEach { StorageRuntime.get(context).register(it, "images", id) }
+        listOf(first, latest).filter(File::isFile).forEach { StorageRuntime.get(context).published(it, "images", id) }
     }
 
     private fun writeImage(file: File, bitmap: Bitmap) {

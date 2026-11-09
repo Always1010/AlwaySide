@@ -47,6 +47,7 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
         } catch (e: Exception) { audio.release(); throw e }
         record=audio
         val file=File(context.cacheDir,"listening-${System.nanoTime()}.wav")
+        ConversationUsage.update(this, "@recording")
         thread=Thread({
             var bytes=0
             var peak=0.0
@@ -85,10 +86,14 @@ internal class PlaybackRecorder(private val context: Context,private val main: H
             val clip=if (completion.reason==RecordingEndReason.CANCELLED || bytes==0 || failure?.startsWith("录音未完成")==true) {
                 file.delete(); null
             } else AudioClip(file,seconds,peak,failure,completion.reason==RecordingEndReason.LIMIT)
-            main.post { record=null; thread=null; onDone(clip) }
+            main.post {
+                record=null; thread=null
+                try { onDone(clip) } finally { ConversationUsage.update(this, null) }
+            }
         },"playback-capture").apply { start() }
     }
     fun stop(discardClip: Boolean=false) {
+        if (thread == null) ConversationUsage.update(this, null)
         completion.stop(discardClip)
         // release() remains owned by the recording thread.
         runCatching { record?.stop() }

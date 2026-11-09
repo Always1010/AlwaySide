@@ -25,6 +25,7 @@ internal class PointReadingController private constructor(private val context: C
     private var temporary: File? = null
     private val pendingAnchors = linkedSetOf<ReadingAnchor>()
     private val usageToken = Any()
+    private val keyUsageToken = Any()
     private val observers = mutableSetOf<() -> Unit>()
     var state = State(); private set
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -38,6 +39,7 @@ internal class PointReadingController private constructor(private val context: C
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
     private fun publish() {
         ConversationUsage.update(usageToken, state.owner.takeIf { state.generating })
+        ConversationUsage.update(keyUsageToken, "@reading:${state.key}".takeIf { state.generating })
         observers.toList().forEach { it() }
     }
 
@@ -91,6 +93,7 @@ internal class PointReadingController private constructor(private val context: C
             ConversationUsage.update(jobUsage, owner)
             var disposable: File? = null
             try {
+                check(!StorageRuntime.get(context).catalog.isDeleted(owner)) { "这段会话已删除" }
                 cancel.throwIfCancelled()
                 var stored = cache.get(key, owner, ticket)
                 if (stored != null && !validAudio(stored)) { cache.discard(key); stored = null }
@@ -105,6 +108,7 @@ internal class PointReadingController private constructor(private val context: C
                     cancel.throwIfCancelled()
                     disposable = File.createTempFile("point-reading-", ".${voice.format}", context.cacheDir)
                     disposable.writeBytes(bytes)
+                    StorageRuntime.get(context).register(disposable, "temporary", owner)
                     require(validAudio(disposable)) { "服务未返回可播放的音频，请检查朗读接口与模型" }
                     val favorites = HistoryStore(context).index().conversations.filter { it.isFavorite }.map { it.id }.toSet()
                     cancel.throwIfCancelled()
@@ -205,9 +209,8 @@ internal class PointReadingController private constructor(private val context: C
         stop()
         worker.execute {
             val success=runCatching {
-                synchronized(ConversationUsage.lock) {
-                    cache.clearIdle(playback.currentFile)
-                }
+                val manager = StorageManager(context)
+                manager.clean(manager.scan().inventory.entries.filter { it.idle && it.optionalCleanup })
             }.isSuccess
             main.post { publish(); if(!success)toast("无法清理点读缓存，请重试");finished() }
         }
