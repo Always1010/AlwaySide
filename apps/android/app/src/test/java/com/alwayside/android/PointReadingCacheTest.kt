@@ -6,14 +6,14 @@ import java.nio.file.Files
 
 class PointReadingCacheTest {
     @Test fun realtimeWavAndLegacyMp3ShareQuotaAndSurviveReopeningWithoutChangingLegacyKeys() = withCache { root ->
-        val cache=PointReadingCache(root,8)
+        val cache=PointReadingCache(root)
         val legacy=ReadingVoice("service","tts-1","alloy")
         assertEquals(readingDigest(listOf("speech-v1","service","tts-1","alloy","mp3","Hi").joinToString("\u0000")),legacy.key("Hi"))
         val current=ReadingVoice("service",ReadingPresets.DEFAULT_MODEL,ReadingPresets.DEFAULT_VOICE)
         assertEquals("wav",current.format)
         cache.put(legacy.key("Hi"),"old",cache.ticket("old"),byteArrayOf(1,2),emptySet())
         cache.put(current.key("Hi"),"new",cache.ticket("new"),byteArrayOf(3,4),emptySet(),format=current.format)
-        val reopened=PointReadingCache(root,8)
+        val reopened=PointReadingCache(root)
         assertEquals("mp3",reopened.get(legacy.key("Hi"),"old",reopened.ticket("old"))!!.extension)
         assertEquals("wav",reopened.get(current.key("Hi"),"new",reopened.ticket("new"))!!.extension)
         assertEquals(4,reopened.bytes().toInt())
@@ -33,13 +33,13 @@ class PointReadingCacheTest {
     }
 
     @Test fun deletionAndClearRejectLateWritesAndFavoritesSurviveEviction() = withCache { root ->
-        val cache = PointReadingCache(root, 6)
+        val cache = PointReadingCache(root)
         val voice = ReadingVoice("service", "model", "voice")
         val oldTicket = cache.ticket("deleted")
         cache.removeOwner("deleted")
         assertNull(cache.put(voice.key("late"), "deleted", oldTicket, byteArrayOf(1), emptySet()))
         cache.put(voice.key("favorite"), "fav", cache.ticket("fav"), byteArrayOf(1, 2, 3, 4), emptySet())
-        assertNull(cache.put(voice.key("other"), "other", cache.ticket("other"), byteArrayOf(5, 6, 7), setOf("fav")))
+        assertNotNull(cache.put(voice.key("other"), "other", cache.ticket("other"), byteArrayOf(5, 6, 7), setOf("fav")))
         val beforeClear = cache.ticket("other")
         cache.clear(setOf("fav"))
         assertNull(cache.put(voice.key("late"), "other", beforeClear, byteArrayOf(1), emptySet()))
@@ -56,11 +56,11 @@ class PointReadingCacheTest {
     }
     @Test fun inactiveStoreCreatesNothingAndEvictionKeepsTheActiveFile() = withCache { root ->
         val directory=java.io.File(root,"not-created")
-        val cache=PointReadingCache(directory,4)
+        val cache=PointReadingCache(directory)
         assertFalse(directory.exists())
         val voice=ReadingVoice("service","model","voice")
         val current=cache.put(voice.key("active"),"a",cache.ticket("a"),byteArrayOf(1,2,3),emptySet())
-        assertNull(cache.put(voice.key("other"),"b",cache.ticket("b"),byteArrayOf(1,2),emptySet(),current))
+        assertNotNull(cache.put(voice.key("other"),"b",cache.ticket("b"),byteArrayOf(1,2),emptySet(),current))
         assertTrue(current!!.exists())
     }
     private fun withCache(block: (java.io.File) -> Unit) {

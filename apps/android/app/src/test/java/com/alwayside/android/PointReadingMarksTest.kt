@@ -82,10 +82,26 @@ class PointReadingMarksTest {
         val ticket = cache.ticket("chat")
         cache.put(first.key, "chat", ticket, byteArrayOf(1), emptySet())
         cache.remember("chat", ticket, first); cache.remember("chat", ticket, second)
-        cache.marks.remove("chat", first.id)
+        cache.removeMark("chat", first)
         assertEquals(listOf(second), cache.marks.list("chat"))
         assertTrue(cache.contains(first.key))
         assertThrows(IllegalArgumentException::class.java) { cache.marks.put("chat", first.copy(key = second.voice.key("Other"))) }
+    }
+
+    @Test fun replacingLastVoiceKeepsOldAudioIdleUntilTheUserCleansIt() = withDirectory { directory ->
+        val cache = PointReadingCache(directory)
+        val old = mark(anchor("Hello"))
+        val fresh = mark(old.anchor, voice.copy(voice = "nova"))
+        val ticket = cache.ticket("chat")
+        cache.put(old.key, "chat", ticket, byteArrayOf(1), emptySet())
+        cache.remember("chat", ticket, old)
+        cache.put(fresh.key, "chat", ticket, byteArrayOf(2), emptySet())
+        cache.remember("chat", ticket, fresh)
+        assertTrue(cache.contains(old.key))
+        assertEquals(listOf(old.key), cache.idleFiles().map { it.nameWithoutExtension })
+        cache.clearIdle()
+        assertFalse(cache.contains(old.key)); assertTrue(cache.contains(fresh.key))
+        assertEquals(listOf(fresh), cache.marks.list("chat"))
     }
 
     private fun withDirectory(block: (java.io.File) -> Unit) {

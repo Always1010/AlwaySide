@@ -19,7 +19,7 @@ internal class ReadingSettingsUi(private val context: Context, private val paren
             orientation = LinearLayout.VERTICAL
             this@ReadingSettingsUi.parent.addView(settingsSectionHeader("朗读服务", help = "说明", onHelp = {
                 showDialog(MaterialAlertDialogBuilder(context).setTitle("朗读服务")
-                    .setMessage("选择 API 管理中已有的密钥，再选择模型和音色，也可手动填写。「从服务读取」会联网获取模型列表，列出的模型仍需实际试用。\n\n朗读会将文字发送到所选语音服务，可能收费；声音由 AI 合成。重播已保存音频和调整播放速度不产生新的语音请求。\n\n普通点读缓存上限为 256 MiB，收藏会话关联的音频不自动清理。\n\nOpenAI 已公告兼容选项中的旧模型于 2027-01-06 停用。")
+                    .setMessage("选择 API 管理中已有的密钥，再选择模型和音色，也可手动填写。「从服务读取」会联网获取模型列表，列出的模型仍需实际试用。\n\n朗读会将文字发送到所选语音服务，可能收费；声音由 AI 合成。重播已保存音频和调整播放速度不产生新的语音请求。\n\n点读音频保存在本机，不设总容量上限。存储管理可查看占用，清理闲置音频。\n\nOpenAI 已公告兼容选项中的旧模型于 2027-01-06 停用。")
                     .setPositiveButton("知道了", null))
             }), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20) })
             this@ReadingSettingsUi.parent.addView(settingsListGroup(this), LinearLayout.LayoutParams(-1, -2))
@@ -51,10 +51,10 @@ internal class ReadingSettingsUi(private val context: Context, private val paren
         group.addView(settingsListRow("音色", preferences.voice().voice, inlineValue = true) {
             choices.chooseVoice()
         })
-        val used=PointReadingCache(java.io.File(noBackupFilesDir,"point_reading_audio")).bytes()
-        group.addView(settingsListRow("清理普通点读缓存", "${used / (1024 * 1024)} MiB", inlineValue=true) {
-            showDialog(MaterialAlertDialogBuilder(context).setTitle("清理普通点读缓存？")
-                .setMessage("保留收藏会话关联的音频。其他片段之后再听时可能需要重新请求；翻译文字不受影响。")
+        val used=PointReadingController.cache(context).idleFiles().sumOf(java.io.File::length)
+        group.addView(settingsListRow("清理闲置点读音频", "${used / (1024 * 1024)} MiB", inlineValue=true) {
+            showDialog(MaterialAlertDialogBuilder(context).setTitle("清理闲置点读音频？")
+                .setMessage("仅清理已无点读标记引用的闲置音频。之后再次生成可能收费；已有标记和聊天文字保留。")
                 .setNegativeButton("取消",null).setPositiveButton("清理") { _,_ ->
                     PointReadingController.get(context).clear(keepFavorites=true) { if(parent.isAttachedToWindow)render() }
                 })

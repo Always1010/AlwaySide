@@ -406,7 +406,7 @@ internal class SettingsScreen(
         check("saveHistoryImages", "长期保留截图", config.saveHistoryImages,
             help = "保存首张原图和当前追问图片，可从历史查看并继续使用。\n\n仅影响之后保存的截图，不补存旧图。图片存于本机，删除会话时一并删除。")
         check("saveHistoryAudio", "长期保留音频", config.saveHistoryAudio,
-            help = "完成录音后存于本机，可从历史回听。取消或丢弃的不保存，待确认录音需确认后保存。\n\n仅影响之后完成的录音，不补存旧音频；关闭不删除旧音频。\n\n删除会话时一并删除音频，总容量上限 512 MiB。")
+            help = "完成录音后存于本机，可从历史回听。取消或丢弃的不保存，待确认录音需确认后保存。\n\n仅影响之后完成的录音，不补存旧音频；关闭不删除旧音频。\n\n关闭后，新录音仅供本次处理和临时回听，结束使用后删除。制作字幕时会另行保留录音。删除会话时一并删除音频。")
         try {
             input("historyLimit", "普通历史上限", "单位：条；请输入大于 0 的整数", HistoryStore(this).historyLimit().toString(), numeric = true)
         } catch (_: Exception) { note("无法读取历史上限，请重新打开此页。") }

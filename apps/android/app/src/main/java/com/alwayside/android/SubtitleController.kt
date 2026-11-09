@@ -260,7 +260,7 @@ internal class SubtitleController private constructor(private val context: Conte
                 lastSaved = bundle
             }
             checkCredential(job)
-            synchronized(fileLock) { checkCurrent(job); archive.publish(job.key.owner, bundle) }
+            synchronized(fileLock) { checkCurrent(job); archive.publish(job.key.owner, bundle); registerFiles(job.key.owner) }
             finish(job, Record(published = bundle, status = "双语字幕已保存", loaded = true))
         } catch (error: Exception) {
             fail(job, lastSaved, error)
@@ -305,7 +305,7 @@ internal class SubtitleController private constructor(private val context: Conte
     }
 
     private fun checkpoint(job: Job, bundle: SubtitleBundle) {
-        synchronized(fileLock) { checkCurrent(job); archive.saveDraft(job.key.owner, bundle) }
+        synchronized(fileLock) { checkCurrent(job); archive.saveDraft(job.key.owner, bundle); registerFiles(job.key.owner) }
         update(job, if (bundle.transcriptionComplete) "英文字幕已保存" else "转写进度已保存", bundle)
     }
 
@@ -316,6 +316,11 @@ internal class SubtitleController private constructor(private val context: Conte
                 draft = draft ?: record(job.key.owner, job.key.method).draft, error = "", loaded = true)
             publish()
         }
+    }
+
+    private fun registerFiles(owner: String) {
+        val folder = File(context.noBackupFilesDir, "conversation_subtitles/${digest(owner)}")
+        folder.walkTopDown().filter(File::isFile).forEach { StorageRuntime.get(context).register(it, "subtitles", owner) }
     }
 
     private fun finish(job: Job, result: Record) {

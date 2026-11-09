@@ -53,7 +53,7 @@ internal class PointReadingController private constructor(private val context: C
     fun removeMark(owner: String, mark: ReadingMark) {
         if (state.owner == owner && state.generating && state.anchor?.id == mark.id) stop()
         worker.execute {
-            val success = runCatching { cache.marks.remove(owner, mark.id) }.isSuccess
+            val success = runCatching { cache.removeMark(owner, mark) }.isSuccess
             main.post { publish(); if (!success) toast("无法移除点读标记，请重试") }
         }
     }
@@ -205,8 +205,9 @@ internal class PointReadingController private constructor(private val context: C
         stop()
         worker.execute {
             val success=runCatching {
-                val protected = if (keepFavorites) HistoryStore(context).index().conversations.filter { it.isFavorite }.map { it.id }.toSet() else emptySet()
-                cache.clear(protected)
+                synchronized(ConversationUsage.lock) {
+                    cache.clearIdle(playback.currentFile)
+                }
             }.isSuccess
             main.post { publish(); if(!success)toast("无法清理点读缓存，请重试");finished() }
         }
@@ -251,9 +252,10 @@ internal class PointReadingController private constructor(private val context: C
         private val stores = java.util.concurrent.ConcurrentHashMap<String,PointReadingCache>()
         private fun cacheFor(context: Context): PointReadingCache {
             val directory=File(context.noBackupFilesDir,"point_reading_audio")
-            return stores.computeIfAbsent(directory.absolutePath) { PointReadingCache(directory) }
+            return stores.computeIfAbsent(directory.absolutePath) { PointReadingCache(directory, StorageReadingIndex(StorageRuntime.get(context))) }
         }
         fun get(context: Context): PointReadingController = instance ?: PointReadingController(context.applicationContext).also { instance = it }
+        fun cache(context: Context) = cacheFor(context)
         fun stopIfCreated() { instance?.stop() }
         fun stopOriginIfCreated(owner: String, origin: ReadingOrigin) {
             instance?.let { if(it.state.owner==owner && it.state.origin==origin)it.stop() }

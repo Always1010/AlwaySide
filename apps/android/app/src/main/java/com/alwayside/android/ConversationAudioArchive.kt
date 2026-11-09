@@ -9,7 +9,6 @@ import java.security.MessageDigest
 /** Stream recordings into a private archive without loading a full WAV into memory. */
 internal class ConversationAudioArchive(
     private val directory: File,
-    private val maxBytes: Long = 512L * 1024 * 1024,
 ) {
     fun save(id: String, input: InputStream, length: Long) = synchronized(copyLock) {
         val target = audioFile(id)
@@ -18,10 +17,6 @@ internal class ConversationAudioArchive(
         // Only one copy runs at a time; these are leftovers from an interrupted process.
         synchronized(lock) {
             directory.listFiles()?.filter { it.extension == "tmp" }?.forEach { check(it.delete()) { "无法清理未完成的录音" } }
-        }
-        val storedBytes = directory.listFiles()?.sumOf { it.length() } ?: 0L
-        check(length <= maxBytes && storedBytes - target.length() <= maxBytes - length) {
-            "历史音频已达到 512 MiB，请删除不需要的会话后重试"
         }
         val pending = File.createTempFile("recording-", ".tmp", directory)
         try {

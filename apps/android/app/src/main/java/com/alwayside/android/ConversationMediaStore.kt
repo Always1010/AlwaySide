@@ -13,7 +13,10 @@ internal class ConversationMediaStore(private val context: Context) {
     private val directory = File(context.noBackupFilesDir, "conversation_images")
     private val audio = ConversationAudioArchive(File(context.noBackupFilesDir, "conversation_audio"))
 
-    fun saveAudio(id: String, input: java.io.InputStream, length: Long) = audio.save(id, input, length)
+    fun saveAudio(id: String, input: java.io.InputStream, length: Long) {
+        audio.save(id, input, length)
+        audio.load(id)?.let { StorageRuntime.get(context).register(it, "audio", id) }
+    }
     fun loadAudio(id: String): File? = audio.load(id)
     fun deleteAudio(id: String) {
         SubtitleController.deleteConversation(context, id)
@@ -31,6 +34,7 @@ internal class ConversationMediaStore(private val context: Context) {
         val latest = imageFile(id)
         if (current !== original) writeImage(latest, current)
         else AtomicFile(latest).delete()
+        listOf(first, latest).filter(File::isFile).forEach { StorageRuntime.get(context).register(it, "images", id) }
     }
 
     private fun writeImage(file: File, bitmap: Bitmap) {
@@ -44,8 +48,6 @@ internal class ConversationMediaStore(private val context: Context) {
             output.toByteArray()
         } } finally { if (scaled !== bitmap) scaled.recycle() }
         check(bytes.size <= MAX_IMAGE_BYTES) { "图片过大，无法长期保存" }
-        val storedBytes = directory.listFiles()?.sumOf { it.length() } ?: 0L
-        check(storedBytes - file.length() + bytes.size <= MAX_TOTAL_BYTES) { "历史图片已达到 128 MiB，请删除不需要的会话后重试" }
         val target = AtomicFile(file)
         val output = target.startWrite()
         try { output.write(bytes); target.finishWrite(output) }
@@ -96,6 +98,5 @@ internal class ConversationMediaStore(private val context: Context) {
     private companion object {
         val lock = Any()
         const val MAX_IMAGE_BYTES = 4L * 1024 * 1024
-        const val MAX_TOTAL_BYTES = 128L * 1024 * 1024
     }
 }

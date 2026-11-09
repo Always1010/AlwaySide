@@ -28,15 +28,13 @@ class ConversationAudioArchiveTest {
         assertTrue(directory.listFiles()!!.isEmpty())
     }
 
-    @Test fun storageLimitRejectsANewRecordingWithoutLosingExistingAudio() {
+    @Test fun additionalRecordingsDoNotEvictEarlierAudio() {
         val directory = temporary.newFolder()
-        val archive = ConversationAudioArchive(directory, recording.size.toLong())
+        val archive = ConversationAudioArchive(directory)
         recording.inputStream().use { archive.save("first", it, recording.size.toLong()) }
-        assertThrows(IllegalStateException::class.java) {
-            recording.inputStream().use { archive.save("second", it, recording.size.toLong()) }
-        }
+        recording.inputStream().use { archive.save("second", it, recording.size.toLong()) }
         assertArrayEquals(recording, archive.load("first")!!.readBytes())
-        assertNull(archive.load("second"))
+        assertNotNull(archive.load("second"))
         archive.delete("first")
         recording.inputStream().use { archive.save("second", it, recording.size.toLong()) }
         assertNotNull(archive.load("second"))

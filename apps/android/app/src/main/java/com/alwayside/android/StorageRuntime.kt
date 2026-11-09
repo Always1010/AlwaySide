@@ -35,7 +35,18 @@ internal class StorageRuntime private constructor(val context: Context) {
                     "images" -> media.deleteImage(job.owner)
                     "audio" -> { ChatAudioPlayback.stopConversation(job.owner); media.deleteAudioFile(job.owner) }
                     "subtitles" -> SubtitleController.deleteConversation(context, job.owner)
-                    "reading" -> PointReadingController.delete(context, job.owner)
+                    "reading" -> {
+                        PointReadingController.delete(context, job.owner)
+                        catalog.assets().filter { it.kind == "reading" && it.owner == job.owner && catalog.references(it.path).isEmpty() }.forEach { asset ->
+                            val file = assetFile(asset.path)
+                            val refs = File(file.parentFile, file.nameWithoutExtension + ".refs")
+                            if (refs.isFile && PointReadingController.cache(context).legacyOwners(file.nameWithoutExtension).isEmpty()) {
+                                check(!file.exists() || file.delete()) { "点读文件清理失败" }
+                                check(!refs.exists() || refs.delete()) { "点读引用清理失败" }
+                                catalog.forget(asset.path)
+                            }
+                        }
+                    }
                     else -> error("未知的清理任务")
                 }
             }
