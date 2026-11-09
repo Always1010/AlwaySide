@@ -33,6 +33,7 @@ internal class SettingsEditPanel(
     private val onRequestClose: () -> Unit,
     onSave: (String, (String) -> Unit) -> Unit,
     confirmLabel: String = "保存",
+    maxDecimalPlaces: Int? = null,
 ) : BottomSheetDialog(context) {
     private var closing = false
     private val inputLayout = TextInputLayout(context).apply {
@@ -69,6 +70,13 @@ internal class SettingsEditPanel(
             setAutofillHints(null)
         }
         contentDescription = title
+        if (maxDecimalPlaces != null) {
+            val pattern = Regex("[0-9]*(\\.[0-9]{0,$maxDecimalPlaces})?")
+            filters = arrayOf(android.text.InputFilter { source, start, end, dest, dstart, dend ->
+                val next = dest.subSequence(0, dstart).toString() + source.subSequence(start, end) + dest.subSequence(dend, dest.length)
+                if (pattern.matches(next)) null else dest.subSequence(dstart, dend)
+            })
+        }
         setText(initial)
         setSelection(length())
         addTextChangedListener(object : TextWatcher {

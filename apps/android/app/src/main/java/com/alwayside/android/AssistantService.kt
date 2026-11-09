@@ -64,6 +64,16 @@ class AssistantService : Service() {
     private var captureOwner: FloatingConversation? = null
     private var restoreCaptureWindows: (() -> Unit)? = null
     private var recorder: PlaybackRecorder? = null
+    private var pendingRecordingStart: Runnable? = null
+    private var recordingStartAt = 0L
+    // Use recording bindings while waiting, so end/cancel gestures can revoke the start.
+    private val recordingActive: Boolean get() = recorder != null || pendingRecordingStart != null
+    private val recordingScreenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            // A delay must not survive sleep and unexpectedly start recording on wake.
+            if (intent?.action == Intent.ACTION_SCREEN_OFF && pendingRecordingStart != null) cancelRecording(false)
+        }
+    }
     private var finishingAudio = false
     private var audioManual = false
     private var audioForPreview = false
@@ -90,7 +100,7 @@ class AssistantService : Service() {
     private val settleTaps = Runnable {
         val count = taps.settle()
         if (count > 0 && alive) {
-            if ((recorder != null) != burstRecording) toast("录音状态已改变，请重新操作")
+            if (recordingActive != burstRecording) toast("录音状态已改变，请重新操作")
             else dispatchAction(burstConfig.gestureAction(BubbleGesture.taps(count), burstRecording))
         }
     }
@@ -121,14 +131,18 @@ class AssistantService : Service() {
             if (!alive) return
             applyPendingAppearance()
             bubbleVisual?.recording = recorder != null
-            bubbleVisual?.working = nodes.values.any { it.chat.busy }
+            bubbleVisual?.working = pendingRecordingStart != null || nodes.values.any { it.chat.busy }
             bubbleVisual?.invalidate()
-            val recording = recorder != null
-            bubble?.contentDescription = (if(recording)"AlwaySide 正在录音。" else "AlwaySide。") +
+            val recording = recordingActive
+            val waiting = pendingRecordingStart != null
+            val delayStatus = if (waiting) String.format(Locale.getDefault(), "%.1f 秒后开始录音",
+                ((recordingStartAt - SystemClock.uptimeMillis()).coerceAtLeast(0L) + 99) / 100 / 10.0) else ""
+            bubble?.contentDescription = (if(waiting)"AlwaySide，$delayStatus。" else if(recording)"AlwaySide 正在录音。" else "AlwaySide。") +
                 BubbleGesture.entries.filter { !it.directional || config.longPressSlide }.joinToString("，") { gesture ->
                     "${gesture.title}：${GestureBindings.title(config.gestureAction(gesture, recording))}"
                 }
             val current = recorder
+            if (waiting) ProbeState.lastEvent = delayStatus
             if (current != null) ProbeState.lastEvent = String.format(Locale.getDefault(), "正在听 %.1f 秒%s", current.seconds, if (finishingAudio) "，正在结束" else "")
             main.postDelayed(this, 250)
         }
@@ -204,6 +218,9 @@ class AssistantService : Service() {
         windows = getSystemService(WindowManager::class.java)
         preferences = InteractionPreferences(this)
         config = preferences.load()
+        val screenFilter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(recordingScreenReceiver, screenFilter, RECEIVER_NOT_EXPORTED)
+        else registerReceiver(recordingScreenReceiver, screenFilter)
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "悬浮助手与采集", NotificationManager.IMPORTANCE_LOW))
         preferences.addListener(preferencesListener)
@@ -222,6 +239,7 @@ class AssistantService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) {
             AssistantControl.setEnabled(this, false)
+            cancelRecording(false)
             stopSelf(); return START_NOT_STICKY
         }
         if (!Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
@@ -436,6 +454,7 @@ class AssistantService : Service() {
         overlaysSuspended = true
         // Invalidate pending real capture/consent and touch callbacks before displaying a simulation.
         capturePermissionGate.cancel(); captureEpoch++
+        cancelPendingRecordingStart()
         gathering = false; captureOwner = null; restoreCaptureWindows = null
         removeMenu(); removeBubble()
         nodes.values.forEach { playback.setVisible(it, null, false) }
@@ -498,21 +517,21 @@ class AssistantService : Service() {
             y = constrainBubbleY((position.second * size.second).toInt(), size.second)
         }
         var startX = layout.x; var startY = layout.y
-        var touchRecording = recorder != null
+        var touchRecording = recordingActive
         var touchConfig = config
-        view.setOnClickListener { dispatchAction(config.action(1, recorder != null)) }
-        view.setOnLongClickListener { dispatchAction(config.gestureAction(BubbleGesture.HOLD, recorder != null)); true }
+        view.setOnClickListener { dispatchAction(config.action(1, recordingActive)) }
+        view.setOnLongClickListener { dispatchAction(config.gestureAction(BubbleGesture.HOLD, recordingActive)); true }
         view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             view.systemGestureExclusionRects = if (config.longPressSlide) listOf(Rect(0, 0, view.width, view.height)) else emptyList()
         }
         bubbleTouch = BubbleTouchController(view, glyph, config = {
             main.removeCallbacks(settleTaps)
-            config = preferences.load(); touchConfig = config; touchRecording = recorder != null
+            config = preferences.load(); touchConfig = config; touchRecording = recordingActive
             startX = layout.x; startY = layout.y
             config
         }, onLeft = { layout.x + layout.width / 2 < size.first / 2 }, onGesture = { gesture ->
             if (alive && bubble === view) {
-                if (touchRecording != (recorder != null)) {
+                if (touchRecording != recordingActive) {
                     cancelGestures(); toast("录音状态已改变，请重新操作")
                 } else if (gesture == BubbleGesture.SINGLE) {
                     if (taps.pending && burstRecording != touchRecording) taps.cancel()
@@ -552,9 +571,9 @@ class AssistantService : Service() {
         when (action) {
             AssistantActions.SCREEN -> captureNew(false)
             AssistantActions.CROP -> captureNew(true)
-            AssistantActions.AUDIO -> if (recorder != null) finishRecording(false) else startRecording()
+            AssistantActions.AUDIO -> if (recordingActive) finishRecording(false) else startRecording()
             AssistantActions.START_AUDIO -> if (recorder == null) startRecording() else toast("已经在录音中")
-            AssistantActions.END_AUDIO -> if (recorder != null) finishRecording(false) else toast("当前没有录音")
+            AssistantActions.END_AUDIO -> if (recordingActive) finishRecording(false) else toast("当前没有录音")
             AssistantActions.CANCEL_AUDIO -> cancelRecording(true)
             AssistantActions.MENU -> showMenu()
             AssistantActions.LAST -> nodes[lastKind]?.let { showWindow(it) } ?: toast("还没有悬浮会话，先截图或听一段")
@@ -592,7 +611,8 @@ class AssistantService : Service() {
         installOverlayBack(body,::removeMenu)
         val menuApi=runCatching { SettingsStore(this).load() }.getOrNull()
         val defaultSearch=menuApi?.webSearch ?: false
-        val presentation = AssistantMenuViews(uiContext,recorder != null,nodes["audio"]?.clip != null,
+        val presentation = AssistantMenuViews(uiContext,recordingActive,nodes["audio"]?.clip != null,
+            recordingPending=pendingRecordingStart != null,
             webSearch=config.menuWebSearch ?: defaultSearch,useDefaultQuestion=config.useDefaultQuestion,
             webSearchAvailable=menuApi?.let(ProviderCapabilities::search) ?: false,
             items=config.menuItems,appearance=config.menuAppearance,
@@ -605,7 +625,7 @@ class AssistantService : Service() {
             removeMenu()
             when(action) {
                 AssistantMenuAction.SCREEN -> captureNew(false)
-                AssistantMenuAction.AUDIO -> if(recorder != null)finishRecording(false) else startRecording()
+                AssistantMenuAction.AUDIO -> if(recordingActive)finishRecording(false) else startRecording()
                 AssistantMenuAction.CANCEL_AUDIO -> cancelRecording(true)
                 AssistantMenuAction.CROP -> captureNew(true)
                 AssistantMenuAction.LAST -> dispatchAction(AssistantActions.LAST)
@@ -839,7 +859,7 @@ class AssistantService : Service() {
         node.composerToggle?.setAssistantComposerState(node.composerExpanded,node.draft.isNotBlank())
     }
     private fun updateSendEnabled(node:FloatingConversation) {
-        node.send?.isEnabled=node.draft.isNotBlank()&&!node.discarding&&!node.awaitingAudioApproval&&!node.chat.busy&&!gathering&&recorder==null
+        node.send?.isEnabled=node.draft.isNotBlank()&&!node.discarding&&!node.awaitingAudioApproval&&!node.chat.busy&&!gathering&&!recordingActive
     }
     private fun updatePin(node:FloatingConversation){node.pin?.apply{
         icon=uiContext.prototypeIcon(if(node.pinned)R.drawable.ic_pin_filled else R.drawable.ic_line_pin)
@@ -883,7 +903,7 @@ class AssistantService : Service() {
             val selected=node.webSearchOverride ?: node.searchDefault
             applySearchToggleStyle(selected)
             val supported=node.apiSnapshot?.let(ProviderCapabilities::search) ?: false
-            isEnabled=!node.discarding&&!node.chat.busy&&!gathering&&recorder==null&&(supported||selected)
+            isEnabled=!node.discarding&&!node.chat.busy&&!gathering&&!recordingActive&&(supported||selected)
             tooltipText=if(supported)"允许模型搜索网页" else "当前模型或协议不支持搜索"
             accessible(if(selected)"联网搜索已开启，点击关闭" else "联网搜索已关闭，点击开启")
         }
@@ -1069,7 +1089,7 @@ class AssistantService : Service() {
     private fun sendQuestion(node:FloatingConversation,text:String,frozen:AppConfig?=null,useDefaultAudioOutput:Boolean=false){
         if (AssistantPreview.overlays.active||node.discarding) return
         if(node.awaitingAudioApproval){toast("请先选择转写或丢弃本段录音");return}
-        if(node.chat.busy||gathering||recorder!=null){toast("请先结束当前采集或请求");return}
+        if(node.chat.busy||gathering||recordingActive){toast("请先结束当前采集或请求");return}
         if(text.isBlank()){node.chat.reportSubmissionFailure(IllegalArgumentException("请输入问题"));return}
         val base=frozen?:readApiConfig(node)?:return
         if(node.apiSnapshot?.connectionId != base.connectionId)node.webSearchOverride=null
@@ -1088,7 +1108,7 @@ class AssistantService : Service() {
     }
     private fun captureNew(crop:Boolean){
         if (AssistantPreview.overlays.active) return
-        if(recorder!=null){toast("请先完成或取消录音");return}
+        if(recordingActive){toast("请先完成或取消录音");return}
         if(gathering){toast("正在取得画面，请稍候");return}
         if(frames==null){requestCaptureConsent(if(crop)AssistantActions.CROP else AssistantActions.SCREEN);return}
         val node=fresh("photo");capture(node,crop,false){showPrepared(node,config.autoAsk("photo"))}
@@ -1168,16 +1188,42 @@ class AssistantService : Service() {
         try{windows.addView(body,layout);selector=body;body.requestFocus()}catch(_:RuntimeException){toast("无法打开框选");showBubble()}
     }
     private fun startRecording(){
-        if(AssistantPreview.overlays.active||recorder!=null||finishingAudio||gathering)return
-        nodes["audio"]?.takeIf{it.awaitingAudioApproval}?.let {
-            showWindow(it);toast("上一段录音已达上限，请先选择转写或丢弃");return
+        if(pendingRecordingStart!=null){toast("正在等待开始录音");return}
+        if(!recordingReady(requestPermission=true))return
+        val recordingConfig=config
+        val delay=recordingConfig.recordingStartDelayTenths * 100L
+        if(delay==0L){beginRecording(recordingConfig);return}
+        lateinit var task: Runnable
+        task=Runnable {
+            if(pendingRecordingStart!==task)return@Runnable
+            pendingRecordingStart=null;recordingStartAt=0L
+            if(recordingReady(requestPermission=false))beginRecording(recordingConfig)
+            else { removeMenu();cancelGestures();ProbeState.lastEvent="未开始录音" }
         }
-        if(projection==null || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestCaptureConsent(AssistantActions.START_AUDIO);return}
+        pendingRecordingStart=task
+        recordingStartAt=SystemClock.uptimeMillis()+delay
+        removeMenu();hideUnpinned();cancelGestures()
+        main.postDelayed(task,delay)
+        ProbeState.lastEvent="${RecordingStartDelay.seconds(recordingConfig.recordingStartDelayTenths)} 秒后开始录音"
+        toast(ProbeState.lastEvent);showBubble()
+    }
+    private fun recordingReady(requestPermission:Boolean):Boolean{
+        if(!alive||!AssistantControl.isEnabled(this)||!Settings.canDrawOverlays(this)||AssistantPreview.overlays.active||recorder!=null||finishingAudio||gathering)return false
+        if(!requestPermission && (!getSystemService(PowerManager::class.java).isInteractive || getSystemService(KeyguardManager::class.java).isKeyguardLocked))return false
+        nodes["audio"]?.takeIf{it.awaitingAudioApproval}?.let {
+            showWindow(it);toast("上一段录音已达上限，请先选择转写或丢弃");return false
+        }
+        if(projection==null || checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+            if(requestPermission)requestCaptureConsent(AssistantActions.START_AUDIO) else toast("录音授权已失效，请重新开始")
+            return false
+        }
+        if(nodes["audio"]?.chat?.busy==true){toast("请先等待或取消当前音频回答");showWindow(nodes.getValue("audio"));return false}
+        return true
+    }
+    private fun beginRecording(recordingConfig:InteractionConfig){
         val source=projection?:return
-        if(nodes["audio"]?.chat?.busy==true){toast("请先等待或取消当前音频回答");showWindow(nodes.getValue("audio"));return}
         PointReadingController.stopIfCreated()
         removeMenu();hideUnpinned();stopPlayback();audioManual=false;audioForPreview=false
-        val recordingConfig=config
         val token=recordingGate.begin();val next=PlaybackRecorder(this,main);recorder=next
         try{next.start(source, recordingConfig.recordingMaxMinutes){result->
             if(!alive||recorder!==next||!recordingGate.complete(token)){result?.file?.delete();return@start}
@@ -1252,12 +1298,23 @@ class AssistantService : Service() {
             }
         }
     }
-    private fun finishRecording(manual:Boolean){val current=recorder?:return;if(finishingAudio)return;audioManual=manual;finishingAudio=true;current.stop(false)}
+    private fun cancelPendingRecordingStart():Boolean{
+        val pending=pendingRecordingStart?:return false
+        pendingRecordingStart=null;recordingStartAt=0L;main.removeCallbacks(pending)
+        cancelGestures()
+        ProbeState.lastEvent="已取消，未开始录音"
+        return true
+    }
+    private fun finishRecording(manual:Boolean){
+        if(pendingRecordingStart!=null){cancelRecording(true);return}
+        val current=recorder?:return;if(finishingAudio)return;audioManual=manual;finishingAudio=true;current.stop(false)
+    }
     private fun cancelRecording(notify:Boolean){
+        val wasPending=cancelPendingRecordingStart()
         val current=recorder
         recordingGate.cancel();recorder=null;finishingAudio=false;audioManual=false;audioForPreview=false;ProbeState.recording=false
         current?.stop(true);removeMenu();cancelGestures();bubbleVisual?.invalidate()
-        ProbeState.lastEvent=if(current!=null)"录音已取消并丢弃，没有发起请求" else "当前没有录音"
+        ProbeState.lastEvent=if(wasPending)"已取消，未开始录音" else if(current!=null)"录音已取消并丢弃，没有发起请求" else "当前没有录音"
         if(notify)toast(ProbeState.lastEvent)
     }
     private fun stopPlayback() { playback.stop() }
@@ -1316,6 +1373,7 @@ class AssistantService : Service() {
     }
     override fun onDestroy(){
         alive=false;capturePermissionGate.cancel();main.removeCallbacksAndMessages(null);ActiveConversationBridge.detachHandler=null
+        unregisterReceiver(recordingScreenReceiver)
         AssistantPreview.overlays.removeListener(previewListener); AssistantPreview.finishRecording = null
         previewWindows=emptyList();previewSelector=null;deferredPreviewWindows.clear()
         AppAppearance.removeListener(this, appearanceListener)

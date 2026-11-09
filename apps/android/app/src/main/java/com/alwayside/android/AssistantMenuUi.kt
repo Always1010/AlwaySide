@@ -120,6 +120,7 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
     items: List<AssistantMenuAction> = AssistantMenuAction.defaults,
     private var appearance: MenuAppearance = MenuAppearance(), private val displayScale: Float = 1f, onCustomize: () -> Unit = {},
     onWebSearchChanged: (Boolean) -> Unit = {}, onDefaultQuestionChanged: (Boolean) -> Unit = {},
+    recordingPending: Boolean = false,
     onAction: (AssistantMenuAction) -> Unit) {
     private val content = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL; setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
@@ -142,7 +143,8 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
     }
     init { with(context) {
         val cells = items.distinct().map { action ->
-            val title = if (action == AssistantMenuAction.AUDIO && recording) "结束录音" else action.title
+            val title = if (action == AssistantMenuAction.AUDIO && recordingPending) "取消录音"
+                else if (action == AssistantMenuAction.AUDIO && recording) "结束录音" else action.title
             val available = when (action) {
                 AssistantMenuAction.PLAY -> hasClip
                 AssistantMenuAction.CANCEL_AUDIO -> recording
@@ -150,6 +152,7 @@ internal class AssistantMenuViews(context: Context, recording: Boolean = false, 
                 else -> true
             }
             val description = when {
+                recordingPending && (action == AssistantMenuAction.AUDIO || action == AssistantMenuAction.CANCEL_AUDIO) -> "取消等待，不开始录音"
                 action == AssistantMenuAction.AUDIO && recording -> "结束录音并处理"
                 action == AssistantMenuAction.PLAY && !hasClip -> "回听上一段，暂无可回听的录音"
                 action == AssistantMenuAction.CANCEL_AUDIO -> if (recording) "取消并丢弃录音" else "取消录音，当前没有录音"

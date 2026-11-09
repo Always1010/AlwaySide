@@ -393,7 +393,8 @@ internal class SettingsScreen(
             help = "开启后，切换应用或锁屏仍继续播放，可通过系统媒体控件暂停或停止。\n\n关闭时，可在对话列表或当前音频对话中播放；离开这些页面即停止。强行停止应用或重启手机会结束播放。")
         check("backgroundPlaybackSubtitles", "音频播放时显示字幕", config.backgroundPlaybackSubtitles,
             help = "播放已有字幕的录音时，自动显示字幕浮窗；打开完整字幕面板时，浮窗隐藏。没有字幕时仅播放录音，不会自动制作字幕或联网。\n\n× 只关闭本次字幕浮窗，录音继续；暂停后继续播放不会重新弹出。可从播放通知、当前音频对话或完整字幕面板重新打开。\n\n需要允许显示在其他应用上层。切换应用后是否继续播放由「后台播放」控制；锁屏隐藏字幕，解锁后恢复。")
-        section("录音", "时长和上限策略从下次录音生效；0 表示不限时长。\n\n自动处理还需开启菜单中的「使用默认提问方式」；手动结束的行为在「结果窗口」设置。")
+        section("录音", "触发「听一段」后，等待所设时间再开始录音，方便你准备并播放音频。开始延迟为 0 秒时立即开始；等待期间可用结束或取消录音的操作撤销。\n\n时长和上限策略从下次录音生效；时长上限为 0 表示不限时长。\n\n自动处理还需开启菜单中的「使用默认提问方式」；手动结束的行为在「结果窗口」设置。")
+        input("recordingStartDelay", "录音开始延迟", "0～5 秒，最多一位小数；0 表示立即开始", RecordingStartDelay.seconds(config.recordingStartDelayTenths), decimal = true)
         input("recordingMaxMinutes", "录音时长上限", "单位：分钟；1～${RecordingLimits.MAX_MINUTES}，0 表示不限时长", config.recordingMaxMinutes.toString(), numeric = true)
         choice("recordingLimitAction", "达到上限后", config.recordingLimitAction.value, RecordingLimitAction.choices,
             optionDescriptions = mapOf(
@@ -435,6 +436,7 @@ internal class SettingsScreen(
                         editorTranscriptionId = restoring.editorTranscriptionId
                         restoring.field.initial
                     } else when (name) {
+                        "recordingStartDelay" -> RecordingStartDelay.seconds(interactionStore.load().recordingStartDelayTenths)
                         "recordingMaxMinutes" -> interactionStore.load().recordingMaxMinutes.toString()
                         "historyLimit" -> HistoryStore(this).historyLimit().toString()
                         else -> {
@@ -454,7 +456,8 @@ internal class SettingsScreen(
                 panel = SettingsEditPanel(this, title, hintValue, start, multiline, secret, numeric, decimal,
                     onDraft = { draft -> if (activeEdit?.name == name) activeEdit?.draft = draft },
                     onRequestClose = { finishEditing {} },
-                    onSave = { draft, error -> saveText(name, draft, secret, valueView, error) })
+                    onSave = { draft, error -> saveText(name, draft, secret, valueView, error) },
+                    maxDecimalPlaces = if (name == "recordingStartDelay") 1 else null)
                 closeEditor = {
                     activeEdit = null; closeEditor = null; editorConnectionId = null; editorTranscriptionId = null
                     panel.close()
@@ -505,11 +508,24 @@ internal class SettingsScreen(
     private fun inputDisplay(name: String, value: String): String = when (name) {
         "transcriptionLanguage" -> transcriptionLanguages[value] ?: value
         "recordingMaxMinutes" -> if (value == "0") "不限时长" else "$value 分钟"
+        "recordingStartDelay" -> "$value 秒"
         "historyLimit" -> "$value 条"
         else -> value.ifBlank { "未设置" }
     }
 
     private fun saveText(name: String, draft: String, secret: Boolean, valueView: TextView, error: (String) -> Unit) {
+        if (name == "recordingStartDelay") {
+            val tenths = RecordingStartDelay.parse(draft)
+            if (tenths == null) {
+                error("请输入 0～5 秒，最多一位小数")
+                return
+            }
+            if (persistInteraction { it.copy(recordingStartDelayTenths = tenths) }) {
+                valueView.text = inputDisplay(name, RecordingStartDelay.seconds(tenths))
+                closeEditor?.invoke()
+            } else error("保存失败，请重试")
+            return
+        }
         if (name == "historyLimit") {
             val limit = draft.trim().toIntOrNull()
             if (limit == null || limit < 1) {

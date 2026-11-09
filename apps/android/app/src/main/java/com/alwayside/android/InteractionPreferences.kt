@@ -29,6 +29,7 @@ internal data class InteractionConfig(
     val saveHistoryImages: Boolean = true,
     val autoAskText: Boolean = true,
     val recordingMaxMinutes: Int = RecordingLimits.DEFAULT_MINUTES,
+    val recordingStartDelayTenths: Int = 0,
     val collapseFollowUpByDefault: Boolean = true,
     val saveHistoryAudio: Boolean = true,
     val backgroundPlayback: Boolean = false,
@@ -86,6 +87,7 @@ internal class InteractionPreferences(private val context: Context) {
             saveHistoryImages = prefs.getBoolean("saveHistoryImages", d.saveHistoryImages),
             autoAskText = prefs.getBoolean("autoAskText", d.autoAskText),
             recordingMaxMinutes = prefs.getInt("recordingMaxMinutes", d.recordingMaxMinutes).coerceIn(0, RecordingLimits.MAX_MINUTES),
+            recordingStartDelayTenths = prefs.getInt("recordingStartDelayTenths", d.recordingStartDelayTenths).coerceIn(0, RecordingStartDelay.MAX_TENTHS),
             collapseFollowUpByDefault = prefs.getBoolean("collapseFollowUpByDefault", d.collapseFollowUpByDefault),
             saveHistoryAudio = prefs.getBoolean("saveHistoryAudio", d.saveHistoryAudio),
             backgroundPlayback = prefs.getBoolean("backgroundPlayback", d.backgroundPlayback),
@@ -114,6 +116,7 @@ internal class InteractionPreferences(private val context: Context) {
     fun save(value: InteractionConfig) {
         require(value.ballSize in 18..48 && value.ballOpacity in 15..100)
         require(value.recordingMaxMinutes in 0..RecordingLimits.MAX_MINUTES)
+        require(value.recordingStartDelayTenths in 0..RecordingStartDelay.MAX_TENTHS)
         require(value.longPressMillis in 400..1500)
         require(value.slideDistanceDp in 16..40 && value.slideDistanceDp % 4 == 0)
         require(value.actionCircleSizeDp in 28..40 && value.actionCircleSizeDp % 4 == 0)
@@ -128,6 +131,7 @@ internal class InteractionPreferences(private val context: Context) {
             .putBoolean("rememberWindowSize", value.rememberWindowSize).putBoolean("defaultPinned", value.defaultPinned)
             .putBoolean("saveHistoryImages", value.saveHistoryImages).putBoolean("autoAskText", value.autoAskText)
             .putInt("recordingMaxMinutes", value.recordingMaxMinutes)
+            .putInt("recordingStartDelayTenths", value.recordingStartDelayTenths)
             .putString("recordingLimitAction", value.recordingLimitAction.value)
             .putBoolean("collapseFollowUpByDefault", value.collapseFollowUpByDefault)
             .putBoolean("saveHistoryAudio", value.saveHistoryAudio)
