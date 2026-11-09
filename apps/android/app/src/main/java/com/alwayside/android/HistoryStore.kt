@@ -10,11 +10,13 @@ import java.util.concurrent.Executors
 
 /** Local archive outside Android backup; favorites never participate in automatic retention. */
 internal class HistoryStore(private val context: Context) {
-    private val media = ConversationMediaStore(context)
+    private val runtime = StorageRuntime.get(context)
     private val repository = context.noBackupFilesDir.canonicalFile.let { root ->
         // Looking up an existing repository must not wait behind an unrelated long body write.
         repositories.computeIfAbsent(root.path) {
-            Repository(HistoryFiles(AndroidHistoryFiles(root),
+            val disk = AndroidHistoryFiles(root)
+            runtime.schedule()
+            Repository(HistoryFiles(CatalogHistoryFiles(disk, runtime.catalog),
                 { WireJson.encode(it).toByteArray(Charsets.UTF_8) },
                 { WireJson.decode(it.toString(Charsets.UTF_8)) }), HistoryPendingWrites(lock, writer))
         }
@@ -29,7 +31,10 @@ internal class HistoryStore(private val context: Context) {
     fun historyLimit(): Int = index().historyLimit
     fun tags(): List<String> = index().tags
 
-    fun save(value: StoredConversation) = change(value.id) { HistoryCollection.save(it, value, System.currentTimeMillis()) }
+    fun save(value: StoredConversation) = change(value.id) {
+        check(!runtime.catalog.isDeleted(value.id)) { "这段会话已删除，请新建会话" }
+        HistoryCollection.save(it, value, System.currentTimeMillis())
+    }
     fun saveAsync(value: StoredConversation, failed: (Exception) -> Unit) {
         repository.pending.submit(value.id, { save(value) }, failed, value.updatedAt)
     }
@@ -53,8 +58,7 @@ internal class HistoryStore(private val context: Context) {
         repository.pending.invalidate(id)
     }
     fun clear() = synchronized(lock) {
-        PointReadingController.clearAll(context)
-        files.clear { repository.pending.invalidateAll(); media.clear() }
+        files.clear { repository.pending.invalidateAll(); runtime.schedule() }
     }
 
     private fun change(bodyId: String? = null, transform: (HistoryState) -> HistoryState) = synchronized(lock) {
@@ -62,9 +66,8 @@ internal class HistoryStore(private val context: Context) {
         val remaining = next.conversations.map { it.id }.toSet()
         old.conversations.filterNot { it.id in remaining }.forEach {
             repository.pending.invalidate(it.id)
-            media.delete(it.id)
-            PointReadingController.delete(context, it.id)
         }
+        runtime.schedule()
     }
 
     private companion object {
@@ -73,6 +76,24 @@ internal class HistoryStore(private val context: Context) {
         data class Repository(val files: HistoryFiles, val pending: HistoryPendingWrites)
         val repositories = ConcurrentHashMap<String, Repository>()
     }
+}
+
+private class CatalogHistoryFiles(private val disk: HistoryFileAccess, private val catalog: StorageCatalog) : HistoryFileAccess {
+    override fun read(name: String, maxBytes: Int?): ByteArray? {
+        if (name != HistoryFiles.MANIFEST) return disk.read(name, maxBytes)
+        if (!catalog.initialized()) {
+            // Keep construction read-only and allow explicit recovery of an unreadable legacy index.
+            HistoryFiles(disk, { WireJson.encode(it).toByteArray(Charsets.UTF_8) },
+                { WireJson.decode(it.toString(Charsets.UTF_8)) }).loadIndex()
+            catalog.commit(checkNotNull(disk.read(HistoryFiles.MANIFEST)))
+        }
+        return catalog.manifest()
+    }
+    override fun write(name: String, bytes: ByteArray) {
+        if (name == HistoryFiles.MANIFEST) catalog.commit(bytes) else disk.write(name, bytes)
+    }
+    override fun delete(name: String) = disk.delete(name)
+    override fun records() = disk.records()
 }
 
 private class AndroidHistoryFiles(private val root: File) : HistoryFileAccess {

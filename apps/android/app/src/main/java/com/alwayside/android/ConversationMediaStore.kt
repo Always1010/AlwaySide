@@ -20,6 +20,7 @@ internal class ConversationMediaStore(private val context: Context) {
         ChatAudioPlayback.stopConversation(id)
         audio.delete(id)
     }
+    fun deleteAudioFile(id: String) = audio.delete(id)
     fun delete(id: String) { deleteImage(id); deleteAudio(id) }
 
     fun saveImages(id: String, original: Bitmap, current: Bitmap) = synchronized(lock) {
@@ -72,8 +73,10 @@ internal class ConversationMediaStore(private val context: Context) {
     }
 
     fun deleteImage(id: String) = synchronized(lock) {
-        AtomicFile(imageFile(id)).delete()
-        AtomicFile(imageFile(id, original = true)).delete()
+        listOf(imageFile(id), imageFile(id, original = true)).forEach { file ->
+            AtomicFile(file).delete()
+            check(listOf(file, File(file.path + ".bak"), File(file.path + ".new")).none(File::exists)) { "图片删除失败" }
+        }
     }
 
     fun clear() = synchronized(lock) {
