@@ -58,7 +58,7 @@ internal class SubtitleDisplaySettings(
             content.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(settingLabel(if (floatingPreferences == null) "音频字幕显示设置" else "浮窗显示设置", 17f).apply {
-                    gravity = Gravity.CENTER_VERTICAL; typeface = android.graphics.Typeface.create("sans-serif-medium", 0)
+                    gravity = Gravity.CENTER_VERTICAL; typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 }, LinearLayout.LayoutParams(0, dp(48), 1f))
                 addView(iconButton(R.drawable.ic_line_close, "收起设置") { finish(); onClose() }.compact(36))
             })
