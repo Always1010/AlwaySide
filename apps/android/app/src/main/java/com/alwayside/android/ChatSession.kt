@@ -33,7 +33,11 @@ internal class ChatSession(
     private var observer: (() -> Unit)? = null
     private var closed = false
     fun setObserver(observer: (() -> Unit)?) { this.observer = observer }
-    private fun notifyChanged() { changed(); observer?.invoke() }
+    private val usageToken = Any()
+    private fun notifyChanged() {
+        ConversationUsage.update(usageToken, id.takeIf { busy && !closed })
+        changed(); observer?.invoke()
+    }
     private fun post(action: () -> Unit) = dispatch(action)
     private var epoch = 0L
     private var cancellation: RequestCancellation? = null
@@ -242,6 +246,7 @@ internal class ChatSession(
             customTitle = currentCustomTitle())
     }
     private fun archive() {
+        if (busy) ConversationUsage.update(usageToken, id)
         updatedAt = maxOf(System.currentTimeMillis(), updatedAt + 1)
         val value = snapshot()
         val asynchronous = saveHistoryAsync
@@ -256,7 +261,7 @@ internal class ChatSession(
             }
         }
     }
-    fun close() { if (busy) cancel(); closed = true; epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
+    fun close() { if (busy) cancel(); closed = true; ConversationUsage.update(usageToken, null); epoch++; cancellation?.cancel(); observer = null; worker.shutdownNow() }
     private fun requestCredentialsCurrent(request: Request): Boolean {
         val needsAudio = request.audio != null && request.transcript.isEmpty()
         return credentialsCurrent(request.config, request.audio == null || request.config.audioOutput != "transcript",

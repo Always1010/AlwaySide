@@ -12,6 +12,11 @@ internal class StorageRuntime private constructor(val context: Context) {
     private val worker = Executors.newSingleThreadExecutor()
     private var scheduled = false
     private val main = Handler(Looper.getMainLooper())
+    init {
+        ConversationUsage.onIdle(this) {
+            worker.execute { runCatching { HistoryStore(context).trim() }; schedule() }
+        }
+    }
     @Synchronized fun schedule(retry: Int = 0) {
         if (scheduled) return
         scheduled = true
@@ -23,7 +28,9 @@ internal class StorageRuntime private constructor(val context: Context) {
     }
     fun drain(): Int {
         val media = ConversationMediaStore(context)
-        StorageCleanup.run(catalog.pending(), { job ->
+        StorageCleanup.run(catalog.pending().filterNot { ConversationUsage.active(it.owner) }, { job ->
+            synchronized(ConversationUsage.lock) {
+                check(!ConversationUsage.active(job.owner)) { "会话正在使用" }
                 when (job.kind) {
                     "images" -> media.deleteImage(job.owner)
                     "audio" -> { ChatAudioPlayback.stopConversation(job.owner); media.deleteAudioFile(job.owner) }
@@ -31,6 +38,7 @@ internal class StorageRuntime private constructor(val context: Context) {
                     "reading" -> PointReadingController.delete(context, job.owner)
                     else -> error("未知的清理任务")
                 }
+            }
         }, catalog::complete, catalog::failed)
         return catalog.pending().size
     }

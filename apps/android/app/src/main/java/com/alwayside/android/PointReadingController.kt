@@ -24,6 +24,7 @@ internal class PointReadingController private constructor(private val context: C
     private var file: File? = null
     private var temporary: File? = null
     private val pendingAnchors = linkedSetOf<ReadingAnchor>()
+    private val usageToken = Any()
     private val observers = mutableSetOf<() -> Unit>()
     var state = State(); private set
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -35,7 +36,10 @@ internal class PointReadingController private constructor(private val context: C
     init { preferences.addListener(listener) }
     fun addObserver(observer: () -> Unit) { observers.add(observer); observer() }
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
-    private fun publish() = observers.toList().forEach { it() }
+    private fun publish() {
+        ConversationUsage.update(usageToken, state.owner.takeIf { state.generating })
+        observers.toList().forEach { it() }
+    }
 
     fun read(owner: String, origin: ReadingOrigin, selected: String, toggle: Boolean = true, anchor: ReadingAnchor? = null) {
         startRead(owner, origin, selected, toggle, anchor, ReadingPreferences(context).voice())
@@ -83,6 +87,8 @@ internal class PointReadingController private constructor(private val context: C
         state = State(owner, origin, text, key, generating = true, anchor = anchor)
         publish()
         worker.execute {
+            val jobUsage = Any()
+            ConversationUsage.update(jobUsage, owner)
             var disposable: File? = null
             try {
                 cancel.throwIfCancelled()
@@ -156,7 +162,7 @@ internal class PointReadingController private constructor(private val context: C
                         publish(); toast(message)
                     }
                 }
-            }
+            } finally { ConversationUsage.update(jobUsage, null) }
         }
     }
 

@@ -381,6 +381,12 @@ internal class HistoryListScreen(
         closeSwipe()
         val deletion = HistoryDeletion(ids)
         if (deletion.ids.isEmpty()) return
+        if (deletion.ids.any(ConversationUsage::active)) {
+            MaterialAlertDialogBuilder(activity).setTitle("会话正在使用")
+                .setMessage("请先关闭对应会话，并结束播放或处理，再删除。")
+                .setPositiveButton("知道了", null).show()
+            return
+        }
         val favorites = values.count { it.id in deletion.ids && it.isFavorite }
         MaterialAlertDialogBuilder(activity).setTitle("删除选中的 ${deletion.ids.size} 段会话？")
             .setMessage((if (favorites > 0) "包含 $favorites 段已收藏会话。\n" else "") +
@@ -401,7 +407,7 @@ internal class HistoryListScreen(
         MaterialAlertDialogBuilder(activity).setTitle("清空无法读取的本机记录？")
             .setMessage("将删除全部本机会话文字、已保存图片和音频，无法撤销。")
             .setNegativeButton("取消", null).setPositiveButton("清空") { _, _ ->
-                runCatching { store.clear(); media.clear() }
+                runCatching { store.clear() }
                     .onSuccess { refresh() }.onFailure { failed() }
             }.show()
     }

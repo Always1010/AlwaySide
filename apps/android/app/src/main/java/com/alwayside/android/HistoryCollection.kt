@@ -12,16 +12,14 @@ internal object HistoryCollection {
         require(name.isNotBlank() && name == name.trim() && name.length <= 64) { "标签须为 1–64 个字符" }
     }
 
-    fun retain(state: HistoryState, protectedId: String? = null): HistoryState {
+    fun retain(state: HistoryState, protectedId: String? = null, protectedIds: Set<String> = emptySet()): HistoryState {
         require(state.historyLimit > 0) { "历史数量须大于 0" }
         val ordinary = state.conversations.filterNot { it.isFavorite }
             .sortedWith(compareByDescending<StoredConversation> { it.historyEnteredAt.takeIf { time -> time > 0 } ?: it.updatedAt }
                 .thenByDescending { it.updatedAt }.thenBy { it.id })
-        val keep = ordinary.take(state.historyLimit).map { it.id }.toMutableSet()
-        if (protectedId != null && ordinary.any { it.id == protectedId } && protectedId !in keep) {
-            keep.remove(ordinary.take(state.historyLimit).last().id)
-            keep.add(protectedId)
-        }
+        val protected = protectedIds + listOfNotNull(protectedId)
+        val keep = ordinary.filter { it.id in protected }.map { it.id }.toMutableSet()
+        keep.addAll(ordinary.filterNot { it.id in keep }.take((state.historyLimit - keep.size).coerceAtLeast(0)).map { it.id })
         return state.copy(conversations = state.conversations.filter { it.isFavorite || it.id in keep }
             .sortedByDescending { it.updatedAt })
     }
@@ -31,7 +29,7 @@ internal object HistoryCollection {
             check(it < Long.MAX_VALUE) { "历史队列时间超出范围" }; it + 1
         })
 
-    fun save(state: HistoryState, incoming: StoredConversation, now: Long): HistoryState {
+    fun save(state: HistoryState, incoming: StoredConversation, now: Long, protectedIds: Set<String> = emptySet()): HistoryState {
         HistoryArchive.validate(incoming)
         val previous = state.conversations.find { it.id == incoming.id }
         if (previous != null && previous.updatedAt > incoming.updatedAt) return state
@@ -42,7 +40,7 @@ internal object HistoryCollection {
             historyEnteredAt = queueTime(state, now), tags = incoming.tags.filter { it in state.tags },
         ) else titled.copy(favoriteAt = previous.favoriteAt, tags = previous.tags,
             historyEnteredAt = if (incoming.updatedAt > previous.updatedAt) queueTime(state, now) else previous.historyEnteredAt)
-        return retain(state.copy(conversations = state.conversations.filterNot { it.id == next.id } + next), next.id)
+        return retain(state.copy(conversations = state.conversations.filterNot { it.id == next.id } + next), next.id, protectedIds)
     }
 
     fun rename(state: HistoryState, id: String, title: String): HistoryState {
@@ -53,12 +51,12 @@ internal object HistoryCollection {
         })
     }
 
-    fun favorite(state: HistoryState, id: String, favorite: Boolean, now: Long): HistoryState {
+    fun favorite(state: HistoryState, id: String, favorite: Boolean, now: Long, protectedIds: Set<String> = emptySet()): HistoryState {
         val value = state.conversations.find { it.id == id } ?: error("会话不存在")
         if (value.isFavorite == favorite) return state
         val next = value.copy(favoriteAt = if (favorite) maxOf(1, now) else 0,
             historyEnteredAt = if (favorite) value.historyEnteredAt else queueTime(state, now))
-        return retain(state.copy(conversations = state.conversations.map { if (it.id == id) next else it }), id)
+        return retain(state.copy(conversations = state.conversations.map { if (it.id == id) next else it }), id, protectedIds)
     }
 
     fun setTags(state: HistoryState, id: String, tags: List<String>): HistoryState {

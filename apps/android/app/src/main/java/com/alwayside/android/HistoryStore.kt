@@ -33,17 +33,17 @@ internal class HistoryStore(private val context: Context) {
 
     fun save(value: StoredConversation) = change(value.id) {
         check(!runtime.catalog.isDeleted(value.id)) { "这段会话已删除，请新建会话" }
-        HistoryCollection.save(it, value, System.currentTimeMillis())
+        HistoryCollection.save(it, value, System.currentTimeMillis(), ConversationUsage.ids())
     }
     fun saveAsync(value: StoredConversation, failed: (Exception) -> Unit) {
         repository.pending.submit(value.id, { save(value) }, failed, value.updatedAt)
     }
     fun setHistoryLimit(limit: Int) = change {
         require(limit > 0) { "历史数量须大于 0" }
-        HistoryCollection.retain(it.copy(historyLimit = limit))
+        HistoryCollection.retain(it.copy(historyLimit = limit), protectedIds = ConversationUsage.ids())
     }
     fun setFavorite(id: String, favorite: Boolean) = change {
-        HistoryCollection.favorite(it, id, favorite, System.currentTimeMillis())
+        HistoryCollection.favorite(it, id, favorite, System.currentTimeMillis(), ConversationUsage.ids())
     }
     fun setTags(id: String, tags: List<String>) = change { HistoryCollection.setTags(it, id, tags) }
     fun rename(id: String, title: String) = change { HistoryCollection.rename(it, id, title.trim()) }
@@ -53,25 +53,28 @@ internal class HistoryStore(private val context: Context) {
     fun createTag(name: String) = change { HistoryCollection.createTag(it, name.trim()) }
     fun renameTag(old: String, new: String) = change { HistoryCollection.renameTag(it, old, new.trim()) }
     fun deleteTag(name: String) = change { HistoryCollection.deleteTag(it, name) }
-    fun delete(id: String) = synchronized(lock) {
+    fun delete(id: String) = synchronized(ConversationUsage.lock) { synchronized(lock) {
+        check(!ConversationUsage.active(id)) { "会话正在使用，请先结束播放或处理后重试" }
         change { it.copy(conversations = it.conversations.filterNot { value -> value.id == id }) }
         repository.pending.invalidate(id)
-    }
-    fun clear() = synchronized(lock) {
+    } }
+    fun clear() = synchronized(ConversationUsage.lock) { synchronized(lock) {
+        check(ConversationUsage.ids().isEmpty()) { "有会话正在使用，请先结束播放或处理" }
         files.clear { repository.pending.invalidateAll(); runtime.schedule() }
-    }
+    } }
+    fun trim() = change { HistoryCollection.retain(it, protectedIds = ConversationUsage.ids()) }
 
-    private fun change(bodyId: String? = null, transform: (HistoryState) -> HistoryState) = synchronized(lock) {
+    private fun change(bodyId: String? = null, transform: (HistoryState) -> HistoryState) = synchronized(ConversationUsage.lock) { synchronized(lock) {
         val (old, next) = files.change(bodyId, transform)
         val remaining = next.conversations.map { it.id }.toSet()
         old.conversations.filterNot { it.id in remaining }.forEach {
             repository.pending.invalidate(it.id)
         }
         runtime.schedule()
-    }
+    } }
 
     private companion object {
-        val lock = Any()
+        val lock = ConversationUsage.lock
         val writer = Executors.newSingleThreadExecutor()
         data class Repository(val files: HistoryFiles, val pending: HistoryPendingWrites)
         val repositories = ConcurrentHashMap<String, Repository>()

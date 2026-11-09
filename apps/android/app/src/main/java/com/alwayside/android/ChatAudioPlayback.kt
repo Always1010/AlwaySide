@@ -27,6 +27,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     private val handler = Handler(Looper.getMainLooper())
     private val preferences = InteractionPreferences(context)
     private val visibility = PlaybackVisibility(preferences.load().backgroundPlayback)
+    private val usageToken = Any()
     private val observers = mutableSetOf<() -> Unit>()
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
@@ -116,6 +117,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
 
     fun setVisible(owner: Any, id: String?, visible: Boolean, retaining: Boolean = false) {
+        ConversationUsage.update(owner, id.takeIf { visible })
         visibility.update(owner, id, visible)
         if (!retaining && visibility.shouldStop(conversationId)) stop()
         if (!retaining) PointReadingController.hiddenIfCreated()
@@ -326,6 +328,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     }
 
     private fun publish(next: State) {
+        ConversationUsage.update(usageToken, conversationId.takeIf { file != null })
         val changed = state.preparing != next.preparing || state.playing != next.playing ||
             (state.remaining == null) != (next.remaining == null)
         state = next

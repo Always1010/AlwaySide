@@ -88,6 +88,8 @@ internal class SubtitleController private constructor(private val context: Conte
 
     private fun enqueueJob(snapshot: StoredConversation, source: File, method: SubtitleMethod,
         recreate: Boolean, config: AppConfig, batchedTranslation: Boolean = preferences.batchedTranslation()): Job {
+        synchronized(ConversationUsage.lock) {
+        check(!StorageRuntime.get(context).catalog.isDeleted(snapshot.id)) { "这段会话已删除" }
         check(preferences.enabled(method)) { "请先在实验室开启此字幕方案" }
         val key = Key(snapshot.id, method)
         check(!jobs.containsKey(key)) { "此字幕正在制作，请勿重复提交" }
@@ -99,10 +101,12 @@ internal class SubtitleController private constructor(private val context: Conte
         val job = Job(key, input, source.length(), config, recreate,
             synchronized(fileLock) { invalidate(key); revision(key) }, batchedTranslation = batchedTranslation)
         jobs[key] = job
+        ConversationUsage.update(job, key.owner)
         records[key] = record(key.owner, method).copy(busy = true, status = "已排队", error = "", loaded = true)
         publish()
         worker.execute { execute(job) }
         return job
+        }
     }
 
     /** Capture settings at submit time; no upload starts until the chat worker asks for the original. */
@@ -317,6 +321,7 @@ internal class SubtitleController private constructor(private val context: Conte
     private fun finish(job: Job, result: Record) {
         main.post {
             if (!jobs.remove(job.key, job)) return@post
+            ConversationUsage.update(job, null)
             if (revision(job.key) != job.revision) return@post
             val previous = record(job.key.owner, job.key.method)
             records[job.key] = result.copy(published = result.published ?: previous.published)

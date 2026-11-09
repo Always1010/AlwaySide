@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HistoryCollectionTest {
+    @Test fun activeConversationsMayExceedTheLimitAndConvergeWhenReleased() {
+        val values = listOf(value("old-active", 1), value("new-active", 2), value("idle", 3))
+        val state = HistoryState(values, historyLimit = 1)
+        val protected = HistoryCollection.retain(state, protectedIds = setOf("old-active", "new-active"))
+        assertEquals(setOf("old-active", "new-active"), protected.conversations.map { it.id }.toSet())
+        assertEquals(listOf("new-active"), HistoryCollection.retain(protected).conversations.map { it.id })
+        val incoming = HistoryCollection.save(state, value("incoming", 4), 4, setOf("old-active"))
+        assertEquals(setOf("old-active", "incoming"), incoming.conversations.map { it.id }.toSet())
+    }
     private fun value(id: String, time: Long) = StoredConversation(id, time, "标题",
         listOf(ChatMessage("assistant", "完整正文 $id")), "资料", historyEnteredAt = time)
 

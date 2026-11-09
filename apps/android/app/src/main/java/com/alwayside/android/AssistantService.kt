@@ -1047,10 +1047,12 @@ class AssistantService : Service() {
         val id=node.chat.conversationId
         // Open before queuing: closing/replacing the overlay may unlink its temporary WAV.
         val input=runCatching{clip.file.inputStream()}.getOrElse{toast("音频未保存，请检查本机存储");return}
+        val usage = Any()
+        ConversationUsage.update(usage, id)
         try{
             val length=input.channel.size()
             mediaWorker.execute{
-                input.use{
+                try { input.use{
                     runCatching{
                         val history=HistoryStore(this);val media=ConversationMediaStore(this)
                         if(history.summary(id)!=null){
@@ -1059,9 +1061,10 @@ class AssistantService : Service() {
                             if(history.summary(id)==null)media.deleteAudio(id)
                         }
                     }.onFailure{error->main.post{if(alive)toast("音频未保存：${error.message?:"存储失败"}")}}
-                }
+                } } finally { ConversationUsage.update(usage, null) }
             }
         }catch(_:Exception){
+            ConversationUsage.update(usage, null)
             runCatching{input.close()};toast("音频未保存，请检查本机存储")
         }
     }
@@ -1071,6 +1074,8 @@ class AssistantService : Service() {
         val original=node.originalFrame!!.bitmap
         if(!preferences.load().saveHistoryImages)return
         val id=node.chat.conversationId
+        val usage = Any()
+        ConversationUsage.update(usage, id)
         mediaWorker.execute{
             runCatching{
                 val history=HistoryStore(this);val media=ConversationMediaStore(this)
@@ -1079,6 +1084,7 @@ class AssistantService : Service() {
                     if(!preferences.load().saveHistoryImages||history.summary(id)==null)media.deleteImage(id)
                 }
             }.onFailure{error->main.post{if(alive)toast("回答可继续，但图片未保存：${error.message?:"存储失败"}")}}
+            ConversationUsage.update(usage, null)
         }
     }
     private fun showPrepared(node:FloatingConversation,autoAsk:Boolean) {
@@ -1269,6 +1275,7 @@ class AssistantService : Service() {
         // The cancellation snapshot is queued first; HistoryStore.delete invalidates queued writes.
         node.chat.cancel()
         ChatAudioPlayback.stopConversation(node.chat.conversationId)
+        playback.setVisible(node, null, false)
         refresh(node)
         val id=node.chat.conversationId
         val temporaryAudio=node.clip?.file
