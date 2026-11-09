@@ -571,6 +571,8 @@ internal class HistoryListScreen(
             setPadding(0, 0, 0, 0); minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
         }, LinearLayout.LayoutParams(activity.dp(28), activity.dp(28)).apply { marginEnd = activity.dp(8) })
         else if (value.kind == "audio" && (playback.fileFor(value.id) ?: media.loadAudio(value.id)) != null) {
+            // The negative start margin places the playback ring inside the row padding.
+            entry.clipToPadding = false
             val drawable = AudioPlaybackIcon(activity)
             val button = activity.iconButton(R.drawable.ic_line_play, "播放录音：$title") {
                 if (!closeSwipe() && !dismissedSwipeOnTouch) toggleAudio(value.id)
