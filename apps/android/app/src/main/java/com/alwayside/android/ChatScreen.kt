@@ -271,6 +271,7 @@ internal class ChatScreen(
             }
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(AudioPlaybackBar(activity), LinearLayout.LayoutParams(-1, -2))
         root.addView(View(this).apply { setBackgroundColor(BORDER) }, LinearLayout.LayoutParams(-1, dp(1)))
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

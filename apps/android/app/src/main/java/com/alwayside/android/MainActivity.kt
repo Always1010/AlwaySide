@@ -395,6 +395,7 @@ class MainActivity : ThemedActivity() {
                     action("准备实际使用", true, ::openPreparation)
                 }.also { addView(it) }
                 addView(history.scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
+                addView(AudioPlaybackBar(this@MainActivity), LinearLayout.LayoutParams(-1, -2))
                 addView(history.selectionActions, LinearLayout.LayoutParams(-1, -2))
             })
             historyView = root

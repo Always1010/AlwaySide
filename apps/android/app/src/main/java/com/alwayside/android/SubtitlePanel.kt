@@ -49,6 +49,7 @@ internal class SubtitlePanel(
     private val play: MaterialButton
     private val follow: MaterialButton
     private val speed: MaterialButton
+    private val repeat: MaterialButton
     private val floating: MaterialButton
     private val make: MaterialButton
     private val cancel: MaterialButton
@@ -154,6 +155,10 @@ internal class SubtitlePanel(
                     gravity = Gravity.CENTER_VERTICAL
                     speed = textButton("1.0×").apply { backgroundTintList = ColorStateList.valueOf(SURFACE); setOnClickListener { speedMenu(this) } }
                     addView(speed, LinearLayout.LayoutParams(dp(52), dp(34)))
+                    repeat = icon(R.drawable.ic_line_play_once, "播放模式", {}).apply {
+                        setOnClickListener { AudioPlaybackMenus.mode(this, playback) }
+                    }
+                    addView(repeat)
                     addView(View(this@with), LinearLayout.LayoutParams(0, 1, 1f))
                     addView(icon(R.drawable.ic_line_rewind, "后退 5 秒", { seekRelative(-5000) }))
                     play = icon(R.drawable.ic_line_play, "回听原始音频", ::togglePlayback, 46).apply {
@@ -258,6 +263,9 @@ internal class SubtitlePanel(
         play.isEnabled = source() != null && !state.preparing; progress.isEnabled = source() != null && duration > 0 && !state.preparing
         floating.isEnabled = !renderedBundle?.cues.isNullOrEmpty() && active
         speed.text = String.format(Locale.ROOT, "%.2f×", playback.originalSpeed).replace(".00", ".0").replace(".50", ".5")
+        repeat.icon = activity.prototypeIcon(AudioPlaybackMenus.modeIcon(playback))
+        repeat.accessible("播放模式：${AudioPlaybackMode.title(playback.repeatMode, playback.listPlayback)}")
+        repeat.isEnabled = active
         if (!dragging) { progress.max = duration.coerceIn(1, Int.MAX_VALUE.toLong()).toInt(); progress.progress = position.toInt(); clock.text = time(position) }
         total.text = time(duration)
         val next = if (active) SubtitleReading.activeIndex(renderedBundle?.cues.orEmpty(), position, state.playing) else -1
@@ -321,14 +329,7 @@ internal class SubtitlePanel(
         }
     }
     private fun speedMenu(anchor: View) {
-        PopupMenu(activity, anchor).apply {
-            listOf(.75f, 1f, 1.25f, 1.5f, 2f).forEach { value ->
-                menu.add("${value}×").apply {
-                    isCheckable = true; isChecked = playback.originalSpeed == value
-                    setOnMenuItemClickListener { playback.setOriginalSpeed(value); tick(); true }
-                }
-            }; show()
-        }
+        AudioPlaybackMenus.speed(anchor, playback)
     }
     private fun sourceDuration() = source()?.let { maxOf(0, it.length() - 44) * 1000 / (RecordingLimits.SAMPLE_RATE * 2) } ?: 0L
     private fun togglePlayback() {
