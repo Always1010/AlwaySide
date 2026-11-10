@@ -4,6 +4,7 @@ package com.alwayside.android
 internal class PlaybackVisibility(var backgroundPlayback: Boolean = false) {
     private val owners = mutableMapOf<Any, String>()
     private val libraries = mutableSetOf<Any>()
+    private val playbackHosts = mutableSetOf<Any>()
     private var handoffDepth = 0
 
     fun update(owner: Any, conversationId: String?, visible: Boolean) {
@@ -14,6 +15,10 @@ internal class PlaybackVisibility(var backgroundPlayback: Boolean = false) {
         if (visible) libraries.add(owner) else libraries.remove(owner)
     }
 
+    fun updatePlaybackHost(owner: Any, visible: Boolean) {
+        if (visible) playbackHosts.add(owner) else playbackHosts.remove(owner)
+    }
+
     /** Detach and attach are synchronous, but neither page owns the audio between them. */
     fun handoff(action: () -> Unit) {
         handoffDepth++
@@ -22,5 +27,5 @@ internal class PlaybackVisibility(var backgroundPlayback: Boolean = false) {
 
     fun shouldStop(conversationId: String?, allowLibrary: Boolean = true): Boolean =
         handoffDepth == 0 && conversationId != null && !backgroundPlayback &&
-            (!allowLibrary || libraries.isEmpty()) && conversationId !in owners.values
+            (!allowLibrary || (libraries.isEmpty() && playbackHosts.isEmpty())) && conversationId !in owners.values
 }

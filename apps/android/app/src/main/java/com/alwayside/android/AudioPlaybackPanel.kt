@@ -7,9 +7,12 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.SeekBar
+import android.widget.TextView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import java.util.Locale
+
+internal fun TextView.playbackText(value: String) { if (text.toString() != value) text = value }
 
 internal object AudioPlaybackMenus {
     fun modeIcon(playback: ChatAudioPlayback) = when (playback.repeatMode) {
@@ -55,6 +58,12 @@ internal class AudioPlaybackPanel(private val activity: Activity) {
     private val total = activity.label("", 12f, true)
     private val progress = SeekBar(activity)
     private val play = activity.iconButton(R.drawable.ic_line_play, "播放", { playback.toggle() })
+    private val previous = activity.iconButton(R.drawable.ic_line_skip_previous, "上一段", { playback.previous() })
+    private val next = activity.iconButton(R.drawable.ic_line_skip_next, "下一段", { playback.next() })
+    private var queueDialog: BottomSheetDialog? = null
+    private val queue = activity.iconButton(R.drawable.ic_line_queue, "播放队列", {
+        queueDialog?.dismiss(); queueDialog = AudioQueuePanel(activity).show()
+    })
     private val mode = activity.iconButton(R.drawable.ic_line_play_once, "播放模式", {})
     private val speed = MaterialButton(activity, null, androidx.appcompat.R.attr.borderlessButtonStyle).apply {
         applyActionStyle(); minimumWidth = 0; minWidth = 0
@@ -62,6 +71,11 @@ internal class AudioPlaybackPanel(private val activity: Activity) {
     }
     private val subtitles = activity.iconButton(R.drawable.ic_line_subtitles, "音频字幕", { openCurrent(true) })
     private var dragging = false
+    private var dragSession = -1L
+    private var renderedPlaying: Boolean? = null
+    private var renderedCompleted: Boolean? = null
+    private var renderedMode: AudioRepeat? = null
+    private var renderedList: Boolean? = null
     private val changed: () -> Unit = { render() }
 
     fun show(): BottomSheetDialog {
@@ -84,32 +98,34 @@ internal class AudioPlaybackPanel(private val activity: Activity) {
             addView(progress, LinearLayout.LayoutParams(-1, activity.dp(40)))
             addView(LinearLayout(activity).apply {
                 gravity = Gravity.CENTER
+                addView(previous)
                 addView(activity.iconButton(R.drawable.ic_line_rewind, "后退 5 秒", { seekRelative(-5000) }))
                 play.applyIconActionStyle(primary = true); play.cornerRadius = activity.dp(24)
                 addView(play)
                 addView(activity.iconButton(R.drawable.ic_line_rewind, "前进 5 秒", { seekRelative(5000) }).apply { scaleX = -1f })
+                addView(next)
             })
             addView(LinearLayout(activity).apply {
                 gravity = Gravity.CENTER
                 addView(speed, LinearLayout.LayoutParams(activity.dp(64), activity.dp(48)))
                 mode.setOnClickListener { AudioPlaybackMenus.mode(mode, playback) }
-                addView(mode); addView(subtitles)
+                addView(mode); addView(subtitles); addView(queue)
                 addView(activity.iconButton(R.drawable.ic_line_stop, "停止播放", { playback.stop() }))
             }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = activity.dp(8) })
         }
         progress.accessible("音频播放进度")
         progress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onStartTrackingTouch(bar: SeekBar) { dragging = true }
+            override fun onStartTrackingTouch(bar: SeekBar) { dragging = true; dragSession = playback.playbackSession }
             override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
                 if (fromUser) clock.text = AudioPlaybackMenus.time(value)
             }
             override fun onStopTrackingTouch(bar: SeekBar) {
                 dragging = false
-                seek(bar.progress)
+                if (dragSession == playback.playbackSession) seek(bar.progress) else render()
             }
         })
         dialog.setContentView(body)
-        dialog.setOnDismissListener { playback.removeObserver(changed) }
+        dialog.setOnDismissListener { queueDialog?.dismiss(); playback.removeObserver(changed) }
         dialog.show()
         playback.addObserver(changed)
         return dialog
@@ -118,24 +134,35 @@ internal class AudioPlaybackPanel(private val activity: Activity) {
     private fun render() {
         if (playback.conversationId == null || playback.readingKey.isNotEmpty()) { dialog.dismiss(); return }
         val state = playback.currentState
-        title.text = playback.mediaTitle
-        source.text = playback.sourceTitle + when {
+        title.playbackText(playback.mediaTitle)
+        source.playbackText(playback.sourceTitle + when {
             state.completed -> " · 已播完"
             state.preparing -> " · 正在读取…"
             else -> ""
-        }
-        total.text = AudioPlaybackMenus.time(playback.duration)
+        })
+        total.playbackText(AudioPlaybackMenus.time(playback.duration))
         if (!dragging) {
             progress.max = playback.duration.coerceAtLeast(1); progress.progress = playback.position
-            clock.text = AudioPlaybackMenus.time(playback.position)
+            clock.playbackText(AudioPlaybackMenus.time(playback.position))
         }
         progress.isEnabled = !state.preparing && playback.duration > 0
         play.isEnabled = !state.preparing
-        play.icon = activity.prototypeIcon(if (state.playing) R.drawable.ic_line_pause else R.drawable.ic_line_play)
-        play.accessible(if (state.playing) "暂停播放" else if (state.completed) "重新播放" else "继续播放")
-        speed.text = "${playback.originalSpeed}×"; speed.accessible("播放速度：${speed.text}")
-        mode.icon = activity.prototypeIcon(AudioPlaybackMenus.modeIcon(playback))
-        mode.accessible("播放模式：${AudioPlaybackMode.title(playback.repeatMode, playback.listPlayback)}")
+        previous.visibility = if (playback.listPlayback) View.VISIBLE else View.GONE
+        next.visibility = previous.visibility; queue.visibility = previous.visibility
+        previous.isEnabled = playback.canGoPrevious; next.isEnabled = playback.canGoNext
+        if (renderedPlaying != state.playing || renderedCompleted != state.completed) {
+            renderedPlaying = state.playing; renderedCompleted = state.completed
+            play.icon = activity.prototypeIcon(if (state.playing) R.drawable.ic_line_pause else R.drawable.ic_line_play)
+            play.accessible(if (state.playing) "暂停播放" else if (state.completed) "重新播放" else "继续播放")
+        }
+        speed.playbackText("${playback.originalSpeed}×")
+        val speedLabel = "播放速度：${speed.text}"
+        if (speed.contentDescription != speedLabel) speed.accessible(speedLabel)
+        if (renderedMode != playback.repeatMode || renderedList != playback.listPlayback) {
+            renderedMode = playback.repeatMode; renderedList = playback.listPlayback
+            mode.icon = activity.prototypeIcon(AudioPlaybackMenus.modeIcon(playback))
+            mode.accessible("播放模式：${AudioPlaybackMode.title(playback.repeatMode, playback.listPlayback)}")
+        }
         subtitles.visibility = if (SubtitlePreferences(activity).anyEnabled() ||
             InteractionPreferences(activity).load().backgroundPlaybackSubtitles ||
             !SubtitleController.get(activity).record(requireNotNull(playback.conversationId), SubtitleMethod.WHISPER).playable?.cues.isNullOrEmpty()) View.VISIBLE else View.GONE

@@ -62,6 +62,7 @@ internal class HistoryListScreen(
     private val selection = HistorySelection(initialSelection, initialSelecting)
     private var values = emptyList<StoredConversation>()
     private var visibleValues = emptyList<StoredConversation>()
+    private var playableValues = emptyList<AudioQueueItem>()
     private var loading = false
     private var disposed = false
     @Volatile private var requestVersion = 0
@@ -307,6 +308,7 @@ internal class HistoryListScreen(
         val version = ++requestVersion
         pendingRead?.cancel(false)
         loading = true; readFailed = false
+        playableValues = emptyList()
         val requested = HistoryBrowse(browse.favorites, browse.tag, browse.untagged, browse.query, browse.dateRange)
         render()
         pendingRead = reader.schedule({
@@ -314,14 +316,18 @@ internal class HistoryListScreen(
                 val state = store.index()
                 if (requested.tag != null && requested.tag !in state.tags) requested.showFavorites()
                 val found = HistorySearch.run(requested, state.conversations, store::find) { requestVersion != version }
-                state to found
+                val playable = AudioPlaybackQueue.recordings(found) { id ->
+                    requestVersion == version && runCatching { media.loadAudio(id) != null }.getOrDefault(false)
+                }
+                Triple(state, found, playable)
             }
             activity.runOnUiThread {
                 if (disposed || activity.isDestroyed || activity.isFinishing || requestVersion != version) return@runOnUiThread
                 val wasSelecting = selecting
                 loading = false
-                result.onSuccess { (state, found) ->
+                result.onSuccess { (state, found, playable) ->
                     values = state.conversations; tags = state.tags; visibleValues = found
+                    playableValues = playable
                     if (browse.tag != null && browse.tag !in tags) browse.showFavorites()
                     selection.retain(found.map { it.id })
                     browse.page = browse.page.coerceIn(0, ((found.size - 1).coerceAtLeast(0) / PAGE_SIZE))
@@ -514,6 +520,20 @@ internal class HistoryListScreen(
                 setPadding(activity.dp(20), activity.dp(75), activity.dp(20), activity.dp(75))
             }, LinearLayout.LayoutParams(-1, -2))
         } else {
+            if (!selecting && browse.favorites && !loading && playableValues.isNotEmpty()) {
+                rows.addView(LinearLayout(activity).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    val prefix = if (browse.query.isNotBlank()) "搜索结果 · " else if (browse.dateRange != null) "筛选结果 · " else ""
+                    addView(activity.label("$prefix${playableValues.size} 段可播放录音", 13f, true), LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(activity.iconButton(R.drawable.ic_line_playlist_play, "播放此列表的全部录音", {
+                        if (!loading && playableValues.isNotEmpty()) {
+                            val origin = browse.tag ?: if (browse.untagged) "未标记" else "我的收藏"
+                            val source = origin + if (browse.query.isNotBlank()) " · 搜索结果" else if (browse.dateRange != null) " · 筛选结果" else ""
+                            playback.playQueue(playableValues, source)
+                        }
+                    }))
+                })
+            }
             val first = browse.page * PAGE_SIZE
             visible.subList(first, minOf(first + PAGE_SIZE, visible.size)).forEach(::addRow)
             addPaging(visible.size)

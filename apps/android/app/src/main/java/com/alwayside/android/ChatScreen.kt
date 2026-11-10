@@ -805,6 +805,7 @@ internal class ChatScreen(
             val label = when {
                 state.preparing -> "正在读取音频"
                 state.playing -> "暂停回听"
+                state.completed -> "重新播放"
                 state.remaining != null -> "继续回听"
                 else -> "回听原始音频"
             }
@@ -890,7 +891,7 @@ internal class ChatScreen(
         playbackForeground = foreground
         if (foreground && !view.isAttachedToWindow) return
         playback.setVisible(this, if (ready) session.conversationId else null,
-            foreground && view.isAttachedToWindow && !closing)
+            foreground && view.isAttachedToWindow && !closing, originalHost = true)
     }
 
     /** Keep a single owner when Home leaves this Activity alive behind the overlay. */

@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.widget.Toast
 import java.io.File
+import java.util.concurrent.Executors
 
 /** One application-owned player. Screens subscribe without owning its lifetime. Main thread only. */
 internal class ChatAudioPlayback private constructor(private val context: Context) {
@@ -29,8 +30,15 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     private val preferences = InteractionPreferences(context)
     private val controls = context.getSharedPreferences("audio_playback_controls", Context.MODE_PRIVATE)
     var repeatMode = AudioPlaybackMode.restore(controls.getString("singleRepeat", null), false); private set
-    val listPlayback: Boolean get() = false
-    val sourceTitle: String get() = "单段播放"
+    var queue: AudioPlaybackQueue? = null; private set
+    val listPlayback: Boolean get() = queue != null
+    val sourceTitle: String get() = queue?.let { "${it.source} · ${it.index + 1}/${it.items.size}" } ?: "单段播放"
+    val canGoNext: Boolean get() = queue?.target(repeatMode) != null
+    val canGoPrevious: Boolean get() = queue?.target(repeatMode, delta = -1) != null
+    private val loader = Executors.newSingleThreadExecutor()
+    @Volatile private var loadVersion = 0L
+    private var loadingFile = false
+    private var playWhenReady = true
     private val visibility = PlaybackVisibility(preferences.load().backgroundPlayback)
     private val usageToken = Any()
     private val observers = mutableSetOf<() -> Unit>()
@@ -99,7 +107,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     fun setRepeatMode(value: AudioRepeat) {
         if (readingKey.isNotEmpty() || value !in AudioPlaybackMode.options(listPlayback)) return
         repeatMode = value
-        controls.edit().putString("singleRepeat", value.name).apply()
+        controls.edit().putString(if (listPlayback) "queueRepeat" else "singleRepeat", value.name).apply()
         refreshMediaControls()
     }
 
@@ -128,9 +136,10 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     fun addObserver(observer: () -> Unit) { observers.add(observer); observer() }
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
 
-    fun setVisible(owner: Any, id: String?, visible: Boolean, retaining: Boolean = false) {
+    fun setVisible(owner: Any, id: String?, visible: Boolean, retaining: Boolean = false, originalHost: Boolean = false) {
         ConversationUsage.update(owner, id.takeIf { visible })
         visibility.update(owner, id, visible)
+        visibility.updatePlaybackHost(owner, visible && originalHost)
         if (!retaining && visibility.shouldStop(conversationId)) stop()
         if (!retaining) PointReadingController.hiddenIfCreated()
     }
@@ -142,8 +151,54 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     }
 
     fun play(id: String, source: File) {
+        val index = queue?.items?.indexOfFirst { it.id == id } ?: -1
+        if (index >= 0) { selectQueueItem(index, source); return }
         selectOriginal(id, source)
         startOrResume()
+    }
+
+    fun playQueue(items: List<AudioQueueItem>, source: String) {
+        if (items.isEmpty()) { toast("此列表没有可播放的录音"); return }
+        PointReadingController.stopIfCreated()
+        stop(releaseHosting = false)
+        queue = AudioPlaybackQueue(items, source)
+        repeatMode = AudioPlaybackMode.restore(controls.getString("queueRepeat", null), true)
+        selectQueueItem(0)
+    }
+
+    fun next() { queue?.target(repeatMode)?.let { selectQueueItem(it) } }
+    fun previous() { queue?.target(repeatMode, delta = -1)?.let { selectQueueItem(it) } }
+    fun selectQueueItem(index: Int, source: File? = null) {
+        val selected = queue ?: return
+        if (index !in selected.items.indices) return
+        releaseTrack(abandon = false)
+        selected.select(index)
+        val item = requireNotNull(selected.current)
+        conversationId = item.id; mediaTitle = item.title; readingKey = ""; speed = originalSpeed
+        playbackSession++
+        playWhenReady = true
+        val version = loadVersion
+        loadingFile = source == null
+        file = source
+        publish(State(preparing = true, remaining = 1f))
+        service?.updatePlayback()
+        if (source != null) { startOrResume(); return }
+        // Protect only the selected item, never the entire snapshot; resolve files off the UI thread.
+        loader.execute {
+            if (version != loadVersion) return@execute
+            val resolved = runCatching {
+                val summary = HistoryStore(context).summary(item.id) ?: return@runCatching null
+                ConversationMediaStore(context).loadAudio(item.id)?.let { it to summary.title }
+            }.getOrNull()
+            handler.post {
+                if (version != loadVersion || queue !== selected || conversationId != item.id) return@post
+                loadingFile = false
+                if (resolved == null) { failed(); return@post }
+                file = resolved.first
+                mediaTitle = resolved.second.ifBlank { item.title }
+                if (playWhenReady) startOrResume() else prepare(startPlaying = false)
+            }
+        }
     }
 
     /** Opening captions prepares the recording without starting sound or requesting audio focus. */
@@ -223,8 +278,11 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     }
 
     private fun startOrResume() {
+        if (loadingFile) return
         if (state.completed) {
+            if (queue != null && repeatMode != AudioRepeat.ONE && pendingSeek == null) { selectQueueItem(0); return }
             if (file?.isFile != true) { failed(); return }
+            playbackSession++
             publish(State(preparing = true, remaining = 1f))
         }
         if ((visibility.backgroundPlayback || readingKey.isNotEmpty()) && service?.hosting != true) {
@@ -238,6 +296,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
 
     private fun prepare(startPlaying: Boolean = true) {
         try {
+            playWhenReady = startPlaying
             val next = MediaPlayer()
             player = next
             next.setAudioAttributes(attributes)
@@ -247,8 +306,9 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
             next.setOnPreparedListener { current ->
                 if (player === current) {
                     duration = current.duration
+                    if (duration > 0) queue?.acceptCurrent()
                     if (duration <= 0) failed()
-                    else if (startPlaying) startPrepared()
+                    else if (playWhenReady) startPrepared()
                     else {
                         pendingSeek?.let { current.seekTo(it.coerceIn(0, duration).toLong(), MediaPlayer.SEEK_CLOSEST); pendingSeek = null }
                         updatePosition(current, playing = false)
@@ -281,7 +341,14 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
 
     fun pause(temporary: Boolean = false) {
         if (!temporary) resumeOnFocus = false
-        if (state.preparing) { stop(); return }
+        if (state.preparing) {
+            playWhenReady = false
+            waitingForService = false
+            // A late foreground-service callback must not undo an explicit pause while loading.
+            if (!loadingFile && player == null && file != null) prepare(startPlaying = false)
+            if (!temporary) { abandonFocus(); service?.pauseHosting() }
+            return
+        }
         val current = player ?: return
         try {
             if (state.playing) {
@@ -297,30 +364,40 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     }
 
     fun stop(releaseHosting: Boolean = true) {
+        releaseTrack()
+        queue = null
+        conversationId = null
+        readingKey = ""; mediaTitle = "原始音频"
+        publish(State())
+        if (releaseHosting) releaseService()
+    }
+
+    private fun releaseTrack(abandon: Boolean = true) {
+        loadVersion++
+        loadingFile = false
         handler.removeCallbacks(ticker)
         val previous = player
         player = null // Ignore callbacks from the released player.
         pendingSeek = null
         waitingForService = false
         resumeOnFocus = false
-        abandonFocus()
+        if (abandon) abandonFocus()
         runCatching { previous?.release() }
         if (deleteWhenStopped) file?.delete()
         file = null; deleteWhenStopped = false
-        conversationId = null; duration = 0
-        readingKey = ""; mediaTitle = "原始音频"
-        publish(State())
-        if (releaseHosting) releaseService()
+        duration = 0
     }
 
     private fun completed() {
         if (readingKey.isNotEmpty()) { stop(); return }
-        if (repeatMode == AudioRepeat.ONE) {
+        val next = queue?.target(repeatMode, automatic = true)
+        if (repeatMode == AudioRepeat.ONE || (next != null && next == queue?.index)) {
             // Keep the subtitle session: an explicitly dismissed caption must stay dismissed.
             pendingSeek = 0
             startPrepared()
             return
         }
+        if (next != null) { selectQueueItem(next); return }
         handler.removeCallbacks(ticker)
         val previous = player
         player = null
@@ -335,7 +412,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     }
 
     private fun requestService() {
-        if (serviceRequested || conversationId == null) return
+        if (serviceRequested || conversationId == null || state.completed) return
         serviceRequested = true
         try { context.startForegroundService(Intent(context, AudioPlaybackService::class.java)) }
         catch (_: RuntimeException) { serviceRequested = false; stop(); toast("无法启动后台播放，请返回聊天后重试") }
@@ -344,7 +421,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     /** Called only after the mediaPlayback service has entered the foreground (before audio focus). */
     fun serviceReady(host: AudioPlaybackService): Boolean {
         serviceRequested = false
-        if (conversationId == null || (!visibility.backgroundPlayback && readingKey.isEmpty())) return false
+        if (conversationId == null || state.completed || (!visibility.backgroundPlayback && readingKey.isEmpty())) return false
         service = host
         if (waitingForService) startOrResume()
         return conversationId != null
@@ -366,7 +443,7 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
     }
 
     private fun publish(next: State) {
-        ConversationUsage.update(usageToken, conversationId.takeIf { file != null && !next.completed })
+        ConversationUsage.update(usageToken, conversationId.takeIf { (file != null || next.preparing) && !next.completed })
         val changed = state.preparing != next.preparing || state.playing != next.playing ||
             (state.remaining == null) != (next.remaining == null)
         state = next
@@ -376,7 +453,21 @@ internal class ChatAudioPlayback private constructor(private val context: Contex
         if (changed) service?.updatePlayback()
     }
 
-    private fun failed() { stop(); toast("无法回听，音频可能已被删除或暂不可读") }
+    private fun failed() {
+        val selected = queue
+        if (selected != null) {
+            selected.rejectCurrent()
+            val next = selected.target(if (repeatMode == AudioRepeat.ALL) AudioRepeat.ALL else AudioRepeat.NONE)
+            if (next != null) {
+                toast("已跳过不可播放的录音")
+                // Queue a handoff so even immediate decoder failures cannot recurse through the snapshot.
+                val version = loadVersion
+                handler.post { if (queue === selected && loadVersion == version) selectQueueItem(next) }
+                return
+            }
+        }
+        stop(); toast("无法回听，音频可能已被删除或暂不可读")
+    }
     private fun toast(message: String) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 
     companion object {

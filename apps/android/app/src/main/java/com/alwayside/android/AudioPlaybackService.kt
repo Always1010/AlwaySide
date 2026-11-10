@@ -34,6 +34,8 @@ internal class AudioPlaybackService : Service() {
                 override fun onPlay() { playback.resume() }
                 override fun onPause() { playback.pause() }
                 override fun onStop() { playback.stop() }
+                override fun onSkipToNext() { playback.next() }
+                override fun onSkipToPrevious() { playback.previous() }
                 override fun onCustomAction(action: String, extras: Bundle?) {
                     if (action == STOP) playback.stop()
                     if (action == SUBTITLES) SubtitleOverlayController.toggle(this@AudioPlaybackService)
@@ -54,6 +56,8 @@ internal class AudioPlaybackService : Service() {
             PLAY -> playback.resume()
             STOP -> playback.stop()
             SUBTITLES -> SubtitleOverlayController.toggle(this)
+            NEXT -> playback.next()
+            PREVIOUS -> playback.previous()
         }
         if (playback.conversationId != null) updatePlayback()
         if (!playback.currentState.playing && !playback.currentState.preparing) pauseHosting()
@@ -64,7 +68,9 @@ internal class AudioPlaybackService : Service() {
         val state = playback.currentState
         session.setMetadata(MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, playback.mediaTitle)
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, playback.sourceTitle)
             .putLong(MediaMetadata.METADATA_KEY_DURATION, playback.duration.toLong()).build())
+        session.setSessionActivity(openConversation())
         val status = when {
             state.preparing -> PlaybackState.STATE_BUFFERING
             state.playing -> PlaybackState.STATE_PLAYING
@@ -73,7 +79,9 @@ internal class AudioPlaybackService : Service() {
         }
         session.setPlaybackState(PlaybackState.Builder().setActions(
             PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
-                PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP)
+                PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP or
+                (if (playback.canGoNext) PlaybackState.ACTION_SKIP_TO_NEXT else 0L) or
+                (if (playback.canGoPrevious) PlaybackState.ACTION_SKIP_TO_PREVIOUS else 0L))
             .addCustomAction(STOP, "停止", R.drawable.ic_line_stop)
             .apply {
                 if (SubtitleOverlayController.available(this@AudioPlaybackService))
@@ -122,9 +130,17 @@ internal class AudioPlaybackService : Service() {
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setOnlyAlertOnce(true).setOngoing(state.playing || state.preparing)
             .setCategory(Notification.CATEGORY_TRANSPORT)
+            .apply {
+                if (playback.canGoPrevious) addAction(Notification.Action.Builder(R.drawable.ic_line_skip_previous,
+                    "上一段", command(PREVIOUS)).build())
+            }
             .addAction(Notification.Action.Builder(
                 if (pause) R.drawable.ic_line_pause else R.drawable.ic_line_play,
                 if (pause) "暂停" else "播放", command(if (pause) PAUSE else PLAY)).build())
+            .apply {
+                if (playback.canGoNext) addAction(Notification.Action.Builder(R.drawable.ic_line_skip_next,
+                    "下一段", command(NEXT)).build())
+            }
             .apply {
                 if (SubtitleOverlayController.available(this@AudioPlaybackService))
                     addAction(Notification.Action.Builder(R.drawable.ic_line_subtitles,
@@ -133,7 +149,7 @@ internal class AudioPlaybackService : Service() {
             .addAction(Notification.Action.Builder(R.drawable.ic_line_stop, "停止", command(STOP)).build())
             .setDeleteIntent(command(STOP))
             .setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).apply {
-                if (SubtitleOverlayController.available(this@AudioPlaybackService)) setShowActionsInCompactView(0, 1, 2)
+                if (playback.canGoPrevious && playback.canGoNext) setShowActionsInCompactView(0, 1, 2)
                 else setShowActionsInCompactView(0, 1)
             })
             .apply { if (Build.VERSION.SDK_INT >= 31) setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE) }
@@ -158,6 +174,8 @@ internal class AudioPlaybackService : Service() {
         private const val PAUSE = "com.alwayside.android.audio.PAUSE"
         private const val STOP = "com.alwayside.android.audio.STOP"
         private const val SUBTITLES = "com.alwayside.android.audio.SUBTITLES"
+        private const val NEXT = "com.alwayside.android.audio.NEXT"
+        private const val PREVIOUS = "com.alwayside.android.audio.PREVIOUS"
         private const val OPEN = "com.alwayside.android.audio.OPEN"
 
         fun takeEntry(intent: Intent, context: android.content.Context): AppEntry.Request? {

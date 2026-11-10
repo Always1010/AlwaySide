@@ -258,13 +258,16 @@ internal class SubtitlePanel(
         if (previousPlaying != state.playing) {
             previousPlaying = state.playing
             play.icon = activity.prototypeIcon(if (state.playing) R.drawable.ic_line_pause else R.drawable.ic_line_play)
-            play.accessible(if (state.playing) "暂停回听" else "继续回听")
+            play.accessible(if (state.playing) "暂停回听" else if (state.completed) "重新播放" else "继续回听")
         }
         play.isEnabled = source() != null && !state.preparing; progress.isEnabled = source() != null && duration > 0 && !state.preparing
         floating.isEnabled = !renderedBundle?.cues.isNullOrEmpty() && active
         speed.text = String.format(Locale.ROOT, "%.2f×", playback.originalSpeed).replace(".00", ".0").replace(".50", ".5")
-        repeat.icon = activity.prototypeIcon(AudioPlaybackMenus.modeIcon(playback))
-        repeat.accessible("播放模式：${AudioPlaybackMode.title(playback.repeatMode, playback.listPlayback)}")
+        val modeLabel = "播放模式：${AudioPlaybackMode.title(playback.repeatMode, playback.listPlayback)}"
+        if (repeat.contentDescription != modeLabel) {
+            repeat.icon = activity.prototypeIcon(AudioPlaybackMenus.modeIcon(playback))
+            repeat.accessible(modeLabel)
+        }
         repeat.isEnabled = active
         if (!dragging) { progress.max = duration.coerceIn(1, Int.MAX_VALUE.toLong()).toInt(); progress.progress = position.toInt(); clock.text = time(position) }
         total.text = time(duration)

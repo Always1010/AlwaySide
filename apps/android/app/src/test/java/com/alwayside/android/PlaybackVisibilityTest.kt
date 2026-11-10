@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackVisibilityTest {
+    @Test fun chatPlaybackBarHostsTheNextOriginalRecordingWithoutExtendingPointReading() {
+        val visibility = PlaybackVisibility()
+        val chat = Any()
+        visibility.update(chat, "first", true)
+        visibility.updatePlaybackHost(chat, true)
+        assertFalse(visibility.shouldStop("second"))
+        assertTrue(visibility.shouldStop("second", allowLibrary = false))
+        visibility.update(chat, null, false)
+        visibility.updatePlaybackHost(chat, false)
+        assertTrue(visibility.shouldStop("second"))
+        visibility.backgroundPlayback = true
+        assertFalse(visibility.shouldStop("second"))
+    }
     @Test fun foregroundLibraryHostsPlaybackUntilItLeavesTheScreen() {
         val visibility = PlaybackVisibility()
         val library = Any()

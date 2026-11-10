@@ -106,7 +106,7 @@ internal class SubtitleOverlayController private constructor(private val context
         state.playback(player.playbackSession, player.currentState.playing)
         val owner = player.conversationId
         val original = owner != null && player.readingKey.isEmpty() &&
-            !player.currentState.preparing && player.currentState.remaining != null
+            !player.currentState.preparing && !player.currentState.completed && player.currentState.remaining != null
         if (enabled && original && loadedSession != player.playbackSession) {
             loadedSession = player.playbackSession
             subtitles.refresh(requireNotNull(owner))
@@ -192,7 +192,7 @@ internal class SubtitleOverlayController private constructor(private val context
             val player = current.playback
             val id = player.conversationId ?: return false
             return (owner == null || id == owner) && current.enabled && player.readingKey.isEmpty() &&
-                !player.currentState.preparing && player.currentState.remaining != null &&
+                !player.currentState.preparing && !player.currentState.completed && player.currentState.remaining != null &&
                 !current.subtitles.record(id, SubtitleMethod.WHISPER).playable?.cues.isNullOrEmpty()
         }
         fun showing(context: Context, owner: String? = null): Boolean {
