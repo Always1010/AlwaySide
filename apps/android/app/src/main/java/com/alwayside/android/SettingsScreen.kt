@@ -12,6 +12,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -42,17 +43,17 @@ internal class SettingsScreen(
     }
     private enum class Page(val title: String, val description: String, val icon: Int) {
         HOME("设置", "", android.R.drawable.ic_menu_preferences),
-        AI("AI 服务", "问答与转写服务配置、API 管理", android.R.drawable.ic_menu_manage),
-        PROMPTS("提示词", "默认问题与音频输出", android.R.drawable.ic_menu_edit),
-        APPEARANCE("应用外观", "跟随系统、浅色或深色主题", android.R.drawable.ic_menu_gallery),
-        BALL("悬浮球外观", "大小、颜色与透明度预览", android.R.drawable.ic_menu_view),
-        MENU("自定义菜单", "添加、移除与排列悬浮工具", R.drawable.ic_line_menu),
-        MENU_APPEARANCE("菜单外观", "背景、大小与背景效果", R.drawable.ic_line_sliders),
-        GESTURES("快捷动作", "功能与手势绑定", android.R.drawable.ic_menu_directions),
-        WINDOW("结果窗口", "窗口行为与自动提问", android.R.drawable.ic_menu_crop),
-        MEDIA("历史与媒体", "历史上限、录音与媒体保留", android.R.drawable.ic_menu_recent_history),
-        LABORATORY("实验室", "试用中的功能", android.R.drawable.ic_menu_manage),
-        HELP("帮助与引导", "新手引导与使用准备", android.R.drawable.ic_menu_help),
+        AI("AI 服务", "问答与转写服务配置、API 管理", R.drawable.ic_settings_ai),
+        PROMPTS("提示词", "默认问题与音频输出", R.drawable.ic_settings_prompts),
+        APPEARANCE("应用外观", "跟随系统、浅色或深色主题", R.drawable.ic_settings_appearance),
+        BALL("悬浮球外观", "大小、颜色与透明度预览", R.drawable.ic_settings_ball),
+        MENU("自定义菜单", "添加、移除与排列悬浮工具", R.drawable.ic_settings_menu),
+        MENU_APPEARANCE("菜单外观", "背景、大小与背景效果", R.drawable.ic_settings_menu_appearance),
+        GESTURES("快捷动作", "功能与手势绑定", R.drawable.ic_settings_gestures),
+        WINDOW("结果窗口", "窗口行为与自动提问", R.drawable.ic_settings_window),
+        MEDIA("历史与媒体", "历史上限、录音与媒体保留", R.drawable.ic_settings_media),
+        LABORATORY("实验室", "试用中的功能", R.drawable.ic_settings_lab),
+        HELP("帮助与引导", "新手引导与使用准备", R.drawable.ic_settings_help),
     }
 
     private lateinit var store: SettingsStore
@@ -253,7 +254,13 @@ internal class SettingsScreen(
     }
 
     private fun category(value: Page) {
-        addRow(settingsListRow(value.title, value.description) {
+        val icon = ImageView(this).apply {
+            setImageDrawable(prototypeIcon(value.icon))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            imageTintList = ColorStateList.valueOf(INK)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        addRow(settingsListRow(value.title, value.description, leading = icon) {
             if (value == Page.HELP) onHelp() else showPage(value)
         })
     }
