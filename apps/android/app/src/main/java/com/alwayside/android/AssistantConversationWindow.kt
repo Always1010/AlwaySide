@@ -12,11 +12,14 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.Window
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 
 /** Keep the existing content, but give its TextViews a real Window/DecorView for ActionMode. */
 @SuppressLint("ViewConstructor")
-internal class AssistantConversationWindow(context: Context, private val outside: () -> Unit) : FrameLayout(context) {
+internal class AssistantConversationWindow(context: Context, pinned: Boolean, private val outside: () -> Unit) : FrameLayout(context) {
+    private val focus = ConversationWindowFocus(pinned)
+    private var windowLayout: WindowManager.LayoutParams? = null
     private var textMode: ActionMode? = null
     val hasTextActionMode: Boolean get() = textMode != null
     private var shadowElevation = 0f
@@ -29,6 +32,7 @@ internal class AssistantConversationWindow(context: Context, private val outside
         override fun onActionModeStarted(mode: ActionMode) {
             super.onActionModeStarted(mode)
             textMode = mode
+            requestInputFocus()
         }
 
         override fun onActionModeFinished(mode: ActionMode) {
@@ -42,13 +46,20 @@ internal class AssistantConversationWindow(context: Context, private val outside
                 // send ACTION_OUTSIDE here. A real outside touch must also end selection
                 // in pinned windows, while the owner decides whether to hide the window.
                 textMode?.finish()
+                releaseInputFocus()
                 outside()
                 return false
             }
+            // Acquire before child dispatch so native editors and selection see a
+            // focusable window. Outside touches hand focus back without hiding it.
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) requestInputFocus()
             return super.dispatchTouchEvent(event)
         }
 
-        override fun cancel() { outside() }
+        override fun cancel() {
+            releaseInputFocus()
+            outside()
+        }
     }.apply {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         setCanceledOnTouchOutside(false)
@@ -72,17 +83,46 @@ internal class AssistantConversationWindow(context: Context, private val outside
 
     fun attach(layout: WindowManager.LayoutParams) {
         if (elevation != 0f) { shadowElevation = elevation; elevation = 0f }
-        host.window!!.attributes = layout
+        if (!focus.focusable) requestFocus()
+        update(layout)
         host.show()
     }
 
     fun update(layout: WindowManager.LayoutParams) {
+        windowLayout = layout
+        // Keep the owner's geometry snapshot in sync, so drag/resize and restores
+        // cannot accidentally make an inactive pinned window focusable again.
+        layout.flags = if (focus.focusable) layout.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            else layout.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         host.window!!.attributes = layout
+    }
+
+    fun setPinned(pinned: Boolean) {
+        if (focus.pinned == pinned) return
+        focus.setPinned(pinned)
+        if (focus.focusable) windowLayout?.let(::update) else releaseInputFocus()
+    }
+
+    fun requestInputFocus() {
+        if (focus.focusable) return
+        focus.interact()
+        windowLayout?.let(::update)
+    }
+
+    fun releaseInputFocus() {
+        focus.leave()
+        if (!focus.focusable) {
+            textMode?.finish()
+            context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
+            requestFocus()
+            windowLayout?.let(::update)
+        }
     }
 
     /** Dismiss removes the decor, toolbar and handle surfaces synchronously before capture. */
     fun detach() {
         textMode?.finish()
+        releaseInputFocus()
         host.dismiss()
     }
 }

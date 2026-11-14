@@ -437,7 +437,7 @@ class AssistantService : Service() {
             updateTranscriptCopy(node)
             node.input?.let { input ->
                 if (selectionStart >= 0 && selectionEnd >= 0) input.setSelection(selectionStart.coerceAtMost(input.length()), selectionEnd.coerceAtMost(input.length()))
-                if (focused) input.requestFocus()
+                if (focused) { node.root?.requestInputFocus(); input.requestFocus() }
             }
             node.scroll?.let { scroll -> scroll.post { if (node.scroll === scroll) scroll.scrollTo(0, scrollY) } }
         }
@@ -724,7 +724,7 @@ class AssistantService : Service() {
             y=if(config.rememberWindowPosition&&saved!=null)((size.second-height-dp(60))*saved.yFraction).toInt()+dp(8) else (size.second-height-dp(32))/2
         }
         clamp(layout)
-        val root=AssistantConversationWindow(uiContext) { if(!node.pinned && node.readingImageDialog?.isShowing!=true) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
+        val root=AssistantConversationWindow(uiContext,node.pinned) { if(!node.pinned && node.readingImageDialog?.isShowing!=true) hideWindow(node) }.apply { background=outlinedCard(BACKGROUND,15);elevation=dp(8).toFloat();clipToOutline=true }
         root.isFocusableInTouchMode=true
         val presentation=AssistantWindowViews(uiContext,when(node.kind){"photo"->"截图问答";"audio"->"听一段";else->"文字问答"},
             node.kind=="photo",AssistantWindowActions(
@@ -804,6 +804,7 @@ class AssistantService : Service() {
         }
         node.input=presentation.input.apply {
             setText(node.draft);accessible("${when(node.kind){"photo"->"截图";"audio"->"音频";else->"文字"}}追问")
+            onFocusChangeListener=View.OnFocusChangeListener { _,hasFocus -> if(hasFocus)node.root?.requestInputFocus() }
             addTextChangedListener(object:TextWatcher {
                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int)=Unit
                 override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){node.draft=s?.toString().orEmpty();updateComposerToggle(node);updateSendEnabled(node)}
@@ -830,6 +831,7 @@ class AssistantService : Service() {
             if(fromUser)node.root?.let { root ->
                 getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(root.windowToken,0)
                 root.requestFocus()
+                root.releaseInputFocus()
             }
         }
         node.composer?.visibility=if(expanded)View.VISIBLE else View.GONE
@@ -838,6 +840,7 @@ class AssistantService : Service() {
     }
     private fun focusQuestionInput(node:FloatingConversation) {
         val input=node.input ?: return
+        node.root?.requestInputFocus()
         input.requestFocus();input.setSelection(input.text?.length ?: 0)
         fun showKeyboard() {
             input.post {
@@ -867,7 +870,7 @@ class AssistantService : Service() {
         isCheckable=true;isChecked=node.pinned
         iconTint=android.content.res.ColorStateList.valueOf(if(node.pinned)ACCENT else MUTED)
         accessible(if(node.pinned)"取消固定，之后点外部收起" else "固定窗口，点外部保持显示")
-    }}
+    };node.root?.setPinned(node.pinned)}
     private fun updateFavorite(node:FloatingConversation){node.favorite?.apply{
         icon=uiContext.prototypeIcon(if(node.isFavorite)R.drawable.ic_star_filled else R.drawable.ic_line_star)
         isCheckable=true;isChecked=node.isFavorite
